@@ -1,0 +1,346 @@
+'use client';
+
+import { useMemo, useCallback, useEffect } from 'react';
+
+interface CassandraOption {
+  option_type?: string;
+  optionType?: string;
+  label?: string;
+  attributes?: Record<string, string>;
+}
+
+interface RelatedVariant {
+  id: string;
+  blankSku: string;
+  price: { amount: number; currency: string };
+  available: boolean;
+  variantImageUrl?: string;
+  options?: CassandraOption[];
+}
+
+interface VariantSelectorProps {
+  currentVariantId: string;
+  currentOptions: CassandraOption[];
+  relatedVariants: RelatedVariant[];
+  productId?: string;
+  onVariantChange?: (variant: RelatedVariant) => void;
+}
+
+// Helper to get option type from either format
+function getOptionType(option: CassandraOption): string {
+  return option.optionType || option.option_type || 'Option';
+}
+
+// Helper to get option label
+function getOptionLabel(option: CassandraOption): string {
+  return option.label || '';
+}
+
+// Helper to get hex color from attributes
+function getOptionHex(option: CassandraOption): string | null {
+  if (option.attributes?.hex) {
+    return option.attributes.hex;
+  }
+  return null;
+}
+
+// Represents an option value with availability info
+interface OptionValue {
+  label: string;
+  hex?: string;
+  available: boolean;
+  matchingVariantId?: string;
+}
+
+// Represents an option type with all its possible values
+interface OptionGroup {
+  type: string;
+  values: OptionValue[];
+}
+
+export default function ShopVariantSelector({
+  currentVariantId,
+  currentOptions,
+  relatedVariants,
+  onVariantChange
+}: VariantSelectorProps) {
+  // All variants including current one
+  const allVariants = useMemo(() => {
+    const currentVariant: RelatedVariant = {
+      id: currentVariantId,
+      blankSku: '', // Not needed for selection logic
+      price: { amount: 0, currency: 'USD' },
+      available: true,
+      options: currentOptions
+    };
+    // Add current variant if not already in related
+    const hasCurrentInRelated = relatedVariants.some((v) => v.id === currentVariantId);
+    return hasCurrentInRelated ? relatedVariants : [currentVariant, ...relatedVariants];
+  }, [currentVariantId, currentOptions, relatedVariants]);
+
+  // Get current option selections as a map
+  const currentSelections = useMemo(() => {
+    const map = new Map<string, string>();
+    currentOptions.forEach((opt) => {
+      map.set(getOptionType(opt), getOptionLabel(opt));
+    });
+    return map;
+  }, [currentOptions]);
+
+  // Extract all option groups with availability
+  const optionGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      Map<string, { hex?: string; variantIds: Array<{ id: string; available: boolean }> }>
+    >();
+
+    // Collect all option values from all variants
+    allVariants.forEach((variant) => {
+      variant.options?.forEach((opt) => {
+        const type = getOptionType(opt);
+        const label = getOptionLabel(opt);
+        const hex = getOptionHex(opt);
+
+        if (!groups.has(type)) {
+          groups.set(type, new Map());
+        }
+
+        const typeGroup = groups.get(type)!;
+        if (!typeGroup.has(label)) {
+          typeGroup.set(label, { hex: hex || undefined, variantIds: [] });
+        }
+
+        typeGroup.get(label)!.variantIds.push({
+          id: variant.id,
+          available: variant.available
+        });
+      });
+    });
+
+    // Helper function to find matching variant (defined locally to avoid hook order issues)
+    const findMatchingVariant = (
+      changeType: string,
+      changeValue: string
+    ): RelatedVariant | undefined => {
+      const newSelections = new Map(currentSelections);
+      newSelections.set(changeType, changeValue);
+
+      return allVariants.find((variant) => {
+        const variantOptions = new Map<string, string>();
+        variant.options?.forEach((opt) => {
+          variantOptions.set(getOptionType(opt), getOptionLabel(opt));
+        });
+
+        for (const [type, label] of newSelections) {
+          if (variantOptions.get(type) !== label) {
+            return false;
+          }
+        }
+        return true;
+      });
+    };
+
+    // Convert to array format
+    const result: OptionGroup[] = [];
+    groups.forEach((values, type) => {
+      const optionValues: OptionValue[] = [];
+      values.forEach((info, label) => {
+        // An option value is available if ANY variant with that option is available
+        // AND matches current selections for OTHER option types
+        const matchingVariant = findMatchingVariant(type, label);
+        const available = matchingVariant ? matchingVariant.available : false;
+
+        optionValues.push({
+          label,
+          hex: info.hex,
+          available,
+          matchingVariantId: matchingVariant?.id
+        });
+      });
+
+      // Sort sizes in a logical order
+      if (type.toLowerCase() === 'size' || type.toLowerCase() === 'clothing size') {
+        const sizeOrder = [
+          // Infant/Toddler
+          'NB',
+          '0-3M',
+          '3-6M',
+          '6-9M',
+          '9-12M',
+          '12mo',
+          '12-18M',
+          '18mo',
+          '18-24M',
+          '24mo',
+          '2T',
+          '3T',
+          '4T',
+          '5T',
+          // Standard
+          'XXS',
+          'XS',
+          'Small',
+          'S',
+          'Medium',
+          'M',
+          'Large',
+          'L',
+          'XL',
+          '1X',
+          '2XL',
+          'XXL',
+          '2X',
+          '3XL',
+          'XXXL',
+          '3X',
+          '4XL',
+          '4X',
+          '5XL',
+          '5X',
+          '6XL',
+          '6X',
+          // Universal
+          'One Size',
+          'OS'
+        ];
+
+        optionValues.sort((a, b) => {
+          const aLabel = a.label;
+          const bLabel = b.label;
+
+          // Exact match check first
+          let aIdx = sizeOrder.indexOf(aLabel);
+          let bIdx = sizeOrder.indexOf(bLabel);
+
+          // Case insensitive check if not found
+          if (aIdx === -1)
+            aIdx = sizeOrder.findIndex((s) => s.toLowerCase() === aLabel.toLowerCase());
+          if (bIdx === -1)
+            bIdx = sizeOrder.findIndex((s) => s.toLowerCase() === bLabel.toLowerCase());
+
+          if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+          if (aIdx >= 0) return -1;
+          if (bIdx >= 0) return 1;
+
+          // Try numeric sort for numeric sizes (e.g. 11oz vs 15oz)
+          const aNum = parseFloat(aLabel);
+          const bNum = parseFloat(bLabel);
+          if (!isNaN(aNum) && !isNaN(bNum)) {
+            return aNum - bNum;
+          }
+
+          return a.label.localeCompare(b.label, undefined, { numeric: true });
+        });
+      }
+
+      result.push({ type, values: optionValues });
+    });
+
+    return result;
+  }, [allVariants, currentSelections]);
+
+  // Find a variant that matches current selections except for one option type
+  const findMatchingVariantForOption = useCallback(
+    (changeType: string, changeValue: string): RelatedVariant | undefined => {
+      // Create new selections with the changed value
+      const newSelections = new Map(currentSelections);
+      newSelections.set(changeType, changeValue);
+
+      // Find a variant that matches all selections
+      return allVariants.find((variant) => {
+        const variantOptions = new Map<string, string>();
+        variant.options?.forEach((opt) => {
+          variantOptions.set(getOptionType(opt), getOptionLabel(opt));
+        });
+
+        // Check if all selections match
+        for (const [type, label] of newSelections) {
+          if (variantOptions.get(type) !== label) {
+            return false;
+          }
+        }
+        return true;
+      });
+    },
+    [allVariants, currentSelections]
+  );
+
+  // Handle option selection - call onVariantChange callback
+  const handleOptionSelect = useCallback(
+    (type: string, label: string) => {
+      const matchingVariant = findMatchingVariantForOption(type, label);
+      if (matchingVariant && matchingVariant.id !== currentVariantId) {
+        if (onVariantChange) {
+          onVariantChange(matchingVariant);
+        }
+      }
+    },
+    [findMatchingVariantForOption, currentVariantId, onVariantChange]
+  );
+
+  // Auto-select single available options
+  useEffect(() => {
+    optionGroups.forEach((group) => {
+      const availableValues = group.values.filter((v) => v.available);
+      if (availableValues.length === 1) {
+        const singleValue = availableValues[0];
+        const currentSelection = currentSelections.get(group.type);
+
+        // Only select if not already selected
+        if (currentSelection !== singleValue.label) {
+          handleOptionSelect(group.type, singleValue.label);
+        }
+      }
+    });
+  }, [optionGroups, currentSelections, handleOptionSelect]);
+
+  return (
+    <div className="bg-white dark:bg-zinc-950 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <h3 className="text-lg font-semibold mb-4">Select Options</h3>
+      <div className="space-y-6">
+        {optionGroups.map((group) => (
+          <div key={group.type}>
+            <label className="block text-sm font-medium text-zinc-500 mb-3">{group.type}</label>
+            <div className="flex flex-wrap gap-2">
+              {group.values.map((value) => {
+                const isSelected = currentSelections.get(group.type) === value.label;
+                const isColor = group.type === 'Color' && value.hex;
+
+                return (
+                  <button
+                    key={value.label}
+                    onClick={() => value.available && handleOptionSelect(group.type, value.label)}
+                    disabled={!value.available}
+                    className={`
+                      relative px-4 py-2 rounded-lg text-sm font-medium transition-all
+                      ${
+                        isSelected
+                          ? 'bg-purple-600 text-white ring-2 ring-purple-600 ring-offset-2 dark:ring-offset-zinc-950'
+                          : value.available
+                            ? 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100'
+                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed line-through'
+                      }
+                      ${isColor ? 'pl-9' : ''}
+                    `}
+                    title={!value.available ? 'Unavailable' : value.label}
+                  >
+                    {isColor && value.hex && (
+                      <span
+                        className={`absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full border-2 ${
+                          isSelected ? 'border-white' : 'border-zinc-300 dark:border-zinc-600'
+                        }`}
+                        style={{ backgroundColor: value.hex }}
+                      />
+                    )}
+                    {value.label}
+                    {!value.available && <span className="sr-only">(Unavailable)</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
