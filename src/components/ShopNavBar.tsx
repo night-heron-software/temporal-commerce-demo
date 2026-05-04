@@ -32,6 +32,14 @@ export function ShopNavBar({ onCartClick }: ShopNavBarProps) {
 
           {/* Right side */}
           <div className="flex items-center gap-3">
+            {/* Admin Panel */}
+            <Link
+              href="/admin"
+              className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors hidden sm:block"
+            >
+              ⚙️ Admin
+            </Link>
+
             {/* Temporal UI Link */}
             <a
               href="http://localhost:8233"
