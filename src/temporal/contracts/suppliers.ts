@@ -5,8 +5,7 @@
  * and webhooks across any supplier (SwiftPod, Printify, etc.).
  *
  * NOTE: POD-specific adapter interfaces (PODSupplierAdapter) have been removed
- * from contracts. They belong in @nightheron/plugin-pod. Only the generic
- * SupplierAdapter interface is defined here.
+ * from contracts. Only the generic SupplierAdapter interface is defined here.
  */
 
 // ============================================================================

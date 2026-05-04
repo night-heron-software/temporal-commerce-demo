@@ -2,8 +2,8 @@
  * Plugin Registry Interface
  *
  * Defines how the platform discovers and accesses ProductTypePlugin instances.
- * The implementation lives in @nightheron/infrastructure; this file provides
- * only the contract so that domain packages can depend on it without pulling
+ * The implementation lives in the lib/ directory; this file provides
+ * only the contract so that domain code can depend on it without pulling
  * in infrastructure.
  */
 

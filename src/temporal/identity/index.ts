@@ -1,5 +1,5 @@
 /**
- * @nightheron/identity
+ * Identity Domain
  *
  * Barrel export for the identity domain package.
  * Re-exports DB repositories and activity implementations
