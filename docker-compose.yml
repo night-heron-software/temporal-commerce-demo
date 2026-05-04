@@ -1,4 +1,3 @@
-
 services:
   cassandra:
     image: cassandra:4.1
@@ -18,9 +17,12 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
+      start_period: 30s
+    networks:
+      - demo-net
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
     container_name: demo-elasticsearch
     ports:
       - "9200:9200"
@@ -36,33 +38,87 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 30s
+    networks:
+      - demo-net
 
   temporal:
-    image: temporalio/auto-setup:1.27.2
+    image: temporalio/auto-setup:1.29.1
     container_name: demo-temporal
+    depends_on:
+      - temporal-postgresql
+      - temporal-elasticsearch
     ports:
       - "7233:7233"
     environment:
-      - DB=sqlite
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgresql
+      - ENABLE_ES=true
+      - ES_SEEDS=temporal-elasticsearch
+      - ES_VERSION=v7
+      - SKIP_DEFAULT_NAMESPACE_CREATION=false
+      - DEFAULT_NAMESPACE=default
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health"]
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - demo-net
 
   temporal-ui:
-    image: temporalio/ui:2.36.2
+    image: temporalio/ui:2.34.0
     container_name: demo-temporal-ui
+    depends_on:
+      - temporal
     ports:
       - "8233:8080"
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:3000
-    depends_on:
-      temporal:
-        condition: service_healthy
+    networks:
+      - demo-net
+
+  temporal-postgresql:
+    image: postgres:16
+    container_name: demo-temporal-postgresql
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=temporal
+      - POSTGRES_PASSWORD=temporal
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    networks:
+      - demo-net
+
+  temporal-elasticsearch:
+    image: elasticsearch:7.17.27
+    container_name: demo-temporal-elasticsearch
+    ports:
+      - "9201:9200"
+    environment:
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+      - xpack.security.enabled=false
+    volumes:
+      - temporal-es-data:/usr/share/elasticsearch/data
+    networks:
+      - demo-net
 
 volumes:
   cassandra-data:
   es-data:
+  temporal-postgres-data:
+  temporal-es-data:
+
+networks:
+  demo-net:
+    driver: bridge

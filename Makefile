@@ -1,10 +1,20 @@
-.PHONY: dev stop clean db-init seed app-start app-stop workers help
+.PHONY: docker-ready dev stop clean db-init seed app-start app-stop workers help
 
 # ==============================================================================
 # Local Development Orchestration
 # ==============================================================================
 
-dev: ## Start local infrastructure (Cassandra, Elasticsearch, Temporal)
+docker-ready: ## Ensure Docker Desktop is running (starts it if not)
+	@if ! docker info > /dev/null 2>&1; then \
+		echo "⚠️  Docker is not running. Starting Docker Desktop..."; \
+		open -a 'Docker'; \
+		until docker info > /dev/null 2>&1; do sleep 2; done; \
+		echo "✓ Docker is ready."; \
+	else \
+		echo "✓ Docker is already running."; \
+	fi
+
+dev: docker-ready ## Start local infrastructure (Cassandra, Elasticsearch, Temporal)
 	@echo "Starting local infrastructure..."
 	@docker-compose up -d
 	@echo "⏳ Waiting for Cassandra..."
@@ -81,6 +91,16 @@ init: dev db-init ## Full init: start infra → create schema → ready for seed
 	@echo "   make app-start"
 	@echo "   # In another terminal:"
 	@echo "   make seed"
+
+# ==============================================================================
+# Diagnostics
+# ==============================================================================
+
+ps: ## List running infrastructure containers
+	@docker-compose ps
+
+logs: ## Tail logs for a container (usage: make logs SERVICE=temporal)
+	@docker-compose logs -f $(SERVICE)
 
 # ==============================================================================
 # Help
