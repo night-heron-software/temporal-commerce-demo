@@ -21,6 +21,7 @@ import omsWorker from './oms/worker';
 
 const log = createLogger('worker');
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS || 'localhost:7233';
+const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || 'default';
 
 type PinoLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
@@ -39,8 +40,18 @@ Runtime.install({
 });
 
 async function run() {
-  const connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS });
-  log.info({ address: TEMPORAL_ADDRESS }, 'Connected to Temporal — starting all domain workers');
+  // Build TLS config for Temporal Cloud (same pattern as temporal-client.ts)
+  const tlsCert = process.env.TEMPORAL_TLS_CERT;
+  const tlsKey = process.env.TEMPORAL_TLS_KEY;
+  const tls = tlsCert && tlsKey ? {
+    clientCertPair: {
+      crt: Buffer.from(tlsCert, 'base64'),
+      key: Buffer.from(tlsKey, 'base64'),
+    }
+  } : undefined;
+
+  const connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS, tls });
+  log.info({ address: TEMPORAL_ADDRESS, namespace: TEMPORAL_NAMESPACE, tls: !!tls }, 'Connected to Temporal — starting all domain workers');
 
   const onShutdown = () => {
     log.info('Shutdown signal received. Draining workers...');

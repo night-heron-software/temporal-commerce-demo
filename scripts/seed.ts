@@ -2,12 +2,13 @@
  * Seed Script — Orchestrates all seeding via API calls to the running app.
  *
  * Usage:
- *   npx tsx scripts/seed.ts
+ *   npx tsx scripts/seed.ts                          # local (localhost:3000)
+ *   npx tsx scripts/seed.ts https://your-app.vercel.app  # remote
  *
- * Prerequisites: `make dev` (infrastructure) and `npm run dev` (Next.js)
+ * Prerequisites: The target app must be running.
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const BASE_URL = process.argv[2] || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
 async function call(
   label: string,
@@ -50,7 +51,8 @@ async function seed() {
   await call('Reindex Products', 'POST', '/api/dev/reindex', { index: 'products' });
 
   console.log('\n✨ Seeding complete!');
-  console.log('   Storefront → http://localhost:3000/shop');
+  console.log(`   Storefront → ${BASE_URL}/shop`);
+  console.log(`   Admin      → ${BASE_URL}/admin`);
   console.log('   Temporal UI → http://localhost:8233');
 
   process.exit(0);
