@@ -5,7 +5,10 @@
  * based on env vars.
  */
 
-import { Client } from 'cassandra-driver';
+import { Client, types } from 'cassandra-driver';
+
+/** Re-export cassandra-driver types for domain code (TimeUuid, Uuid, etc.) */
+export const cassandraTypes = types;
 
 const CONTACT_POINTS = (process.env.CASSANDRA_CONTACT_POINTS || 'localhost:9042').split(',');
 const KEYSPACE = process.env.CASSANDRA_KEYSPACE || 'catalog';
@@ -59,3 +62,14 @@ export async function executeCql<T = Record<string, unknown>>(
   const result = await client.execute(query, params, { prepare: true });
   return result.rows as unknown as T[];
 }
+
+/**
+ * Execute a batch of CQL queries atomically.
+ */
+export async function executeBatch(
+  queries: Array<{ query: string; params?: unknown[] }>,
+): Promise<void> {
+  const client = getCassandraClient();
+  await client.batch(queries, { prepare: true });
+}
+
