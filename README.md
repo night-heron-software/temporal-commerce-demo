@@ -1,36 +1,133 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Temporal Commerce Demo
 
-## Getting Started
+A full-stack e-commerce application demonstrating [Temporal](https://temporal.io) durable execution patterns — cart management, checkout orchestration, order processing, and simulated fulfillment.
 
-First, run the development server:
+Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasticsearch**.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Next.js Storefront (localhost:3000)                    │
+│  ┌──────────┐  ┌──────────┐  ┌────────────────────┐    │
+│  │  /shop   │  │ /checkout│  │ Server Actions      │    │
+│  │ Catalog  │  │ Flow     │  │ (cart-actions.ts)   │    │
+│  └──────────┘  └──────────┘  └─────────┬──────────┘    │
+└────────────────────────────────────────│────────────────┘
+                                         │ Temporal Client
+┌────────────────────────────────────────│────────────────┐
+│  Temporal Server (localhost:7233)       ▼               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐  │
+│  │   Cart   │  │ Checkout │  │  Order + Fulfillment │  │
+│  │ Workflow │  │ Workflow │  │  Workflows           │  │
+│  └──────────┘  └──────────┘  └──────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+         │                              │
+    ┌────┴────┐                   ┌─────┴─────┐
+    │Cassandra│                   │Elasticsearch│
+    │  :9042  │                   │   :9200     │
+    └─────────┘                   └───────────┘
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Temporal Workflows
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Workflow | Purpose | Key Patterns |
+|----------|---------|--------------|
+| **Cart** | Manages shopping cart state as a long-running workflow | `updateWithStart`, Query/Update handlers, entity lifecycle |
+| **Checkout** | Orchestrates shipping → payment → order submission | State machine, step validation, `continueAsNew` |
+| **Order** | Processes order from placement through fulfillment | Supplier routing, assignment tracking, status projections |
+| **Fulfillment** | Simulates supplier order submission and shipping | Timer-based simulation, shipment tracking |
+| **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Quick Start
 
-## Learn More
+### Prerequisites
 
-To learn more about Next.js, take a look at the following resources:
+- **Node.js** ≥ 20
+- **Docker** (for Cassandra, Elasticsearch, Temporal)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 1. Install dependencies
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm install
+```
 
-## Deploy on Vercel
+### 2. Start infrastructure
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+make init
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This starts Cassandra, Elasticsearch, and Temporal via Docker Compose, then initializes the Cassandra schema.
+
+### 3. Start the application
+
+```bash
+make app-start
+```
+
+This starts the Next.js dev server and Temporal workers concurrently.
+
+### 4. Seed demo data
+
+In another terminal:
+
+```bash
+make seed
+```
+
+### 5. Browse
+
+- **Storefront** → [http://localhost:3000/shop](http://localhost:3000/shop)
+- **Temporal UI** → [http://localhost:8233](http://localhost:8233)
+
+## Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `make dev` | Start infrastructure (Cassandra, ES, Temporal) |
+| `make init` | Full init: infrastructure + Cassandra schema |
+| `make app-start` | Start storefront + Temporal workers |
+| `make app-stop` | Stop application processes |
+| `make seed` | Populate demo catalog data |
+| `make workers` | Start Temporal workers only |
+| `make stop` | Stop infrastructure containers |
+| `make clean` | Stop + wipe all data volumes |
+
+## Project Structure
+
+```
+temporal-commerce-demo/
+├── cassandra/              # CQL schema
+├── sample-data/            # Demo catalog (catalog.json)
+├── scripts/                # Seed orchestrator
+├── src/
+│   ├── app/
+│   │   ├── api/            # REST endpoints (search, product, seed)
+│   │   └── shop/           # Storefront pages + Server Actions
+│   ├── components/         # UI components (NavBar, CartDrawer, etc.)
+│   ├── context/            # React context (CartProvider)
+│   ├── lib/                # Shared: Cassandra, ES, Temporal clients
+│   └── temporal/
+│       ├── contracts/      # Shared type definitions
+│       ├── cart/            # Cart workflow + activities
+│       ├── checkout/        # Checkout workflow + activities
+│       ├── oms/            # Order management workflow
+│       ├── fulfillment/    # Fulfillment simulation workflow
+│       ├── inventory/      # CQRS inventory workflow
+│       └── worker.ts       # Unified Temporal worker
+└── docker-compose.yml      # Local infrastructure
+```
+
+## Technology Stack
+
+- **Frontend**: Next.js 15 (App Router), React, Tailwind CSS
+- **Backend**: Next.js Server Actions + API Routes
+- **Orchestration**: Temporal TypeScript SDK
+- **Database**: Apache Cassandra (catalog, orders, inventory)
+- **Search**: Elasticsearch (product search with faceted filtering)
+- **Infrastructure**: Docker Compose (local), compatible with Temporal Cloud + AWS EKS
+
+## License
+
+MIT

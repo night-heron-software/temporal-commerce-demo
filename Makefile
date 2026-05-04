@@ -18,7 +18,7 @@ dev: ## Start local infrastructure (Cassandra, Elasticsearch, Temporal)
 	@echo "✓ Temporal ready"
 	@echo ""
 	@echo "✨ Infrastructure ready!"
-	@echo "   Temporal UI → http://localhost:8080"
+	@echo "   Temporal UI → http://localhost:8233"
 
 stop: ## Stop all infrastructure containers
 	@echo "Stopping infrastructure..."
@@ -44,8 +44,8 @@ db-init: ## Initialize Cassandra schema
 
 app-start: ## Start storefront + workers together
 	@echo "Starting Temporal Commerce Demo..."
-	@echo "  Storefront → http://localhost:3000"
-	@echo "  Temporal UI → http://localhost:8080"
+	@echo "  Storefront → http://localhost:3000/shop"
+	@echo "  Temporal UI → http://localhost:8233"
 	@npx concurrently \
 		--names "next,workers" \
 		--prefix-colors "cyan,magenta" \
@@ -64,8 +64,8 @@ app-stop: ## Stop application processes
 workers: ## Start Temporal workers only
 	npm run temporal:worker
 
-seed: ## Run full seeding pipeline (requires storefront at localhost:3000)
-	npm run seed
+seed: ## Seed demo data (requires storefront running at localhost:3000)
+	npx tsx scripts/seed.ts
 
 # ==============================================================================
 # Full Initialization
@@ -76,6 +76,11 @@ init: dev db-init ## Full init: start infra → create schema → ready for seed
 	@echo "✨ Init complete! Next steps:"
 	@echo "   1. make app-start   (starts storefront + workers)"
 	@echo "   2. make seed        (populates demo data)"
+	@echo ""
+	@echo "Quick start (after init):"
+	@echo "   make app-start"
+	@echo "   # In another terminal:"
+	@echo "   make seed"
 
 # ==============================================================================
 # Help
