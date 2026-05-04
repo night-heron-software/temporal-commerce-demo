@@ -8,7 +8,6 @@
  */
 
 import { getTemporalClient } from '@/lib';
-import { DEMO_STORE_ID } from '@/lib/constants';
 import { executeCql, cassandraTypes as types } from '@/lib';
 import {
   getOrderStateQuery,
@@ -45,8 +44,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       status: string;
       created_at: Date | null;
     }>(
-      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders WHERE store_id = ? LIMIT 200`,
-      [types.Uuid.fromString(DEMO_STORE_ID)]
+      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders LIMIT 200`
     );
 
     const sorted = rows.sort((a, b) => {
@@ -79,7 +77,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
 export async function getOrderState(orderId: string): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `${DEMO_STORE_ID}-order-${orderId}`;
+    const workflowId = `order-${orderId}`;
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.query(getOrderStateQuery);
     return { success: true, data: state };
@@ -104,7 +102,7 @@ export async function updateOrderStatus(
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `${DEMO_STORE_ID}-order-${orderId}`;
+    const workflowId = `order-${orderId}`;
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.executeUpdate(updateStatusUpdate, {
       args: [{ status, note, updatedBy: 'admin' as const } as UpdateStatusSignal],
@@ -126,7 +124,7 @@ export async function cancelOrder(
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `${DEMO_STORE_ID}-order-${orderId}`;
+    const workflowId = `order-${orderId}`;
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.executeUpdate(cancelOrderUpdate, {
       args: [{ reason }],

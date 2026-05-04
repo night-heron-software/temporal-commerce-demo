@@ -21,20 +21,14 @@ interface VariantRow {
   blank_sku: string;
 }
 
-async function resolveBlankSku(storeId: string, variantId: string): Promise<string | null> {
+async function resolveBlankSku(_storeId: string, variantId: string): Promise<string | null> {
   const variants = await executeCql<VariantRow>(
-    `SELECT blank_sku FROM variants WHERE store_id = ? AND id = ?`,
-    [types.Uuid.fromString(storeId), types.Uuid.fromString(variantId)]
+    `SELECT blank_sku FROM variants WHERE id = ?`,
+    [types.Uuid.fromString(variantId)]
   );
   if (variants.length > 0) return variants[0].blank_sku;
 
-  // Fallback to dynamic catalog_items table
-  interface CatalogItemRow { sku: string }
-  const catalogRows = await executeCql<CatalogItemRow>(
-    `SELECT sku FROM catalog_items WHERE store_id = ? AND catalog_item_id = ?`,
-    [types.Uuid.fromString(storeId), types.Uuid.fromString(variantId)]
-  );
-  return catalogRows.length > 0 ? catalogRows[0].sku : null;
+  return null;
 }
 
 /**

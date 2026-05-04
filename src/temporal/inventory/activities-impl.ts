@@ -60,7 +60,6 @@ interface StockWriteRow {
 
 interface ReservationWriteRow {
   reservation_id: string;
-  store_id: types.Uuid;
   blank_sku: string;
   cart_id: string;
   variant_id: string;
@@ -162,10 +161,10 @@ export async function projectReservationViews(): Promise<void> {
   for (const r of activeReservations) {
     batch.push({
       query: `INSERT INTO inventory_reservations_by_sku (
-        blank_sku, reservation_id, store_id, cart_id, variant_id, quantity,
+        blank_sku, reservation_id, cart_id, variant_id, quantity,
         status, supplier_id, expires_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [r.blank_sku, r.reservation_id, r.store_id, r.cart_id, r.variant_id,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [r.blank_sku, r.reservation_id, r.cart_id, r.variant_id,
                r.quantity, r.status, r.supplier_id, r.expires_at, r.created_at],
     });
   }
@@ -447,10 +446,10 @@ export async function projectReservationsForSkus(blankSkus: string[]): Promise<v
     for (const r of activeReservations) {
       batch.push({
         query: `INSERT INTO inventory_reservations_by_sku (
-          blank_sku, reservation_id, store_id, cart_id, variant_id, quantity,
+          blank_sku, reservation_id, cart_id, variant_id, quantity,
           status, supplier_id, expires_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [r.blank_sku, r.reservation_id, r.store_id, r.cart_id, r.variant_id,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [r.blank_sku, r.reservation_id, r.cart_id, r.variant_id,
                  r.quantity, r.status, r.supplier_id, r.expires_at, r.created_at],
       });
     }

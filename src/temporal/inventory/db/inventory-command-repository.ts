@@ -103,7 +103,6 @@ interface StockRow {
 
 interface ReservationRow {
   reservation_id: string;
-  store_id: types.Uuid;
   blank_sku: string;
   cart_id: string;
   variant_id: string;
@@ -119,7 +118,6 @@ interface ReservationRow {
 interface CartReservationRow {
   cart_id: string;
   reservation_id: string;
-  store_id: types.Uuid;
   blank_sku: string;
   variant_id: string;
   quantity: number;
@@ -133,7 +131,7 @@ interface CartReservationRow {
 function rowToReservation(row: ReservationRow): ReservationRecord {
   return {
     reservationId: row.reservation_id,
-    storeId: row.store_id.toString(),
+    storeId: 'demo',
     blankSku: row.blank_sku,
     cartId: row.cart_id,
     variantId: row.variant_id,
@@ -343,24 +341,23 @@ export const InventoryCommandRepository = {
     const expiresAt = new Date(now.getTime() + args.ttlSeconds * 1000);
 
     // Insert reservation record + by-cart lookup (batch for cross-partition atomicity)
-    const storeIdUuid = types.Uuid.fromString(args.storeId);
     await executeBatch([
       {
         query: `INSERT INTO inventory_reservations_w (
-          reservation_id, store_id, blank_sku, cart_id, variant_id, supplier_id,
+          reservation_id, blank_sku, cart_id, variant_id, supplier_id,
           quantity, reference_id, status, expires_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'TEMPORARY', ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'TEMPORARY', ?, ?, ?)`,
         params: [
-          args.reservationId, storeIdUuid, args.blankSku, args.cartId, args.variantId,
+          args.reservationId, args.blankSku, args.cartId, args.variantId,
           null, args.quantity, args.referenceId, expiresAt, now, now,
         ],
       },
       {
         query: `INSERT INTO inventory_reservations_by_cart_w (
-          cart_id, reservation_id, store_id, blank_sku, variant_id, quantity, status
-        ) VALUES (?, ?, ?, ?, ?, ?, 'TEMPORARY')`,
+          cart_id, reservation_id, blank_sku, variant_id, quantity, status
+        ) VALUES (?, ?, ?, ?, ?, 'TEMPORARY')`,
         params: [
-          args.cartId, args.reservationId, storeIdUuid, args.blankSku,
+          args.cartId, args.reservationId, args.blankSku,
           args.variantId, args.quantity,
         ],
       },

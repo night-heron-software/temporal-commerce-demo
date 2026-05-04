@@ -5,7 +5,6 @@
  */
 import { NextResponse } from 'next/server';
 import { getCassandraClient, executeCql, cassandraTypes as types } from '@/lib';
-import { DEMO_STORE_ID } from '@/lib/constants';
 import path from 'path';
 import fs from 'fs/promises';
 
@@ -59,12 +58,11 @@ export async function POST() {
 
   try {
     const now = new Date();
-    const storeId = types.Uuid.fromString(DEMO_STORE_ID);
 
     // Create demo store
     await executeCql(
       `INSERT INTO stores (id, name, slug, status, owner_email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [storeId, 'Temporal Commerce Demo', 'demo', 'active', 'demo@example.com', now, now]
+      [types.Uuid.fromString('00000000-0000-0000-0000-000000000001'), 'Temporal Commerce Demo', 'demo', 'active', 'demo@example.com', now, now]
     );
     results.store = true;
 
@@ -77,8 +75,8 @@ export async function POST() {
     for (const collection of sampleData.collections) {
       try {
         await executeCql(
-          `INSERT INTO collections (store_id, id, name, description, created_at) VALUES (?, ?, ?, ?, ?)`,
-          [storeId, types.Uuid.fromString(collection.id), collection.name, collection.description, now]
+          `INSERT INTO collections (id, name, description, created_at) VALUES (?, ?, ?, ?)`,
+          [types.Uuid.fromString(collection.id), collection.name, collection.description, now]
         );
         results.collections++;
       } catch (error) {
@@ -91,13 +89,12 @@ export async function POST() {
       try {
         await executeCql(
           `INSERT INTO products (
-            store_id, id, type, collection_ids, collection_names, name, description,
+            id, type, collection_ids, collection_names, name, description,
             base_price_amount, base_price_currency, blank_brand, blank_model,
             default_variant_id, default_variant_image_url,
             created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            storeId,
             types.Uuid.fromString(product.id),
             product.type,
             product.collection_ids?.map((id) => types.Uuid.fromString(id)) || [],
@@ -120,12 +117,11 @@ export async function POST() {
           for (const collectionId of product.collection_ids) {
             await executeCql(
               `INSERT INTO products_by_collection (
-                store_id, collection_id, product_id, type, name,
+                collection_id, product_id, type, name,
                 base_price_amount, base_price_currency,
                 default_variant_id, default_variant_image_url
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
               [
-                storeId,
                 types.Uuid.fromString(collectionId),
                 types.Uuid.fromString(product.id),
                 product.type,
@@ -150,11 +146,10 @@ export async function POST() {
       try {
         await executeCql(
           `INSERT INTO variants (
-            store_id, id, blank_sku, product_id, product_name, product_type,
+            id, blank_sku, product_id, product_name, product_type,
             price_amount, price_currency, available, images, options, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            storeId,
             types.Uuid.fromString(variant.id),
             variant.blank_sku,
             types.Uuid.fromString(variant.product_id),
@@ -176,11 +171,10 @@ export async function POST() {
           null;
         await executeCql(
           `INSERT INTO variants_by_product (
-            store_id, product_id, id, blank_sku, price_amount, price_currency,
+            product_id, id, blank_sku, price_amount, price_currency,
             available, variant_image_url, options
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
-            storeId,
             types.Uuid.fromString(variant.product_id),
             types.Uuid.fromString(variant.id),
             variant.blank_sku,

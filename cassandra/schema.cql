@@ -1,5 +1,5 @@
 -- Temporal Commerce Demo — Cassandra Schema
--- Subset of nightheron-platform schema for cart, checkout, order, and fulfillment domains
+-- Single-store demo: no store_id partition keys
 
 CREATE KEYSPACE IF NOT EXISTS catalog
 WITH replication = {
@@ -86,7 +86,7 @@ CREATE TYPE IF NOT EXISTS supplier_order (
 );
 
 -- ===========================================
--- Store (single demo store)
+-- Store (single demo store — kept for reference only)
 -- ===========================================
 
 CREATE TABLE IF NOT EXISTS stores (
@@ -104,8 +104,7 @@ CREATE TABLE IF NOT EXISTS stores (
 -- ===========================================
 
 CREATE TABLE IF NOT EXISTS products (
-    store_id UUID,
-    id UUID,
+    id UUID PRIMARY KEY,
     type TEXT,
     collection_ids LIST<UUID>,
     collection_names LIST<TEXT>,
@@ -118,12 +117,10 @@ CREATE TABLE IF NOT EXISTS products (
     default_variant_id UUID,
     default_variant_image_url TEXT,
     created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    PRIMARY KEY (store_id, id)
+    updated_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS products_by_collection (
-    store_id UUID,
     collection_id UUID,
     product_id UUID,
     type TEXT,
@@ -132,12 +129,11 @@ CREATE TABLE IF NOT EXISTS products_by_collection (
     base_price_currency TEXT,
     default_variant_id UUID,
     default_variant_image_url TEXT,
-    PRIMARY KEY ((store_id, collection_id), product_id)
+    PRIMARY KEY (collection_id, product_id)
 );
 
 CREATE TABLE IF NOT EXISTS variants (
-    store_id UUID,
-    id UUID,
+    id UUID PRIMARY KEY,
     blank_sku TEXT,
     product_id UUID,
     product_name TEXT,
@@ -147,12 +143,10 @@ CREATE TABLE IF NOT EXISTS variants (
     available BOOLEAN,
     images MAP<TEXT, TEXT>,
     options LIST<FROZEN<option_selection>>,
-    created_at TIMESTAMP,
-    PRIMARY KEY (store_id, id)
+    created_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS variants_by_product (
-    store_id UUID,
     product_id UUID,
     id UUID,
     blank_sku TEXT,
@@ -161,16 +155,14 @@ CREATE TABLE IF NOT EXISTS variants_by_product (
     available BOOLEAN,
     variant_image_url TEXT,
     options LIST<FROZEN<option_selection>>,
-    PRIMARY KEY ((store_id, product_id), id)
+    PRIMARY KEY (product_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS collections (
-    store_id UUID,
-    id UUID,
+    id UUID PRIMARY KEY,
     name TEXT,
     description TEXT,
-    created_at TIMESTAMP,
-    PRIMARY KEY (store_id, id)
+    created_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS option_types (
@@ -190,8 +182,7 @@ CREATE TABLE IF NOT EXISTS option_values_by_type (
 -- ===========================================
 
 CREATE TABLE IF NOT EXISTS orders (
-    store_id UUID,
-    order_id UUID,
+    order_id UUID PRIMARY KEY,
     cart_id TEXT,
     confirmation_number TEXT,
     customer_email TEXT,
@@ -208,12 +199,10 @@ CREATE TABLE IF NOT EXISTS orders (
     currency TEXT,
     status TEXT,
     created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    PRIMARY KEY (store_id, order_id)
+    updated_at TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS orders_by_customer (
-    store_id UUID,
     customer_email TEXT,
     created_at TIMESTAMP,
     order_id UUID,
@@ -221,26 +210,23 @@ CREATE TABLE IF NOT EXISTS orders_by_customer (
     total INT,
     currency TEXT,
     status TEXT,
-    PRIMARY KEY ((store_id, customer_email), created_at, order_id)
+    PRIMARY KEY (customer_email, created_at, order_id)
 ) WITH CLUSTERING ORDER BY (created_at DESC, order_id ASC);
 
 CREATE TABLE IF NOT EXISTS orders_by_confirmation (
-    store_id UUID,
-    confirmation_number TEXT,
+    confirmation_number TEXT PRIMARY KEY,
     order_id UUID,
-    customer_email TEXT,
-    PRIMARY KEY (store_id, confirmation_number)
+    customer_email TEXT
 );
 
 CREATE TABLE IF NOT EXISTS order_status_history (
-    store_id UUID,
     order_id UUID,
     event_time TIMESTAMP,
     id TIMEUUID,
     status TEXT,
     note TEXT,
     updated_by TEXT,
-    PRIMARY KEY ((store_id, order_id), event_time, id)
+    PRIMARY KEY (order_id, event_time, id)
 ) WITH CLUSTERING ORDER BY (event_time DESC, id DESC);
 
 -- ===========================================
@@ -301,7 +287,6 @@ CREATE TABLE IF NOT EXISTS inventory_stock_w (
 
 CREATE TABLE IF NOT EXISTS inventory_reservations_w (
     reservation_id TEXT PRIMARY KEY,
-    store_id UUID,
     blank_sku TEXT,
     cart_id TEXT,
     variant_id TEXT,
@@ -319,7 +304,6 @@ CREATE INDEX IF NOT EXISTS idx_reservations_blank_sku ON inventory_reservations_
 CREATE TABLE IF NOT EXISTS inventory_reservations_by_cart_w (
     cart_id TEXT,
     reservation_id TEXT,
-    store_id UUID,
     blank_sku TEXT,
     variant_id TEXT,
     quantity INT,

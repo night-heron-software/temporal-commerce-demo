@@ -273,6 +273,78 @@ export async function indexSupplierOrder(doc: Elasticsearch.SupplierOrderDocumen
   log.info(`[Activity] Indexed supplier order ${doc.supplierOrderId} to Elasticsearch`);
 }
 
+/**
+ * Insert a status history entry into order_status_history table
+ */
+export async function insertStatusHistoryEntry(
+  _storeId: string,
+  orderId: string,
+  entry: { status: string; timestamp: string; note?: string; updatedBy: string }
+): Promise<void> {
+  const client = getCassandraClient();
+  const orderIdUuid = types.Uuid.fromString(orderId);
+  const eventTime = new Date(entry.timestamp);
+  const timeUuid = types.TimeUuid.fromDate(eventTime);
+
+  await client.execute(
+    `INSERT INTO order_status_history (order_id, event_time, id, status, note, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [orderIdUuid, eventTime, timeUuid, entry.status, entry.note ?? null, entry.updatedBy],
+    { prepare: true }
+  );
+
+  log.info(`[Activity] Inserted status history: ${entry.status} for order ${orderId}`);
+}
+
+/**
+ * Get orders by customer email
+ */
+export async function getOrdersByEmail(email: string): Promise<Order[]> {
+  const client = getCassandraClient();
+  const result = await client.execute(
+    `SELECT order_id, confirmation_number, total, currency, status, created_at
+     FROM orders_by_customer WHERE customer_email = ?`,
+    [email],
+    { prepare: true }
+  );
+
+  return result.rows.map(row => ({
+    orderId: row.order_id.toString(),
+    confirmationNumber: row.confirmation_number,
+    customerEmail: email,
+    total: row.total,
+    currency: row.currency,
+    status: row.status,
+    createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
+  } as unknown as Order));
+}
+
+/**
+ * Get a single order by ID
+ */
+export async function getOrderById(orderId: string): Promise<Order | null> {
+  const client = getCassandraClient();
+  const orderIdUuid = types.Uuid.fromString(orderId);
+  const result = await client.execute(
+    `SELECT * FROM orders WHERE order_id = ?`,
+    [orderIdUuid],
+    { prepare: true }
+  );
+
+  if (result.rows.length === 0) return null;
+
+  const row = result.rows[0];
+  return {
+    orderId: row.order_id.toString(),
+    confirmationNumber: row.confirmation_number,
+    customerEmail: row.customer_email,
+    total: row.total,
+    currency: row.currency,
+    status: row.status,
+    createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
+  } as unknown as Order;
+}
+
 export function createOmsActivities() {
   return {
     saveOrderToDatabase,
@@ -280,6 +352,9 @@ export function createOmsActivities() {
     sendOrderStatusEmail,
     sendFeedbackThankYouEmail,
     resolveSupplierAssignments,
+    insertStatusHistoryEntry,
+    getOrdersByEmail,
+    getOrderById,
     indexOrder,
     indexSupplierOrder,
   };

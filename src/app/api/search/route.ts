@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Client } from '@elastic/elasticsearch';
-import { DEMO_STORE_ID } from '@/lib/constants';
 
 const ES_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 const client = new Client({ node: ES_URL });
@@ -49,9 +48,7 @@ export async function GET(
 
     // Build ES query
     const must: object[] = [];
-    const filter: object[] = [
-      { term: { storeId: DEMO_STORE_ID } }
-    ];
+    const filter: object[] = [];
 
     if (params.q) {
       must.push({

@@ -42,7 +42,6 @@ export async function POST(request: NextRequest) {
       // Read products from Cassandra
       interface ProductRow {
         id: CqlUuid;
-        store_id: CqlUuid;
         name: string;
         description: string;
         type: string;
@@ -97,7 +96,7 @@ export async function POST(request: NextRequest) {
           const productId = row.id.toString();
           const doc = {
             id: productId,
-            storeId: row.store_id.toString(),
+            storeId: 'demo',
             name: row.name,
             description: row.description,
             type: row.type,
@@ -120,7 +119,6 @@ export async function POST(request: NextRequest) {
     } else if (index === 'collections') {
       interface CollectionRow {
         id: CqlUuid;
-        store_id: CqlUuid;
         name: string;
       }
 
@@ -129,7 +127,7 @@ export async function POST(request: NextRequest) {
         try {
           const doc = {
             id: row.id.toString(),
-            storeId: row.store_id.toString(),
+            storeId: 'demo',
             name: row.name,
             productCount: 0
           };

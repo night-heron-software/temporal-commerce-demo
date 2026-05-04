@@ -97,7 +97,6 @@ interface SupplierStockRow {
 interface SkuReservationRow {
   blank_sku: string;
   reservation_id: string;
-  store_id: types.Uuid;
   cart_id: string;
   variant_id: string;
   quantity: number;
@@ -151,7 +150,7 @@ function rowToSkuReservation(row: SkuReservationRow): SkuReservation {
   return {
     blankSku: row.blank_sku,
     reservationId: row.reservation_id,
-    storeId: row.store_id.toString(),
+    storeId: 'demo',
     cartId: row.cart_id,
     variantId: row.variant_id,
     quantity: row.quantity,
