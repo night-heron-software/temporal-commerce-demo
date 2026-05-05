@@ -7,6 +7,7 @@ interface CassandraOption {
   optionType?: string;
   label?: string;
   attributes?: Record<string, string>;
+  value?: { label?: string; name?: string; hex?: string };
 }
 
 interface RelatedVariant {
@@ -33,13 +34,18 @@ function getOptionType(option: CassandraOption): string {
 
 // Helper to get option label
 function getOptionLabel(option: CassandraOption): string {
-  return option.label || '';
+  // Cassandra flat: option.label; ES indexed: option.value.label
+  return option.label || option.value?.label || option.value?.name || '';
 }
 
 // Helper to get hex color from attributes
 function getOptionHex(option: CassandraOption): string | null {
+  // Cassandra flat: option.attributes.hex; ES indexed: option.value.hex
   if (option.attributes?.hex) {
     return option.attributes.hex;
+  }
+  if (option.value?.hex) {
+    return option.value.hex;
   }
   return null;
 }

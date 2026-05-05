@@ -8,6 +8,42 @@ import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
 import type { Cart } from '@/temporal/contracts';
 
+// Semi-random test address generator
+function generateTestAddress(): Cart.ShippingAddress {
+  const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+  const firstNames = ['Alice', 'Bob', 'Charlie', 'Diana', 'Ethan', 'Fiona', 'George', 'Hannah', 'Ivan', 'Julia'];
+  const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
+  const streets = ['123 Main St', '456 Oak Ave', '789 Elm Blvd', '321 Pine Dr', '654 Maple Ln', '987 Cedar Way', '111 Birch Ct', '222 Spruce Rd'];
+  const units = ['', '', '', 'Apt 2B', 'Suite 100', 'Unit 4', '#301'];
+  const locations = [
+    { city: 'San Francisco', state: 'CA', zip: '94102' },
+    { city: 'Austin', state: 'TX', zip: '78701' },
+    { city: 'Portland', state: 'OR', zip: '97201' },
+    { city: 'Denver', state: 'CO', zip: '80202' },
+    { city: 'Chicago', state: 'IL', zip: '60601' },
+    { city: 'Seattle', state: 'WA', zip: '98101' },
+    { city: 'Nashville', state: 'TN', zip: '37201' },
+    { city: 'Boise', state: 'ID', zip: '83702' },
+  ];
+  const loc = pick(locations);
+  const first = pick(firstNames);
+  const last = pick(lastNames);
+
+  return {
+    firstName: first,
+    lastName: last,
+    address1: pick(streets),
+    address2: pick(units),
+    city: loc.city,
+    state: loc.state,
+    postalCode: loc.zip,
+    country: 'US',
+    phone: `555-${String(Math.floor(Math.random() * 900) + 100)}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
+    email: `${first.toLowerCase()}.${last.toLowerCase()}@example.com`
+  };
+}
+
 export default function ShippingPage() {
   const router = useRouter();
   const { cart, cartId, refreshCart } = useCart();
@@ -33,6 +69,10 @@ export default function ShippingPage() {
       setFormData(cart.checkout.shippingAddress);
     }
   }, [cart?.checkout?.shippingAddress]);
+
+  const handleAutofill = () => {
+    setFormData(generateTestAddress());
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,7 +122,16 @@ export default function ShippingPage() {
           ← Back to Shop
         </Link>
 
-        <h1 className="text-3xl font-bold mb-6 mt-6">Shipping Address</h1>
+        <div className="flex items-center justify-between mt-6 mb-6">
+          <h1 className="text-3xl font-bold">Shipping Address</h1>
+          <button
+            type="button"
+            onClick={handleAutofill}
+            className="px-3 py-1.5 text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+          >
+            🧪 Autofill Test Data
+          </button>
+        </div>
 
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 p-4 rounded-lg mb-6">

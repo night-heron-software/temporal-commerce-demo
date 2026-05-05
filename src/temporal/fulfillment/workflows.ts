@@ -9,7 +9,7 @@
  */
 
 import * as wf from "@temporalio/workflow";
-import { OMS, Suppliers } from '../contracts';
+import { OMS } from '../contracts';
 import type {
   FulfillmentOrderRequest,
   FulfillmentWorkflowState,
@@ -28,7 +28,6 @@ import {
 import {
   getFeatureFlag,
   submitSupplierOrder,
-  buildFulfillmentPayload,
   pollSupplierStatus,
   sendShippedEmail,
   sendDeliveredEmail,
@@ -553,15 +552,15 @@ async function runAutomaticSimulatedFulfillment(
   syncProjections: () => Promise<void>,
 ): Promise<void> {
   const processingDelayMs = parseInt(
-    (wf.workflowInfo().memo?.processingDelayMs as string) || "60000",
+    (wf.workflowInfo().memo?.processingDelayMs as string) || "15000",
     10,
   );
   const shippingDelayMs = parseInt(
-    (wf.workflowInfo().memo?.shippingDelayMs as string) || "60000",
+    (wf.workflowInfo().memo?.shippingDelayMs as string) || "15000",
     10,
   );
   const deliveryDelayMs = parseInt(
-    (wf.workflowInfo().memo?.deliveryDelayMs as string) || "60000",
+    (wf.workflowInfo().memo?.deliveryDelayMs as string) || "15000",
     10,
   );
 
