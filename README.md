@@ -6,7 +6,7 @@ Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasti
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │  Next.js Storefront (localhost:3000)                    │
 │  ┌──────────┐  ┌──────────┐  ┌────────────────────┐    │
@@ -32,7 +32,7 @@ Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasti
 ### Temporal Workflows
 
 | Workflow | Purpose | Key Patterns |
-|----------|---------|--------------|
+| ---------- | --------- | -------------- |
 | **Cart** | Manages shopping cart state as a long-running workflow | `updateWithStart`, Query/Update handlers, entity lifecycle |
 | **Checkout** | Orchestrates shipping → payment → order submission | State machine, step validation, `continueAsNew` |
 | **Order** | Processes order from placement through fulfillment | Supplier routing, assignment tracking, status projections |
@@ -84,7 +84,7 @@ make seed
 ## Makefile Targets
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `make dev` | Start infrastructure (Cassandra, ES, Temporal) |
 | `make init` | Full init: infrastructure + Cassandra schema |
 | `make app-start` | Start storefront + Temporal workers |
@@ -96,7 +96,7 @@ make seed
 
 ## Project Structure
 
-```
+```text
 temporal-commerce-demo/
 ├── cassandra/              # CQL schema
 ├── sample-data/            # Demo catalog (catalog.json)

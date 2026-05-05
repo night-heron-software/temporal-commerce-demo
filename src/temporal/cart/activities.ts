@@ -7,8 +7,8 @@ import { proxyActivities } from '@temporalio/workflow';
 import { Elasticsearch } from '../contracts';
 
 export interface CartActivities {
-  validateInventory(storeId: string, variantId: string, quantity: number): Promise<boolean>;
-  reserveCartItem(storeId: string, cartId: string, variantId: string, quantity: number): Promise<string | null>;
+  validateInventory(variantId: string, quantity: number): Promise<boolean>;
+  reserveCartItem(cartId: string, variantId: string, quantity: number): Promise<string | null>;
   releaseCartItem(cartId: string, variantId: string): Promise<void>;
   indexCart(doc: Elasticsearch.CartDocument): Promise<void>;
   deleteCart(cartId: string): Promise<void>;

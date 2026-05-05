@@ -3,14 +3,13 @@
 /**
  * Cart Server Actions — Demo version
  * 
- * Simplified: no auth, no storeId multi-tenancy, cookie-only cart ID.
+ * Simplified: no auth, cookie-only cart ID.
  * Uses Temporal updateWithStart for lazy cart creation.
  */
 
 import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
 import { getTemporalClient } from '@/lib/temporal-client';
-import { DEMO_STORE_ID } from '@/lib/constants';
 import { Cart, Checkout, Constants } from '@/temporal/contracts';
 
 const CART_ID_COOKIE = 'cartId';
@@ -64,7 +63,7 @@ async function executeCartUpdate<TReturn, TArgs extends any[]>(
       const { WithStartWorkflowOperation } = await import('@temporalio/client');
       const startOp = new WithStartWorkflowOperation('cartWorkflow', {
         workflowId,
-        args: [{ storeId: DEMO_STORE_ID, cartId }],
+        args: [{ cartId }],
         taskQueue: Constants.CART_TASK_QUEUE,
         workflowIdConflictPolicy: 'USE_EXISTING',
         workflowExecutionTimeout: '30 days',

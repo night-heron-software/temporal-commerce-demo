@@ -4,7 +4,7 @@ Deploy the Temporal Commerce Demo to Temporal Cloud + AWS for live presentation.
 
 ## Architecture
 
-```
+```text
 ┌──────────────────┐     ┌──────────────────────────┐
 │  Vercel / App     │     │  Temporal Cloud           │
 │  Runner           │     │  (mTLS, managed)          │
@@ -52,7 +52,7 @@ temporal cloud cert generate \
   --output-dir ./certs
 ```
 
-4. Base64-encode the certificates for env vars:
+1. Base64-encode the certificates for env vars:
 
 ```bash
 export TEMPORAL_TLS_CERT=$(base64 < ./certs/client.pem)
@@ -78,7 +78,7 @@ cqlsh --secure-connect-bundle=./secure-connect-bundle.zip \
   -f cassandra/schema.cql
 ```
 
-5. Set env vars:
+1. Set env vars:
 
 ```bash
 export CASSANDRA_CONTACT_POINTS=xxx.astra.datastax.com:29042
@@ -234,7 +234,7 @@ tsx scripts/seed.ts https://your-app.vercel.app
 ## Environment Variables Reference
 
 | Variable | Required | Default | Description |
-|:---------|:---------|:--------|:------------|
+| :--------- | :--------- | :-------- | :------------ |
 | `TEMPORAL_ADDRESS` | Yes | `localhost:7233` | Temporal server address |
 | `TEMPORAL_NAMESPACE` | Yes | `default` | Temporal namespace |
 | `TEMPORAL_TLS_CERT` | Cloud only | — | Base64-encoded mTLS client cert |

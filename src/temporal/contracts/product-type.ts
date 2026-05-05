@@ -34,7 +34,6 @@ export interface SupplierInfo {
 
 /** Context for supplier assignment resolution. */
 export interface SupplierResolutionContext {
-  storeId: string;
   preferredSuppliers: string[];
 }
 
@@ -60,7 +59,6 @@ export interface OrderLineItem {
 
 /** Context for building fulfillment payloads. */
 export interface FulfillmentPayloadContext {
-  storeId: string;
   orderId: string;
   shippingMethod: string;
 }
@@ -84,7 +82,6 @@ export interface SchemaExtension {
 
 /** Context for resolving product presentation data. */
 export interface PresentationContext {
-  storeId: string;
   locale?: string;
 }
 

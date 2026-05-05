@@ -138,7 +138,6 @@ export interface Product {
 }
 
 export interface Variant {
-  storeId: string;
   id: string;
   blankSku: string;
   productId: string;
@@ -151,7 +150,6 @@ export interface Variant {
 }
 
 export interface ProductInput {
-  storeId: string;
   id?: string;
   type: ProductType;
   name: string;

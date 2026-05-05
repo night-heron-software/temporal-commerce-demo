@@ -48,7 +48,6 @@ export interface SupplierStock {
 export interface SkuReservation {
   blankSku: string;
   reservationId: string;
-  storeId: string;
   cartId: string;
   variantId: string;
   quantity: number;
@@ -150,7 +149,6 @@ function rowToSkuReservation(row: SkuReservationRow): SkuReservation {
   return {
     blankSku: row.blank_sku,
     reservationId: row.reservation_id,
-    storeId: 'demo',
     cartId: row.cart_id,
     variantId: row.variant_id,
     quantity: row.quantity,
@@ -245,15 +243,11 @@ export const InventoryQueryRepository = {
   /**
    * Get all reservations for a SKU (ordered by most recent).
    */
-  async getReservationsBySku(blankSku: string, storeId?: string): Promise<SkuReservation[]> {
+  async getReservationsBySku(blankSku: string): Promise<SkuReservation[]> {
     const rows = await executeCql<SkuReservationRow>(
       `SELECT * FROM inventory_reservations_by_sku WHERE blank_sku = ?`,
       [blankSku]
     );
-    let reservations = rows.map(rowToSkuReservation);
-    if (storeId) {
-      reservations = reservations.filter((r) => r.storeId === storeId);
-    }
-    return reservations;
+    return rows.map(rowToSkuReservation);
   },
 };

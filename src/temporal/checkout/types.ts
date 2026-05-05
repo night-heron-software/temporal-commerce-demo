@@ -30,7 +30,6 @@ export interface CheckoutState {
 }
 
 export interface CheckoutWorkflowInput {
-  storeId: string;
   cartId: string;
   parentCartWorkflowId: string;
   items: CartItem[];

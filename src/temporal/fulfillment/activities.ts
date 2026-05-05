@@ -15,14 +15,12 @@ export interface FulfillmentActivities {
   getFeatureFlag(name: string): Promise<boolean>;
   submitSupplierOrder(request: Suppliers.SupplierOrderInput): Promise<Suppliers.SupplierOrderResult>;
   buildFulfillmentPayload(input: {
-    storeId: string;
     orderId: string;
     items: any[];
     supplierType: string;
     productType: string;
   }): Promise<any>;
   pollSupplierStatus(input: {
-    storeId: string;
     supplierOrderId: string;
     supplierType: string;
   }): Promise<Suppliers.SupplierStatusUpdate>;

@@ -5,5 +5,4 @@
  * In the full platform, these would be resolved dynamically per request.
  */
 
-export const DEMO_STORE_ID = '00000000-0000-0000-0000-000000000001';
 export const DEMO_STORE_NAME = 'Demo Store';

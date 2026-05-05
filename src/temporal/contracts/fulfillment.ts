@@ -18,7 +18,6 @@ import type { SupplierOrderStatus } from './oms';
 
 /** Sent from OMS to start fulfillment with pre-decided supplier orders */
 export interface FulfillmentOrderRequest {
-  storeId: string;
   orderId: string;
   cartId: string; // Needed for inventory reservation IDs
   customerId: string;
@@ -75,7 +74,6 @@ export type FulfillmentLineItemStatus =
 // ============================================================================
 
 export interface FulfillmentWorkflowState {
-  storeId: string;
   orderId: string;
   cartId: string;
   customerId: string;

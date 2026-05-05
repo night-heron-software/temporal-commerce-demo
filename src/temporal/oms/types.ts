@@ -45,8 +45,6 @@ export type OrderStatus =
 export interface OrderWorkflowInput {
   order: Order;
   customerEmail: string;
-  restoredState?: OrderState;
-  signalCount?: number;
 }
 
 export interface OrderState {
@@ -83,8 +81,8 @@ export type SupplierOrderStatus =
   | 'rejected';
 
 /**
- * Fulfillment status update received from child fulfillment workflows.
- * Used to propagate status changes back to the parent OMS workflow.
+ * Fulfillment status update received from fulfillment workflows.
+ * Used to propagate status changes back to the OMS workflow.
  */
 export interface FulfillmentStatusUpdate {
   supplierOrderId: string;

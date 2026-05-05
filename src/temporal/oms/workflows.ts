@@ -1,11 +1,9 @@
 import {
   allHandlersFinished,
   condition,
-  continueAsNew,
   getExternalWorkflowHandle,
   log,
   setHandler,
-  startChild,
   uuid4
 } from '@temporalio/workflow';
 const getFeatureFlag = async (_flag: string) => false;
@@ -19,7 +17,8 @@ import {
   resolveSupplierAssignments,
   insertStatusHistoryEntry,
   indexOrder,
-  indexSupplierOrder
+  indexSupplierOrder,
+  startFulfillmentWorkflow
 } from './activities';
 import {
   OrderState,
@@ -45,7 +44,6 @@ interface FulfillmentItem {
   title: string;
 }
 const fulfillmentCancelSignal = defineSignal('cancel');
-const FULFILLMENT_TASK_QUEUE_NAME = 'fulfillment-queue';
 
 // Import definitions from the dedicated definitions file
 import {
@@ -96,11 +94,6 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
   let isComplete = false;
   let isCancelled = false;
-
-  // Continue-as-New: signal counter to prevent unbounded history growth
-  const CONTINUE_AS_NEW_THRESHOLD = 200;
-  let signalCount = input.signalCount || 0;
-
   // Non-blocking projection sync: dirty flag for main loop
   let projectionDirty = false;
   const supplierOrdersToIndex: string[] = [];
@@ -115,113 +108,99 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
   const finalizeUpdate = (supplierOrderId?: string) => {
     state.updatedAt = new Date().toISOString();
     syncProjections(supplierOrderId);
-    signalCount++;
   };
 
-  // Restore state from Continue-as-New if applicable
-  const isResumed = !!input.restoredState;
-  if (isResumed) {
-    Object.assign(state, input.restoredState);
-    log.info('[OMS] Resumed from Continue-as-New', { status: state.status, signalCount });
-  }
-
-  // Skip initial persistence on Continue-as-New resume
-  if (!isResumed) {
-    // Persist order to database
-    log.info('[OMS] Saving order to database');
-    await saveOrderToDatabase(input.order);
-
-    // Persist initial status history entry
-    await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, state.statusHistory[0]);
-  }
-
   // Helper to build OrderDocument from current state
-  const getOrderDocument = () => buildOrderDocument(input.order.storeId, input.order, state, input.customerEmail);
+  const getOrderDocument = () => buildOrderDocument(input.order, state, input.customerEmail);
 
-  // Index order to Elasticsearch (always, even on resume)
+  // Persist order to database
+  log.info('[OMS] Saving order to database');
+  await saveOrderToDatabase(input.order);
+
+  // Persist initial status history entry
+  await insertStatusHistoryEntry(input.order.orderId, state.statusHistory[0]);
+
+  // Index order to Elasticsearch
   await indexOrder(getOrderDocument());
 
-  // Skip auto-assignment and fulfillment trigger on Continue-as-New resume
-  if (!isResumed) {
-    // ============================================================================
-    
-    // ============================================================================
-    // AUTO-ASSIGNMENT: Resolve supplier assignments via plugins
-    // ============================================================================
-    const lineItems: OrderLineItem[] = input.order.items.map((item) => {
-      // CartItem may carry extra fields at runtime (productId, title) from checkout
-      const ext = item as CartItem & { productId?: string; title?: string; variantTitle?: string };
-      return {
-        lineItemId: item.lineItemId,
-        variantId: item.variantId,
-        productId: ext.productId || 'unknown',
-        quantity: item.quantity,
-        productTitle: ext.title || 'Unknown Product',
-        variantTitle: ext.variantTitle || 'Unknown Variant',
-        unitPrice: item.price,
-        currency: input.order.currency
-      };
-    });
-    
-    log.info('[OMS] Resolving supplier assignments', { itemCount: lineItems.length });
-    const assignments = await resolveSupplierAssignments(lineItems, { storeId: input.order.storeId, preferredSuppliers: [] });
-    
-    // Auto-assign all items based on plugin resolution
-    for (let i = 0; i < input.order.items.length; i++) {
-      const item = input.order.items[i];
-      const assignment = assignments[i];
-      
-      state.assignments.push({
-        assignmentId: `asg-${uuid4().slice(0, 8)}`,
-        lineItemId: item.lineItemId,
-        variantId: item.variantId,
-        supplierId: assignment.supplierId,
-        supplierName: assignment.supplierName,
-        quantity: item.quantity,
-        status: 'assigned'
-      });
-    }
-
-    const printifyDynamicCount = state.assignments.filter(a => a.supplierId === 'printify-dynamic').length;
-    const simulatedCount = state.assignments.filter(a => a.supplierId === 'simulated').length;
-    log.info('[OMS] Auto-assignment complete', {
-      totalAssignments: state.assignments.length,
-      printifyDynamic: printifyDynamicCount,
-      simulated: simulatedCount
-    });
-    if (dataFlowEnabled) {
-      log.info('[DataFlow] T6: Order → OrderAssignment[] — mid.assignments', {
-        dataFlow: true, stage: 'T6: Order → FulfillmentOrderRequest', label: 'mid.OrderAssignment[]',
-        data: JSON.stringify(state.assignments, null, 2)
-      });
-    }
-
-    // All items are now assigned, move to ready_to_fulfill
-    state.status = 'ready_to_fulfill';
-    const readyEntry: StatusHistoryEntry = {
-      status: 'ready_to_fulfill',
-      timestamp: new Date().toISOString(),
-      note: 'All items auto-assigned',
-      updatedBy: 'system'
+  // ============================================================================
+  
+  // ============================================================================
+  // AUTO-ASSIGNMENT: Resolve supplier assignments via plugins
+  // ============================================================================
+  const lineItems: OrderLineItem[] = input.order.items.map((item) => {
+    // CartItem may carry extra fields at runtime (productId, title) from checkout
+    const ext = item as CartItem & { productId?: string; title?: string; variantTitle?: string };
+    return {
+      lineItemId: item.lineItemId,
+      variantId: item.variantId,
+      productId: ext.productId || 'unknown',
+      quantity: item.quantity,
+      productTitle: ext.title || 'Unknown Product',
+      variantTitle: ext.variantTitle || 'Unknown Variant',
+      unitPrice: item.price,
+      currency: input.order.currency
     };
-    state.statusHistory.push(readyEntry);
-
-    // Persist assignments to database
-    await updateOrderInDatabase(input.order.storeId, input.order.orderId, {
-      status: state.status,
-      statusHistory: state.statusHistory,
-      assignments: state.assignments
-    });
-    await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, readyEntry);
-
-    // Auto-trigger fulfillment
-    log.info('[OMS] Triggering fulfillment');
-    await triggerFulfillment(state, input, 'system', dataFlowEnabled);
-    log.info('[OMS] Fulfillment triggered, entering main loop', {
-      status: state.status,
-      supplierOrderCount: state.supplierOrders.length
+  });
+  
+  log.info('[OMS] Resolving supplier assignments', { itemCount: lineItems.length });
+  const assignments = await resolveSupplierAssignments(lineItems, { preferredSuppliers: [] });
+  
+  // Auto-assign all items based on plugin resolution
+  for (let i = 0; i < input.order.items.length; i++) {
+    const item = input.order.items[i];
+    const assignment = assignments[i];
+    
+    state.assignments.push({
+      assignmentId: `asg-${uuid4().slice(0, 8)}`,
+      lineItemId: item.lineItemId,
+      variantId: item.variantId,
+      supplierId: assignment.supplierId,
+      supplierName: assignment.supplierName,
+      quantity: item.quantity,
+      status: 'assigned'
     });
   }
+
+  const printifyDynamicCount = state.assignments.filter(a => a.supplierId === 'printify-dynamic').length;
+  const simulatedCount = state.assignments.filter(a => a.supplierId === 'simulated').length;
+  log.info('[OMS] Auto-assignment complete', {
+    totalAssignments: state.assignments.length,
+    printifyDynamic: printifyDynamicCount,
+    simulated: simulatedCount
+  });
+  if (dataFlowEnabled) {
+    log.info('[DataFlow] T6: Order → OrderAssignment[] — mid.assignments', {
+      dataFlow: true, stage: 'T6: Order → FulfillmentOrderRequest', label: 'mid.OrderAssignment[]',
+      data: JSON.stringify(state.assignments, null, 2)
+    });
+  }
+
+  // All items are now assigned, move to ready_to_fulfill
+  state.status = 'ready_to_fulfill';
+  const readyEntry: StatusHistoryEntry = {
+    status: 'ready_to_fulfill',
+    timestamp: new Date().toISOString(),
+    note: 'All items auto-assigned',
+    updatedBy: 'system'
+  };
+  state.statusHistory.push(readyEntry);
+
+  // Persist assignments to database
+  await updateOrderInDatabase(input.order.orderId, {
+    status: state.status,
+    statusHistory: state.statusHistory,
+    assignments: state.assignments
+  });
+  await insertStatusHistoryEntry(input.order.orderId, readyEntry);
+
+  // Trigger fulfillment
+  log.info('[OMS] Triggering fulfillment');
+  await triggerFulfillment(state, input, 'system', dataFlowEnabled);
+  log.info('[OMS] Fulfillment triggered, entering main loop', {
+    status: state.status,
+    supplierOrderCount: state.supplierOrders.length
+  });
 
   // Query for current order state
   setHandler(getOrderStateQuery, () => state);
@@ -298,7 +277,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
           updatedBy: 'system'
         };
         state.statusHistory.push(shippedEntry);
-        await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, shippedEntry);
+        await insertStatusHistoryEntry(input.order.orderId, shippedEntry);
       }
     } else if (update.status === 'delivered' && (state.status === 'shipped' || state.status === 'processing')) {
       const allDelivered = state.supplierOrders.every(
@@ -314,13 +293,13 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
           updatedBy: 'system'
         };
         state.statusHistory.push(deliveredEntry);
-        await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, deliveredEntry);
+        await insertStatusHistoryEntry(input.order.orderId, deliveredEntry);
         isComplete = true;
       }
     }
 
     // Persist updates
-    await updateOrderInDatabase(input.order.storeId, input.order.orderId, {
+    await updateOrderInDatabase(input.order.orderId, {
       status: state.status,
       statusHistory: state.statusHistory,
       assignments: state.assignments,
@@ -342,9 +321,9 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       updatedBy: signal.updatedBy
     };
     state.statusHistory.push(historyEntry);
-    await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, historyEntry);
+    await insertStatusHistoryEntry(input.order.orderId, historyEntry);
 
-    await updateOrderInDatabase(input.order.storeId, input.order.orderId, {
+    await updateOrderInDatabase(input.order.orderId, {
       status: signal.status,
       statusHistory: state.statusHistory
     });
@@ -368,7 +347,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     if (signal.status === 'cancelled' || signal.status === 'refunded') {
       // Signal fulfillment workflow to cancel (it will release inventory)
       try {
-        const fulfillmentWorkflowId = `${input.order.storeId}-fulfillment-${input.order.orderId}`;
+        const fulfillmentWorkflowId = `fulfillment-${input.order.orderId}`;
         const handle = getExternalWorkflowHandle(fulfillmentWorkflowId);
         await handle.signal(fulfillmentCancelSignal);
         log.info('[OMS] Sent cancel signal to fulfillment workflow');
@@ -393,9 +372,9 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       updatedBy: 'admin'
     };
     state.statusHistory.push(historyEntry);
-    await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, historyEntry);
+    await insertStatusHistoryEntry(input.order.orderId, historyEntry);
 
-    await updateOrderInDatabase(input.order.storeId, input.order.orderId, {
+    await updateOrderInDatabase(input.order.orderId, {
       status: 'cancelled',
       statusHistory: state.statusHistory
     });
@@ -404,7 +383,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
     // Signal fulfillment workflow to cancel (it will release inventory)
     try {
-      const fulfillmentWorkflowId = `${input.order.storeId}-fulfillment-${input.order.orderId}`;
+      const fulfillmentWorkflowId = `fulfillment-${input.order.orderId}`;
       const handle = getExternalWorkflowHandle(fulfillmentWorkflowId);
       await handle.signal(fulfillmentCancelSignal);
       log.info('[OMS] Sent cancel signal to fulfillment workflow');
@@ -425,7 +404,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       submittedAt: new Date().toISOString()
     };
 
-    await updateOrderInDatabase(input.order.storeId, input.order.orderId, {
+    await updateOrderInDatabase(input.order.orderId, {
       customerFeedback: state.customerFeedback
     });
 
@@ -439,7 +418,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       updatedBy: 'customer'
     };
     state.statusHistory.push(completeEntry);
-    await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, completeEntry);
+    await insertStatusHistoryEntry(input.order.orderId, completeEntry);
 
     isComplete = true;
     finalizeUpdate();
@@ -450,25 +429,14 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
   while (!isComplete && !isCancelled) {
     await condition(() => isComplete || isCancelled || projectionDirty, '365 days');
 
-    log.info('[OMS] Main loop woke', { isComplete, isCancelled, projectionDirty, signalCount });
+    log.info('[OMS] Main loop woke', { isComplete, isCancelled, projectionDirty });
     if (projectionDirty) {
       projectionDirty = false;
       await indexOrder(getOrderDocument());
       for (const soId of supplierOrdersToIndex.splice(0)) {
         const so = state.supplierOrders.find(s => s.supplierOrderId === soId);
-        if (so) await indexSupplierOrder(buildSupplierOrderDocument(input.order.storeId, so));
+        if (so) await indexSupplierOrder(buildSupplierOrderDocument(so));
       }
-    }
-
-    // Continue-as-New if signal threshold reached
-    if (signalCount >= CONTINUE_AS_NEW_THRESHOLD && !isComplete && !isCancelled) {
-      log.info('[OMS] Signal threshold reached, continuing as new', { signalCount });
-      await condition(allHandlersFinished);
-      await continueAsNew<typeof orderWorkflow>({
-        ...input,
-        restoredState: state,
-        signalCount: 0
-      });
     }
   }
   log.info('[OMS] Exited main loop', { finalStatus: state.status });
@@ -480,7 +448,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     await indexOrder(getOrderDocument());
     for (const soId of supplierOrdersToIndex.splice(0)) {
       const so = state.supplierOrders.find(s => s.supplierOrderId === soId);
-      if (so) await indexSupplierOrder(buildSupplierOrderDocument(input.order.storeId, so));
+      if (so) await indexSupplierOrder(buildSupplierOrderDocument(so));
     }
   }
 
@@ -494,7 +462,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 /**
  * Trigger fulfillment for all assigned items.
  * Groups assignments by supplier, builds SupplierOrder records,
- * then starts a SINGLE fulfillment child workflow with all supplier orders.
+ * then starts a standalone fulfillment workflow via activity.
  */
 async function triggerFulfillment(
   state: OrderState,
@@ -546,7 +514,7 @@ async function triggerFulfillment(
     state.supplierOrders.push(supplierOrder);
 
     // Index supplier order to Elasticsearch
-    await indexSupplierOrder(buildSupplierOrderDocument(input.order.storeId, supplierOrder));
+    await indexSupplierOrder(buildSupplierOrderDocument(supplierOrder));
 
     // Update assignment references
     for (const assignment of assignments) {
@@ -582,41 +550,35 @@ async function triggerFulfillment(
     });
   }
 
-  // Start SINGLE fulfillment child workflow with all supplier orders
-  const fulfillmentWorkflowId = `${input.order.storeId}-fulfillment-${input.order.orderId}`;
-  log.info('[OMS] Starting fulfillment child workflow', {
-    workflowId: fulfillmentWorkflowId,
-    taskQueue: FULFILLMENT_TASK_QUEUE_NAME,
+  // Start standalone fulfillment workflow via activity
+  const fulfillmentInput = {
+    orderId: input.order.orderId,
+    cartId: input.order.cartId,
+    customerId: input.customerEmail,
+    customerEmail: input.customerEmail,
+    confirmationNumber: input.order.confirmationNumber,
+    shippingAddress: {
+      firstName: input.order.shippingAddress.firstName,
+      lastName: input.order.shippingAddress.lastName,
+      email: input.customerEmail,
+      phone: input.order.shippingAddress.phone,
+      address1: input.order.shippingAddress.address1,
+      address2: input.order.shippingAddress.address2,
+      city: input.order.shippingAddress.city,
+      region: input.order.shippingAddress.state,
+      zip: input.order.shippingAddress.postalCode,
+      country: input.order.shippingAddress.country
+    },
+    shippingMethod: 'standard',
+    supplierOrders: fulfillmentSupplierOrders
+  };
+
+  log.info('[OMS] Starting fulfillment workflow via activity', {
+    orderId: input.order.orderId,
     supplierOrderCount: fulfillmentSupplierOrders.length
   });
 
-  await startChild('fulfillmentWorkflow', {
-    workflowId: fulfillmentWorkflowId,
-    args: [{
-      storeId: input.order.storeId,
-      orderId: input.order.orderId,
-      cartId: input.order.cartId,
-      customerId: input.customerEmail,
-      customerEmail: input.customerEmail,
-      confirmationNumber: input.order.confirmationNumber,
-      shippingAddress: {
-        firstName: input.order.shippingAddress.firstName,
-        lastName: input.order.shippingAddress.lastName,
-        email: input.customerEmail,
-        phone: input.order.shippingAddress.phone,
-        address1: input.order.shippingAddress.address1,
-        address2: input.order.shippingAddress.address2,
-        city: input.order.shippingAddress.city,
-        region: input.order.shippingAddress.state,
-        zip: input.order.shippingAddress.postalCode,
-        country: input.order.shippingAddress.country
-      },
-      shippingMethod: 'standard',
-      supplierOrders: fulfillmentSupplierOrders
-    }],
-    taskQueue: FULFILLMENT_TASK_QUEUE_NAME,
-    workflowExecutionTimeout: '90 days'
-  });
+  await startFulfillmentWorkflow(fulfillmentInput);
 
   // Mark all supplier orders as processing
   for (const supplierOrder of state.supplierOrders) {
@@ -626,7 +588,7 @@ async function triggerFulfillment(
       timestamp: new Date().toISOString(),
       note: 'Submitted to fulfillment workflow'
     });
-    await indexSupplierOrder(buildSupplierOrderDocument(input.order.storeId, supplierOrder));
+    await indexSupplierOrder(buildSupplierOrderDocument(supplierOrder));
   }
 
   state.status = 'processing';
@@ -637,14 +599,14 @@ async function triggerFulfillment(
     updatedBy
   };
   state.statusHistory.push(processingEntry);
-  await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, processingEntry);
+  await insertStatusHistoryEntry(input.order.orderId, processingEntry);
 
-  await updateOrderInDatabase(input.order.storeId, input.order.orderId, {
+  await updateOrderInDatabase(input.order.orderId, {
     status: state.status,
     statusHistory: state.statusHistory,
     assignments: state.assignments,
     supplierOrders: state.supplierOrders
   });
 
-  await indexOrder(buildOrderDocument(input.order.storeId, input.order, state, input.customerEmail));
+  await indexOrder(buildOrderDocument(input.order, state, input.customerEmail));
 }

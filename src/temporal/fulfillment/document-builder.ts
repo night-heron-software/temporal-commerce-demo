@@ -1,9 +1,8 @@
 
 import { Elasticsearch } from '../contracts';
 
-export function buildFulfillmentDocument(storeId: string, state: any): Elasticsearch.FulfillmentDocument {
+export function buildFulfillmentDocument(state: any): Elasticsearch.FulfillmentDocument {
   return {
-    storeId,
     orderId: state.orderId,
     customerId: state.customerId,
     status: state.status,

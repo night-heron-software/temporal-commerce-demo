@@ -38,13 +38,13 @@ export const IDENTITY_WORKFLOW_TYPE = 'identityWorkflow';
 /**
  * Build a deterministic workflow ID from domain components.
  *
- * Convention: `{storeId}-{domain}-{entityId}`
+ * Convention: `{domain}-{entityId}`
  *
  * Examples:
- *   buildWorkflowId('store-abc', 'cart', 'cart-123')     → 'store-abc-cart-cart-123'
- *   buildWorkflowId('store-abc', 'fulfillment', 'ord-1') → 'store-abc-fulfillment-ord-1'
- *   buildWorkflowId('store-abc', 'inventory', 'SKU-001') → 'store-abc-inventory-SKU-001'
+ *   buildWorkflowId('cart', 'cart-123')     → 'cart-cart-123'
+ *   buildWorkflowId('fulfillment', 'ord-1') → 'fulfillment-ord-1'
+ *   buildWorkflowId('inventory', 'SKU-001') → 'inventory-SKU-001'
  */
-export function buildWorkflowId(storeId: string, domain: string, entityId: string): string {
-  return `${storeId}-${domain}-${entityId}`;
+export function buildWorkflowId(domain: string, entityId: string): string {
+  return `${domain}-${entityId}`;
 }

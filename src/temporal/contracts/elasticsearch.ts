@@ -11,7 +11,6 @@ export interface PriceDocument {
 
 // Products Index (with nested variants)
 export interface ProductDocument {
-  storeId: string;
   id: string;
   name: string;
   sku?: string;
@@ -54,7 +53,6 @@ export interface OptionDocument {
 
 // Collections Index
 export interface CollectionDocument {
-  storeId: string;
   id: string;
   name: string;
   thumbnailUrl?: string;
@@ -63,7 +61,6 @@ export interface CollectionDocument {
 
 // Orders Index
 export interface OrderDocument {
-  storeId: string;
   orderId: string;
   cartId: string;
   confirmationNumber: string;
@@ -228,7 +225,6 @@ export interface InventoryReservationDocument {
 
 // Supplier Orders Index
 export interface SupplierOrderDocument {
-  storeId: string;
   supplierOrderId: string;
   orderId: string;
   supplierId: string;
@@ -265,7 +261,6 @@ export interface CartItemDocument {
 }
 
 export interface CartDocument {
-  storeId: string;
   cartId: string;
   items: CartItemDocument[];
   itemCount: number;
@@ -291,7 +286,6 @@ export interface ReservationDocument {
 
 // Fulfillments Index (fulfillment workflow state)
 export interface FulfillmentDocument {
-  storeId: string;
   orderId: string;
   customerId: string;
   status: string;

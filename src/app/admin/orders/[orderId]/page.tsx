@@ -152,7 +152,7 @@ export default function AdminOrderDetailPage() {
       {/* Temporal UI Link */}
       <div className="p-3 bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 rounded-lg mb-6 text-sm">
         <a
-          href={`http://localhost:8233/namespaces/default/workflows/${encodeURIComponent(`${order.storeId}-order-${order.orderId}`)}`}
+          href={`http://localhost:8233/namespaces/default/workflows/${encodeURIComponent(`order-${order.orderId}`)}`}
           target="_blank"
           rel="noopener noreferrer"
           className="text-cyan-700 dark:text-cyan-400 hover:underline"

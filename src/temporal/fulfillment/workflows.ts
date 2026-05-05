@@ -100,7 +100,7 @@ async function signalParentOMSWorkflow(
   };
 
   try {
-    const omsWorkflowId = `${state.storeId}-order-${state.orderId}`;
+    const omsWorkflowId = `order-${state.orderId}`;
     const omsHandle = wf.getExternalWorkflowHandle(omsWorkflowId);
     await omsHandle.signal<[OMS.FulfillmentStatusUpdate]>(
       "fulfillmentStatus",
@@ -131,7 +131,6 @@ export async function fulfillmentWorkflow(
 ): Promise<FulfillmentResult> {
   // Initialize multi-supplier state
   const state: FulfillmentWorkflowState = {
-    storeId: request.storeId,
     orderId: request.orderId,
     cartId: request.cartId,
     customerId: request.customerId,
@@ -162,7 +161,7 @@ export async function fulfillmentWorkflow(
 
   // Helper: sync projections to ES
   const syncProjections = async () => {
-    await indexFulfillment(buildFulfillmentDocument(state.storeId, state));
+    await indexFulfillment(buildFulfillmentDocument(state));
   };
 
   // Query handler
@@ -658,7 +657,6 @@ async function waitForSupplierCompletion(
     if (!conditionMet && !isTerminal() && so.supplierExternalId) {
       try {
         const update = await pollSupplierStatus({
-          storeId: state.storeId,
           supplierOrderId: so.supplierExternalId,
           supplierType: so.supplierType,
         });

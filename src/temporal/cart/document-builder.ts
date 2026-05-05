@@ -13,9 +13,8 @@ type CartDocument = Elasticsearch.CartDocument;
  * Builds an ES CartDocument from workflow state.
  * Pure function - no side effects, safe to use in workflow or API context.
  */
-export function buildCartDocument(storeId: string, cart: CartDetails, createdAt?: string): CartDocument {
+export function buildCartDocument(cart: CartDetails, createdAt?: string): CartDocument {
   return {
-    storeId,
     cartId: cart.cartId,
     items: cart.items.map((item) => ({
       lineItemId: item.lineItemId,

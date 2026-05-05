@@ -67,7 +67,7 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
       supplier_order_id: a.supplierOrderId || ''
     })) || [];
 
-  // Execute all three inserts as an atomic logged batch (no storeId)
+  // Execute all three inserts as an atomic logged batch
   const queries = [
     {
       query: `INSERT INTO orders (
@@ -128,7 +128,6 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
  * Update order in database
  */
 export async function updateOrderInDatabase(
-  storeId: string,
   orderId: string,
   updates: Partial<OrderState>
 ): Promise<void> {
@@ -277,7 +276,6 @@ export async function indexSupplierOrder(doc: Elasticsearch.SupplierOrderDocumen
  * Insert a status history entry into order_status_history table
  */
 export async function insertStatusHistoryEntry(
-  _storeId: string,
   orderId: string,
   entry: { status: string; timestamp: string; note?: string; updatedBy: string }
 ): Promise<void> {
@@ -345,6 +343,34 @@ export async function getOrderById(orderId: string): Promise<Order | null> {
   } as unknown as Order;
 }
 
+/**
+ * Start a standalone fulfillment workflow via Temporal client.
+ * Uses the same pattern as checkout's startOrderManagementWorkflow.
+ */
+export async function startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string> {
+  const orderId = input.orderId as string;
+  const workflowId = `fulfillment-${orderId}`;
+  log.info(`[Activity] Starting fulfillment workflow: ${workflowId}`);
+
+  const { Connection, Client } = await import('@temporalio/client');
+
+  const connection = await Connection.connect({
+    address: process.env.TEMPORAL_ADDRESS || 'localhost:7233'
+  });
+
+  const client = new Client({ connection });
+
+  await client.workflow.start('fulfillmentWorkflow', {
+    taskQueue: 'fulfillment-queue',
+    workflowId,
+    args: [input],
+    workflowExecutionTimeout: '90 days'
+  });
+
+  log.info(`[Activity] Started fulfillment workflow: ${workflowId}`);
+  return workflowId;
+}
+
 export function createOmsActivities() {
   return {
     saveOrderToDatabase,
@@ -357,5 +383,6 @@ export function createOmsActivities() {
     getOrderById,
     indexOrder,
     indexSupplierOrder,
+    startFulfillmentWorkflow,
   };
 }

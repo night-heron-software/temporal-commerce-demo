@@ -15,13 +15,11 @@ type SupplierOrderDocument = Elasticsearch.SupplierOrderDocument;
  * Pure function - no side effects, safe to use in workflow or API context.
  */
 export function buildOrderDocument(
-  storeId: string,
   order: Order,
   state: OrderState,
   customerEmail: string
 ): OrderDocument {
   return {
-    storeId,
     orderId: order.orderId,
     cartId: order.cartId,
     confirmationNumber: order.confirmationNumber,
@@ -104,9 +102,8 @@ export function buildOrderDocument(
  * Builds an ES SupplierOrderDocument from a SupplierOrder.
  * Pure function - no side effects.
  */
-export function buildSupplierOrderDocument(storeId: string, supplierOrder: SupplierOrder): SupplierOrderDocument {
+export function buildSupplierOrderDocument(supplierOrder: SupplierOrder): SupplierOrderDocument {
   return {
-    storeId,
     supplierOrderId: supplierOrder.supplierOrderId,
     orderId: supplierOrder.orderId,
     supplierId: supplierOrder.supplierId,

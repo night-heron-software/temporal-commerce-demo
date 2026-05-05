@@ -26,7 +26,6 @@ export interface PaymentMethod {
 }
 
 export interface Order {
-  storeId: string;
   orderId: string;
   cartId: string;
   customerEmail: string;
@@ -71,7 +70,6 @@ export interface CheckoutState {
 }
 
 export interface CartDetails {
-  storeId: string;
   cartId: string;
   userId?: string; // Linked user ID if authenticated
   items: CartItem[];
@@ -124,7 +122,6 @@ export type BeginCheckoutSignal = object;
 
 // Checkout workflow input/output types (duplicated from checkout/types to avoid cross-module imports)
 export interface CheckoutWorkflowInput {
-  storeId: string;
   cartId: string;
   parentCartWorkflowId: string;
   items: CartItem[];

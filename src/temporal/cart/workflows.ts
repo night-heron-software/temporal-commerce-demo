@@ -62,7 +62,6 @@ const CONTINUE_AS_NEW_THRESHOLD = 100;
 
 // Input type for Continue-as-New (preserves state across executions)
 interface CartWorkflowInput {
-  storeId: string;
   cartId: string;
   initialCart?: CartDetails;
   createdAt?: string;
@@ -76,23 +75,19 @@ interface CartWorkflowInput {
 
 export async function cartWorkflow(input: CartWorkflowInput | string): Promise<CartDetails> {
   // Handle both legacy string input and new object input
-  // Extract storeId safely. Legacy executions might not provide it at start,
-  // but they will need it for some operations.
   const {
-    storeId,
     cartId,
     initialCart,
     createdAt: inputCreatedAt,
     updateCount: inputUpdateCount
   } = typeof input === 'string'
-    ? { storeId: 'legacy-store', cartId: input, initialCart: undefined, createdAt: undefined, updateCount: 0 }
+    ? { cartId: input, initialCart: undefined, createdAt: undefined, updateCount: 0 }
     : input;
 
   // Initialize or restore cart state
   const now = new Date().toISOString();
   
   const cart: CartDetails = initialCart || {
-    storeId,
     cartId,
     items: [],
     subtotalPrice: 0,
@@ -124,7 +119,6 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
       // Wait for pending handlers before continuing as new
       await condition(allHandlersFinished);
       await continueAsNew<typeof cartWorkflow>({
-        storeId,
         cartId,
         initialCart: cart,
         createdAt: cart.createdAt,
@@ -279,7 +273,7 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
     if (oldQuantity > 0) {
       await releaseCartItem(cartId, input.variantId);
     }
-    await reserveCartItem(storeId, cartId, input.variantId, newQuantity);
+    await reserveCartItem(cartId, input.variantId, newQuantity);
 
     await finalizeUpdate();
     log.info('addItemToCartUpdate EXIT', {
@@ -311,7 +305,7 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
         // Quantity change — release old, reserve new
         await releaseCartItem(cartId, variantId);
         item.quantity = input.quantity;
-        await reserveCartItem(storeId, cartId, variantId, input.quantity);
+        await reserveCartItem(cartId, variantId, input.quantity);
       }
       recalculateTotals(cart);
     }
@@ -408,7 +402,6 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
       parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
       args: [
         {
-          storeId: cart.storeId,
           cartId: cart.cartId,
           parentCartWorkflowId,
           items: cart.items,
@@ -510,7 +503,7 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
       if (cart.items.length === 0 || cart.status === 'abandoned') {
         await deleteCart(cart.cartId);
       } else {
-        await indexCart(buildCartDocument(storeId, cart, cart.createdAt));
+        await indexCart(buildCartDocument(cart, cart.createdAt));
       }
     }
 
@@ -560,7 +553,7 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
   if (cart.status === 'completed' || cart.status === 'abandoned') {
     await deleteCart(cart.cartId);
   } else if (projectionDirty) {
-    await indexCart(buildCartDocument(storeId, cart, cart.createdAt));
+    await indexCart(buildCartDocument(cart, cart.createdAt));
   }
 
   log.info('cartWorkflow EXITING', { cartId, orderComplete, shouldExit, status: cart.status });

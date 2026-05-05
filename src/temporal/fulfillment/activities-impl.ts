@@ -26,7 +26,6 @@ export async function submitSupplierOrder(
 
 export async function buildFulfillmentPayload(
   input: {
-    storeId: string;
     orderId: string;
     items: any[];
     supplierType: string;
@@ -38,7 +37,6 @@ export async function buildFulfillmentPayload(
 }
 
 export async function pollSupplierStatus(input: {
-  storeId: string;
   supplierOrderId: string;
   supplierType: string;
 }): Promise<Suppliers.SupplierStatusUpdate> {

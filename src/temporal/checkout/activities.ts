@@ -14,7 +14,6 @@ export interface ReservationInfo {
 }
 
 export interface CreateOrderInput {
-  storeId: string;
   cartId: string;
   items: CartItem[];
   shippingAddress: Cart.ShippingAddress;
@@ -40,7 +39,6 @@ export interface CheckoutActivities {
   sendConfirmationEmail(email: string, confirmationNumber: string, order: Order): Promise<void>;
   startOrderManagementWorkflow(order: Order, customerEmail: string): Promise<string>;
   renewReservationsForCheckout(
-    storeId: string,
     cartId: string,
     items: CartItem[]
   ): Promise<{
@@ -49,7 +47,7 @@ export interface CheckoutActivities {
     unavailableItems?: Array<{ variantId: string; error: string }>;
     error?: string;
   }>;
-  confirmReservations(storeId: string, reservations: ReservationInfo[]): Promise<void>;
+  confirmReservations(reservations: ReservationInfo[]): Promise<void>;
   releaseReservations(reservations: ReservationInfo[]): Promise<void>;
   cancelReservations(reservations: ReservationInfo[]): Promise<void>;
 }

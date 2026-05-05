@@ -96,7 +96,6 @@ export async function POST(request: NextRequest) {
           const productId = row.id.toString();
           const doc = {
             id: productId,
-            storeId: 'demo',
             name: row.name,
             description: row.description,
             type: row.type,
@@ -127,7 +126,6 @@ export async function POST(request: NextRequest) {
         try {
           const doc = {
             id: row.id.toString(),
-            storeId: 'demo',
             name: row.name,
             productCount: 0
           };

@@ -11,13 +11,11 @@ export type ShippingAddress = Cart.ShippingAddress;
 import { v4 as uuidv4 } from 'uuid';
 
 import { executeCql, logger as log, sendEmail } from '../../lib';
-import { DEMO_STORE_ID } from '../../lib/constants';
 import { cassandraTypes as types } from '../../lib';
 import { ApplicationFailure } from '@temporalio/activity';
 
 
 export interface CreateOrderInput {
-  storeId: string;
   cartId: string;
   items: CartItem[];
   shippingAddress: ShippingAddress;
@@ -110,7 +108,6 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const confirmationNumber = generateConfirmationNumber();
 
   const order: Order = {
-    storeId: input.storeId || DEMO_STORE_ID,
     orderId,
     cartId: input.cartId,
     customerEmail: input.shippingAddress.email,
@@ -193,7 +190,6 @@ export async function startOrderManagementWorkflow(
  * Demo: always succeeds — simulated inventory has unlimited stock.
  */
 export async function renewReservationsForCheckout(
-  storeId: string,
   cartId: string,
   items: CartItem[]
 ): Promise<{
@@ -217,7 +213,7 @@ export async function renewReservationsForCheckout(
  * Confirm reservations after successful payment.
  * Demo: no-op — simulated inventory.
  */
-export async function confirmReservations(storeId: string, reservations: ReservationInfo[]): Promise<void> {
+export async function confirmReservations(reservations: ReservationInfo[]): Promise<void> {
   log.info(`[Activity] Confirming ${reservations.length} reservations (demo: no-op)`);
 }
 

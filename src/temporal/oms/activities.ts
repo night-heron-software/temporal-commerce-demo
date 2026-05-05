@@ -9,7 +9,7 @@ import { OrderLineItem, SupplierResolutionContext, SupplierAssignment, Elasticse
 
 export interface OmsActivities {
   saveOrderToDatabase(order: Order): Promise<void>;
-  updateOrderInDatabase(storeId: string, orderId: string, updates: Partial<OrderState>): Promise<void>;
+  updateOrderInDatabase(orderId: string, updates: Partial<OrderState>): Promise<void>;
   sendOrderStatusEmail(
     email: string,
     orderId: string,
@@ -21,12 +21,12 @@ export interface OmsActivities {
   getOrderById(orderId: string): Promise<Order | null>;
   resolveSupplierAssignments(items: OrderLineItem[], context: SupplierResolutionContext): Promise<SupplierAssignment[]>;
   insertStatusHistoryEntry(
-    storeId: string,
     orderId: string,
     entry: { status: string; timestamp: string; note?: string; updatedBy: string }
   ): Promise<void>;
   indexOrder(doc: Elasticsearch.OrderDocument): Promise<void>;
   indexSupplierOrder(doc: Elasticsearch.SupplierOrderDocument): Promise<void>;
+  startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string>;
 }
 
 // Database write activities: order persistence and status tracking
@@ -74,7 +74,8 @@ export const {
 export const {
   getOrdersByEmail,
   getOrderById,
-  resolveSupplierAssignments
+  resolveSupplierAssignments,
+  startFulfillmentWorkflow
 } = proxyActivities<OmsActivities>({
   startToCloseTimeout: '1m',
   retry: {

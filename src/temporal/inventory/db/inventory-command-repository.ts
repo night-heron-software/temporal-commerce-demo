@@ -49,7 +49,6 @@ export interface SetSupplierStockResult {
 }
 
 export interface ReserveArgs {
-  storeId: string;
   reservationId: string;
   blankSku: string;
   cartId: string;
@@ -73,7 +72,6 @@ export interface BatchReserveResult {
 
 export interface ReservationRecord {
   reservationId: string;
-  storeId: string;
   blankSku: string;
   cartId: string;
   variantId: string;
@@ -131,7 +129,6 @@ interface CartReservationRow {
 function rowToReservation(row: ReservationRow): ReservationRecord {
   return {
     reservationId: row.reservation_id,
-    storeId: 'demo',
     blankSku: row.blank_sku,
     cartId: row.cart_id,
     variantId: row.variant_id,
@@ -655,7 +652,6 @@ export const InventoryCommandRepository = {
    * Rolls back on any failure.
    */
   async reserveAll(
-    storeId: string,
     cartId: string,
     items: Array<{ variantId: string; blankSku: string; quantity: number }>,
     referenceId?: string
@@ -664,7 +660,6 @@ export const InventoryCommandRepository = {
     const results = await Promise.all(
       items.map(item =>
         this.reserve({
-          storeId,
           reservationId: `${cartId}-${item.variantId}`,
           cartId,
           blankSku: item.blankSku,
@@ -724,7 +719,6 @@ export const InventoryCommandRepository = {
    * Reconcile reservations after cart change: release removed, reserve new, adjust changed.
    */
   async reconcile(
-    storeId: string,
     cartId: string,
     oldItems: Array<{ variantId: string; blankSku: string; quantity: number }>,
     newItems: Array<{ variantId: string; blankSku: string; quantity: number }>
@@ -751,7 +745,7 @@ export const InventoryCommandRepository = {
     // Reserve added + changed (with new quantities)
     const toReserve = [...added, ...changed];
     if (toReserve.length > 0) {
-      return this.reserveAll(storeId, cartId, toReserve);
+      return this.reserveAll(cartId, toReserve);
     }
 
     return { success: true, reservations: [] };

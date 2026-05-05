@@ -186,11 +186,10 @@ export async function checkoutWorkflow(
       }
 
       // Confirm inventory reservations after successful payment
-      await confirmReservations(input.storeId, reservations);
+      await confirmReservations(reservations);
 
       // Create order
       const order: Order = await createOrder({
-        storeId: input.storeId,
         cartId: input.cartId,
         items: input.items,
         shippingAddress: state.shippingAddress,
@@ -255,7 +254,7 @@ export async function checkoutWorkflow(
   // ==================
   // Renew Inventory Reservations at Checkout Start
   // ==================
-  const reserveResult = await renewReservationsForCheckout(input.storeId, input.cartId, input.items);
+  const reserveResult = await renewReservationsForCheckout(input.cartId, input.items);
 
   if (!reserveResult.success) {
     state.step = 'auth';

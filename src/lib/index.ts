@@ -3,4 +3,4 @@ export { getCassandraClient, executeCql, executeBatch, cassandraTypes } from './
 export { getElasticsearchClient } from './es-client';
 export { createLogger, logger } from './logger';
 export { sendEmail } from './email-service';
-export { DEMO_STORE_ID, DEMO_STORE_NAME } from './constants';
+export { DEMO_STORE_NAME } from './constants';

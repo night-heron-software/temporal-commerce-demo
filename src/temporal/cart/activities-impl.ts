@@ -21,7 +21,7 @@ interface VariantRow {
   blank_sku: string;
 }
 
-async function resolveBlankSku(_storeId: string, variantId: string): Promise<string | null> {
+async function resolveBlankSku(variantId: string): Promise<string | null> {
   const variants = await executeCql<VariantRow>(
     `SELECT blank_sku FROM variants WHERE id = ?`,
     [types.Uuid.fromString(variantId)]
@@ -35,11 +35,11 @@ async function resolveBlankSku(_storeId: string, variantId: string): Promise<str
  * Validate that requested quantity is available for an item.
  * Reads from inventory_stock_w via InventoryCommandRepository.
  */
-export async function validateInventory(storeId: string, variantId: string, quantity: number): Promise<boolean> {
+export async function validateInventory(variantId: string, quantity: number): Promise<boolean> {
   console.log(`[Activity] Checking inventory for variant ${variantId} (qty: ${quantity})`);
 
   try {
-    const blankSku = await resolveBlankSku(storeId, variantId);
+    const blankSku = await resolveBlankSku(variantId);
     if (!blankSku) {
       console.error(`[Activity] Variant not found: ${variantId}`);
       return false;
@@ -63,15 +63,14 @@ export async function validateInventory(storeId: string, variantId: string, quan
  * Returns the reservationId on success, null on failure.
  */
 export async function reserveCartItem(
-  storeId: string,
   cartId: string,
   variantId: string,
   quantity: number
 ): Promise<string | null> {
-  console.log(`[Activity] Reserving inventory for cart ${cartId}, variant ${variantId} (qty: ${quantity}) in store ${storeId}`);
+  console.log(`[Activity] Reserving inventory for cart ${cartId}, variant ${variantId} (qty: ${quantity})`);
 
   try {
-    const blankSku = await resolveBlankSku(storeId, variantId);
+    const blankSku = await resolveBlankSku(variantId);
     if (!blankSku) {
       console.error(`[Activity] Variant not found for reservation: ${variantId}`);
       return null;
@@ -79,7 +78,6 @@ export async function reserveCartItem(
 
     const reservationId = `${cartId}-${variantId}`;
     const result = await InventoryCommandRepository.reserve({
-      storeId,
       reservationId,
       blankSku,
       cartId,

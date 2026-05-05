@@ -12,7 +12,6 @@ export const INDEX_MAPPINGS: Record<string, any> = {
   products: {
     properties: {
       id: { type: 'keyword' },
-      storeId: { type: 'keyword' },
       name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       description: { type: 'text' },
       type: { type: 'keyword' },
@@ -63,7 +62,6 @@ export const INDEX_MAPPINGS: Record<string, any> = {
   collections: {
     properties: {
       id: { type: 'keyword' },
-      storeId: { type: 'keyword' },
       name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       thumbnailUrl: { type: 'keyword', index: false },
       productCount: { type: 'integer' }
