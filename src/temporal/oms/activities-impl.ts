@@ -5,7 +5,7 @@
 
 import { log } from '@temporalio/activity';
 import { getCassandraClient, cassandraTypes as types, getElasticsearchClient } from '../../lib';
-import { Order, OrderState, OrderStatus, OrderAssignment, StatusHistoryRow } from './types';
+import { Order, OrderState, OrderStatus, OrderAssignment } from './types';
 import type { Elasticsearch } from '../contracts';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import type { OrderLineItem, SupplierResolutionContext, SupplierAssignment } from '../contracts/product-type';
@@ -22,7 +22,7 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
   const orderIdUuid = types.Uuid.fromString(order.orderId);
 
   // Prepare items as frozen order_item UDT
-  const items = order.items.map((item: any) => ({
+  const items = order.items.map((item) => ({
     line_item_id: item.lineItemId,
     variant_id: item.variantId,
     quantity: item.quantity,
@@ -222,9 +222,9 @@ export async function updateOrderInDatabase(
  */
 export async function sendOrderStatusEmail(
   email: string,
-  orderId: string,
+  _orderId: string,
   status: OrderStatus,
-  details?: { trackingNumber?: string; carrier?: string }
+  _details?: { trackingNumber?: string; carrier?: string }
 ): Promise<void> {
   log.info(`[Activity] 📧 [DEMO] Order status email: ${status} to ${email}`);
 }
@@ -232,7 +232,7 @@ export async function sendOrderStatusEmail(
 /**
  * Send feedback thank you email (console stub for demo)
  */
-export async function sendFeedbackThankYouEmail(email: string, orderId: string): Promise<void> {
+export async function sendFeedbackThankYouEmail(email: string, _orderId: string): Promise<void> {
   log.info(`[Activity] 📧 [DEMO] Feedback thank-you to ${email}`);
 }
 
@@ -242,7 +242,7 @@ export async function sendFeedbackThankYouEmail(email: string, orderId: string):
  */
 export async function resolveSupplierAssignments(
   items: OrderLineItem[],
-  context: SupplierResolutionContext,
+  _context: SupplierResolutionContext,
 ): Promise<SupplierAssignment[]> {
   log.info(`[Activity] Resolving supplier assignments for ${items.length} items`);
   return items.map(() => ({
