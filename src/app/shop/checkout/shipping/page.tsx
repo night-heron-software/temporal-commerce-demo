@@ -6,7 +6,6 @@ import { useState, useEffect } from 'react';
 import { setShippingAddress } from '@/app/shop/cart-actions';
 import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
-import { CheckoutProgress } from '@/components/CheckoutProgress';
 import type { Cart } from '@/temporal/contracts';
 
 export default function ShippingPage() {
@@ -82,8 +81,6 @@ export default function ShippingPage() {
         <Link href="/shop" className="text-indigo-600 dark:text-indigo-400 hover:underline mb-4 inline-block">
           ← Back to Shop
         </Link>
-
-        <CheckoutProgress />
 
         <h1 className="text-3xl font-bold mb-6 mt-6">Shipping Address</h1>
 

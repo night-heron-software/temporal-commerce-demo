@@ -158,7 +158,7 @@ export async function checkoutWorkflow(
     return state;
   });
 
-  // Submit order - process payment, create order, send confirmation
+  // Submit order - process payment, create order, start OMS workflow
   setHandler(submitOrderUpdate, async () => {
     await condition(() => state.step !== 'validating');
     if (state.step !== 'review') {
@@ -172,8 +172,6 @@ export async function checkoutWorkflow(
 
     try {
       // Process payment
-      // If Stripe is enabled, the 'token' in paymentMethod is the PaymentIntent ID
-      // Pass cartId as idempotency key for mock payments
       const paymentSuccess = await processPayment(
         state.paymentMethod.token,
         totalPrice,
@@ -205,12 +203,10 @@ export async function checkoutWorkflow(
         currency: input.currency
       });
 
-      // Send confirmation email
-      await sendConfirmationEmail(state.shippingAddress.email, order.confirmationNumber, order);
-
-      // Start the Order Management workflow for this order
+      // Start the Order Management workflow — once this succeeds, checkout is done
       await startOrderManagementWorkflow(order, state.shippingAddress.email);
 
+      // Mark complete immediately so the checkout workflow terminates
       state.order = order;
       state.step = 'complete';
       orderComplete = true;
@@ -220,6 +216,13 @@ export async function checkoutWorkflow(
           dataFlow: true, stage: 'T5: CartItem[] → Order', label: 'output.Order',
           data: JSON.stringify(order, null, 2)
         });
+      }
+
+      // Send confirmation email — non-critical, don't let failures block checkout completion
+      try {
+        await sendConfirmationEmail(state.shippingAddress.email, order.confirmationNumber, order);
+      } catch (emailErr) {
+        log.warn('Failed to send confirmation email, order still completed', { error: String(emailErr) });
       }
 
       return state;

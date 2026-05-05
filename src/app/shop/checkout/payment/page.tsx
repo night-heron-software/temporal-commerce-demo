@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { setPaymentMethod, getCheckoutState } from '@/app/shop/cart-actions';
-import { CheckoutProgress } from '@/components/CheckoutProgress';
 
 /**
  * Mock Payment Page — Demo version
@@ -50,8 +49,6 @@ export default function PaymentPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
-      <CheckoutProgress />
-
       <div className="mt-8 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
         <h2 className="text-xl font-semibold mb-6">Payment</h2>
 

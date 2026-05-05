@@ -8,6 +8,8 @@ export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [manualFulfillment, setManualFulfillment] = useState(false);
+  const [isTogglingFlag, setIsTogglingFlag] = useState(false);
 
   const fetchOrders = useCallback(async () => {
     setIsLoading(true);
@@ -21,9 +23,38 @@ export default function AdminOrdersPage() {
     setIsLoading(false);
   }, []);
 
+  // Load feature flags on mount
+  useEffect(() => {
+    fetch('/api/admin/feature-flags')
+      .then(r => r.json())
+      .then(flags => {
+        setManualFulfillment(flags.MANUAL_FULFILLMENT ?? false);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  const toggleFulfillmentMode = async () => {
+    setIsTogglingFlag(true);
+    const newValue = !manualFulfillment;
+    try {
+      const res = await fetch('/api/admin/feature-flags', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'MANUAL_FULFILLMENT', value: newValue }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setManualFulfillment(data.flags.MANUAL_FULFILLMENT);
+      }
+    } catch {
+      // revert on error
+    }
+    setIsTogglingFlag(false);
+  };
 
   const formatPrice = (amount: number, currency: string) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount / 100);
@@ -70,6 +101,46 @@ export default function AdminOrdersPage() {
         >
           View in Temporal UI →
         </a>
+      </div>
+
+      {/* Fulfillment Mode Toggle */}
+      <div className="mb-6 p-4 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            Fulfillment Mode
+          </h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            {manualFulfillment
+              ? 'Manual — orders wait for admin to advance each step'
+              : 'Automatic — orders progress through fulfillment automatically (simulated delays)'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={`text-xs font-medium ${!manualFulfillment ? 'text-green-600 dark:text-green-400' : 'text-zinc-400'}`}>
+            Auto
+          </span>
+          <button
+            onClick={toggleFulfillmentMode}
+            disabled={isTogglingFlag}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50 ${
+              manualFulfillment
+                ? 'bg-purple-600'
+                : 'bg-green-500'
+            }`}
+            role="switch"
+            aria-checked={manualFulfillment}
+            aria-label="Toggle fulfillment mode"
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                manualFulfillment ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+          <span className={`text-xs font-medium ${manualFulfillment ? 'text-purple-600 dark:text-purple-400' : 'text-zinc-400'}`}>
+            Manual
+          </span>
+        </div>
       </div>
 
       {error && (

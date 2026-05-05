@@ -3,6 +3,28 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Night Heron design tokens */
+  --heron-slate: #2a3f52;
+  --heron-slate-light: #3d5a75;
+  --heron-slate-dark: #1c2d3d;
+  --heron-cream: #e8e4dc;
+  --heron-cream-light: #f5f3ef;
+  --heron-cream-dark: #d4cfc4;
+  --heron-gray: #9aa4ab;
+  --heron-gray-dark: #6b757c;
+  --heron-ruby: #8b2020;
+  --heron-ruby-light: #b83232;
+  --heron-forest: #1a2e1f;
+  --heron-forest-dark: #0d1a10;
+  --heron-gold: #c9a84c;
+  --heron-gold-dark: #a88a3a;
+  --success: #2d6a4f;
+  --success-foreground: #ffffff;
+  --warning: #c77f32;
+  --warning-foreground: #ffffff;
+  --error: var(--heron-ruby);
+  --error-foreground: #ffffff;
 }
 
 @theme inline {

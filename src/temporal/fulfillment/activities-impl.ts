@@ -2,9 +2,10 @@ import { heartbeat } from "@temporalio/activity";
 import { logger, getElasticsearchClient } from '../../lib';
 import type { Suppliers, Elasticsearch } from '../contracts';
 import { ES_INDICES } from '../contracts/elasticsearch';
+import { getFlag } from '../../lib/feature-flags';
 
 export async function getFeatureFlag(name: string): Promise<boolean> {
-  return false; // Stubbed locally, overridden by worker in platform
+  return getFlag(name);
 }
 
 export async function submitSupplierOrder(

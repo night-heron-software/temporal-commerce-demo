@@ -8,8 +8,9 @@ import {
   startChild,
   uuid4
 } from '@temporalio/workflow';
-const getFeatureFlag = async (flag: string) => false;
-import { OrderLineItem } from '../contracts';
+const getFeatureFlag = async (_flag: string) => false;
+import { OrderLineItem, Cart } from '../contracts';
+type CartItem = Cart.CartItem;
 import {
   saveOrderToDatabase,
   updateOrderInDatabase,
@@ -29,8 +30,20 @@ import {
 import { buildOrderDocument, buildSupplierOrderDocument } from './document-builder';
 
 import { defineSignal } from '@temporalio/workflow';
-type FulfillmentSupplierOrderInput = any;
-type FulfillmentItem = any;
+interface FulfillmentSupplierOrderInput {
+  supplierOrderId: string;
+  supplierId: string;
+  supplierType: string;
+  items: FulfillmentItem[];
+}
+interface FulfillmentItem {
+  sku: string;
+  productId: string;
+  variantId: string;
+  quantity: number;
+  unitPrice: number;
+  title: string;
+}
 const fulfillmentCancelSignal = defineSignal('cancel');
 const FULFILLMENT_TASK_QUEUE_NAME = 'fulfillment-queue';
 
@@ -135,16 +148,20 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     // ============================================================================
     // AUTO-ASSIGNMENT: Resolve supplier assignments via plugins
     // ============================================================================
-    const lineItems: OrderLineItem[] = input.order.items.map((item: any) => ({
-      lineItemId: item.lineItemId,
-      variantId: item.variantId,
-      productId: item.productId || 'unknown',
-      quantity: item.quantity,
-      productTitle: item.title || 'Unknown Product',
-      variantTitle: item.variantTitle || 'Unknown Variant',
-      unitPrice: item.price,
-      currency: input.order.currency
-    }));
+    const lineItems: OrderLineItem[] = input.order.items.map((item) => {
+      // CartItem may carry extra fields at runtime (productId, title) from checkout
+      const ext = item as CartItem & { productId?: string; title?: string; variantTitle?: string };
+      return {
+        lineItemId: item.lineItemId,
+        variantId: item.variantId,
+        productId: ext.productId || 'unknown',
+        quantity: item.quantity,
+        productTitle: ext.title || 'Unknown Product',
+        variantTitle: ext.variantTitle || 'Unknown Variant',
+        unitPrice: item.price,
+        currency: input.order.currency
+      };
+    });
     
     log.info('[OMS] Resolving supplier assignments', { itemCount: lineItems.length });
     const assignments = await resolveSupplierAssignments(lineItems, { storeId: input.order.storeId, preferredSuppliers: [] });
@@ -298,6 +315,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         };
         state.statusHistory.push(deliveredEntry);
         await insertStatusHistoryEntry(input.order.storeId, input.order.orderId, deliveredEntry);
+        isComplete = true;
       }
     }
 
@@ -340,6 +358,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
     if (signal.status === 'delivered') {
       state.deliveredAt = new Date().toISOString();
+      isComplete = true;
     }
 
     if (signal.status === 'complete') {
@@ -537,7 +556,7 @@ async function triggerFulfillment(
 
     // Build fulfillment items from order items
     const fulfillmentItems: FulfillmentItem[] = assignments.map((a) => {
-      const orderItem = input.order.items.find((i: any) => i.variantId === a.variantId);
+      const orderItem = input.order.items.find((i) => i.variantId === a.variantId);
       return {
         sku: a.variantId,
         productId: a.variantId,
