@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Client } from '@elastic/elasticsearch';
-
-const ES_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
-const client = new Client({ node: ES_URL });
+import { getElasticsearchClient } from '@/lib/es-client';
 
 interface SearchParams {
   q?: string;
@@ -121,6 +118,8 @@ export async function GET(
     }
 
     const from = ((params.page || 1) - 1) * (params.pageSize || 24);
+
+    const client = getElasticsearchClient();
 
     const response = await client.search({
       index: 'products',

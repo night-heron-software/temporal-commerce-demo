@@ -352,13 +352,8 @@ export async function startFulfillmentWorkflow(input: Record<string, unknown>): 
   const workflowId = `fulfillment-${orderId}`;
   log.info(`[Activity] Starting fulfillment workflow: ${workflowId}`);
 
-  const { Connection, Client } = await import('@temporalio/client');
-
-  const connection = await Connection.connect({
-    address: process.env.TEMPORAL_ADDRESS || 'localhost:7233'
-  });
-
-  const client = new Client({ connection });
+  const { getTemporalClient } = await import('../../lib/temporal-client');
+  const client = await getTemporalClient();
 
   await client.workflow.start('fulfillmentWorkflow', {
     taskQueue: 'fulfillment-queue',

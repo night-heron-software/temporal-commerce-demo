@@ -4,11 +4,9 @@
  * Body: { index: 'products' | 'collections' }
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { Client } from '@elastic/elasticsearch';
 import { executeCql } from '@/lib';
+import { getElasticsearchClient } from '@/lib/es-client';
 import { INDEX_MAPPINGS } from '@/lib/es-index-mappings';
-
-const ES_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 
 /** Cassandra UUID columns have a toString() method */
 type CqlUuid = { toString(): string };
@@ -21,7 +19,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Unknown index: ${index}` }, { status: 400 });
     }
 
-    const esClient = new Client({ node: ES_URL });
+    const esClient = getElasticsearchClient();
 
     // Delete and recreate index
     try {

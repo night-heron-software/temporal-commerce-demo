@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { Client } from '@elastic/elasticsearch';
+import { getElasticsearchClient } from '@/lib/es-client';
 
-const ES_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
-const client = new Client({ node: ES_URL });
 
 interface RouteParams {
   params: Promise<{ productId: string }>;
@@ -16,6 +14,8 @@ interface RouteParams {
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { productId } = await params;
+
+    const client = getElasticsearchClient();
 
     // Search ES for this product
     const response = await client.search({

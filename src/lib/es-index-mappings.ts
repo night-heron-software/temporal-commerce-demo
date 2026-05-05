@@ -3,10 +3,6 @@
  * Subset of nightheron-infrastructure/es-index-mappings — only products and collections.
  */
 
-import { Client } from '@elastic/elasticsearch';
-
-const ES_URL = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const INDEX_MAPPINGS: Record<string, any> = {
   products: {
@@ -70,7 +66,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
 };
 
 export async function ensureIndicesExist(): Promise<void> {
-  const client = new Client({ node: ES_URL });
+  const { getElasticsearchClient } = await import('./es-client');
+  const client = getElasticsearchClient();
 
   for (const [indexName, mapping] of Object.entries(INDEX_MAPPINGS)) {
     const exists = await client.indices.exists({ index: indexName });

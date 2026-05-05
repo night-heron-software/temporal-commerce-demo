@@ -164,13 +164,8 @@ export async function startOrderManagementWorkflow(
 ): Promise<string> {
   log.info(`[Activity] Starting OMS workflow for order: ${order.orderId}`);
 
-  const { Connection, Client } = await import('@temporalio/client');
-
-  const connection = await Connection.connect({
-    address: process.env.TEMPORAL_ADDRESS || 'localhost:7233'
-  });
-
-  const client = new Client({ connection });
+  const { getTemporalClient } = await import('../../lib/temporal-client');
+  const client = await getTemporalClient();
 
   const workflowId = `order-${order.orderId}`;
 
