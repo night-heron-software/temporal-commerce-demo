@@ -6,27 +6,23 @@ Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasti
 
 ## Architecture
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│  Next.js Storefront (localhost:3000)                    │
-│  ┌──────────┐  ┌──────────┐  ┌────────────────────┐    │
-│  │  /shop   │  │ /checkout│  │ Server Actions      │    │
-│  │ Catalog  │  │ Flow     │  │ (cart-actions.ts)   │    │
-│  └──────────┘  └──────────┘  └─────────┬──────────┘    │
-└────────────────────────────────────────│────────────────┘
-                                         │ Temporal Client
-┌────────────────────────────────────────│────────────────┐
-│  Temporal Server (localhost:7233)       ▼               │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐  │
-│  │   Cart   │  │ Checkout │  │  Order + Fulfillment │  │
-│  │ Workflow │  │ Workflow │  │  Workflows           │  │
-│  └──────────┘  └──────────┘  └──────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-         │                              │
-    ┌────┴────┐                   ┌─────┴─────┐
-    │Cassandra│                   │Elasticsearch│
-    │  :9042  │                   │   :9200     │
-    └─────────┘                   └───────────┘
+```mermaid
+graph TB
+    subgraph nextjs["Next.js Storefront (localhost:3000)"]
+        shop["/shop<br/>Catalog"]
+        checkout["/checkout<br/>Flow"]
+        actions["Server Actions<br/>(cart-actions.ts)"]
+    end
+
+    subgraph temporal["Temporal Server (localhost:7233)"]
+        cartWF["Cart<br/>Workflow"]
+        checkoutWF["Checkout<br/>Workflow"]
+        orderWF["Order + Fulfillment<br/>Workflows"]
+    end
+
+    actions -->|"Temporal Client"| temporal
+    temporal -->|"Activities"| cassandra[("Cassandra<br/>:9042")]
+    temporal -->|"Activities"| elasticsearch[("Elasticsearch<br/>:9200")]
 ```
 
 ### Temporal Workflows
