@@ -1,12 +1,14 @@
 /**
  * POST /api/seed-inventory
  *
- * Seed inventory_stock_w with stock for every unique blank_sku in the variants table.
- * Uses the default-supplier with a configurable default stock level.
+ * Seed inventory stock for every unique blank_sku in the variants table.
+ * Uses InventoryCommandRepository.setSupplierStock() so each write flows
+ * through the inventory service workflow (CQRS projections + ES sync).
  */
 
 import { NextResponse } from 'next/server';
-import { executeCql, executeBatch } from '@/lib';
+import { executeCql } from '@/lib';
+import { InventoryCommandRepository } from '@/temporal/inventory/db/inventory-command-repository';
 
 const DEFAULT_STOCK = 100;
 const SUPPLIER_ID = 'default-supplier';
@@ -55,36 +57,30 @@ export async function POST() {
       cost: 0,
     };
 
-    // Batch insert stock rows
-    const BATCH_SIZE = 20;
-    const now = new Date();
-    let inserted = 0;
-
-    for (let i = 0; i < uniqueSkus.length; i += BATCH_SIZE) {
-      const batch = uniqueSkus.slice(i, i + BATCH_SIZE).map(blankSku => ({
-        query: `INSERT INTO inventory_stock_w (
-          blank_sku, supplier_id, supplier_name,
-          total_stock, reserved_stock, ordered_stock, cost,
-          address1, city, state, postal_code, country,
-          updated_at
-        ) VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [
-          blankSku, SUPPLIER_ID, SUPPLIER_NAME,
-          DEFAULT_STOCK, loc.cost,
-          loc.address1, loc.city, loc.state, loc.postal_code, loc.country,
-          now,
-        ],
-      }));
-
-      await executeBatch(batch);
-      inserted += batch.length;
+    // Set stock for each SKU via the command repository.
+    // setSupplierStock writes to inventory_stock_w and signals the
+    // inventory-service workflow for CQRS projection + ES sync.
+    let seeded = 0;
+    for (const blankSku of uniqueSkus) {
+      await InventoryCommandRepository.setSupplierStock(blankSku, {
+        supplierId: SUPPLIER_ID,
+        supplierName: SUPPLIER_NAME,
+        totalStock: DEFAULT_STOCK,
+        cost: loc.cost,
+        address1: loc.address1,
+        city: loc.city,
+        state: loc.state,
+        postalCode: loc.postal_code,
+        country: loc.country,
+      });
+      seeded++;
     }
 
     return NextResponse.json({
       success: true,
-      message: `Seeded inventory stock for ${inserted} unique SKUs`,
+      message: `Seeded inventory stock for ${seeded} unique SKUs via inventory service`,
       results: {
-        uniqueSkus: inserted,
+        uniqueSkus: seeded,
         stockPerSku: DEFAULT_STOCK,
         supplier: SUPPLIER_ID,
       },
