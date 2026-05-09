@@ -53,6 +53,20 @@ export default function AdminDashboardPage() {
           </p>
         </Link>
 
+        {/* Search */}
+        <Link
+          href="/admin/search"
+          className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-emerald-400 dark:hover:border-emerald-500 transition-all hover:shadow-lg"
+        >
+          <div className="text-3xl mb-3">🔍</div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+            Search
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            Query all Elasticsearch indices — products, orders, inventory, customers, and more.
+          </p>
+        </Link>
+
         {/* Temporal UI */}
         <a
           href="http://localhost:8233"

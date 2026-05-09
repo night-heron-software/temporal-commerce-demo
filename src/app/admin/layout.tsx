@@ -29,6 +29,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               >
                 Carts
               </Link>
+              <Link
+                href="/admin/search"
+                className="text-zinc-300 hover:text-white transition-colors"
+              >
+                Search
+              </Link>
             </div>
           </div>
           <div className="flex items-center gap-4 text-sm">
