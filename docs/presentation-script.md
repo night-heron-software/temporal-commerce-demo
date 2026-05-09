@@ -505,7 +505,8 @@ make seed       # Populate catalog
    - Cart workflow completes
 8. **Watch fulfillment** → show simulated timers advancing through `in_production → shipped → delivered`
 9. **Show admin panel** → order status updating in real-time via ES projections
-10. **Show Temporal UI** → full event history, queryable state, signal flow
+10. **Show Elasticsearch Explorer** (`/admin/search`) → search for the order ID to show cross-index projections (orders, supplier_orders, fulfillments, customers, inventory)
+11. **Show Temporal UI** → full event history, queryable state, signal flow
 
 ### Feature Flag Demo Options
 

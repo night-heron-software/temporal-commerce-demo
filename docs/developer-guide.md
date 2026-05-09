@@ -49,7 +49,7 @@ graph TB
 | Service | Port | Purpose |
 | --- | --- | --- |
 | **Cassandra** | 9042 | Primary data store (catalog, orders, inventory) |
-| **Elasticsearch** | 9200 | Search + read-side projections (products, orders, carts, inventory) |
+| **Elasticsearch** | 9200 | Search + read-side projections (all 11 domain indices) |
 | **Temporal Server** | 7233 | Workflow orchestration engine |
 | **Temporal UI** | 8233 | Workflow visualization and debugging |
 | **Temporal PostgreSQL** | 5432 | Temporal's internal persistence |
@@ -155,9 +155,15 @@ temporal-commerce-demo/
 │   │   │   ├── search/        # Product search API
 │   │   │   ├── seed-cassandra/# Catalog seeding endpoint
 │   │   │   └── seed-inventory/# Inventory seeding endpoint
-│   │   ├── admin/             # Admin dashboard (orders, feature flags)
+│   │   ├── admin/             # Admin dashboard
 │   │   │   ├── orders/        # Order management pages
-│   │   │   └── admin-order-actions.ts
+│   │   │   ├── inventory/     # Inventory monitoring
+│   │   │   ├── carts/         # Active cart monitoring
+│   │   │   ├── search/        # Elasticsearch explorer (all 11 indices)
+│   │   │   ├── admin-order-actions.ts
+│   │   │   ├── admin-inventory-actions.ts
+│   │   │   ├── admin-cart-actions.ts
+│   │   │   └── admin-search-actions.ts
 │   │   └── shop/              # Customer-facing storefront
 │   │       ├── cart-actions.ts # Server Actions for cart/checkout
 │   │       ├── checkout/      # Multi-step checkout flow
@@ -379,12 +385,14 @@ Elasticsearch serves as the read-side projection store and powers product search
 | `products` | `ProductDocument` | Product search with nested variants and options |
 | `collections` | `CollectionDocument` | Collection browsing |
 | `orders` | `OrderDocument` | Order search and admin views |
+| `customers` | `CustomerDocument` | Customer search |
+| `suppliers` | `SupplierDocument` | Supplier search |
+| `inventory` | `InventoryDocument` | Inventory read-side views |
 | `supplier_orders` | `SupplierOrderDocument` | Supplier order tracking |
 | `carts` | `CartDocument` | Active cart visibility |
 | `reservations` | `ReservationDocument` | Reservation tracking |
 | `fulfillments` | `FulfillmentDocument` | Fulfillment workflow state |
 | `shipments` | `ShipmentDocument` | Shipment tracking |
-| `inventory` | `InventoryDocument` | Inventory read-side views |
 
 All ES document types are defined in `src/temporal/contracts/elasticsearch.ts`.
 
@@ -606,10 +614,10 @@ npx tsx scripts/seed.ts https://app.example.com  # Target a remote deployment
 
 **Seed Pipeline:**
 
-1. `POST /api/dev/init/es-indices` — Create ES index mappings
+1. `POST /api/dev/init/es-indices` — Create ES index mappings for all 11 indices
 2. `POST /api/seed-cassandra` — Load `sample-data/catalog.json` into Cassandra
-3. `POST /api/dev/reindex` (collections) — Sync collection data to Elasticsearch
-4. `POST /api/dev/reindex` (products) — Sync product data to Elasticsearch
+3. `POST /api/seed-inventory` — Seed inventory stock for all variants
+4. `POST /api/dev/reindex` (`{index: "all"}`) — Sync all Cassandra-backed data to Elasticsearch
 
 ### Catalog Generator
 
@@ -676,14 +684,14 @@ make logs SERVICE=elasticsearch
 
 ## Cloud Deployment
 
-For deploying to Temporal Cloud + AWS, see [cloud-deployment.md](cloud-deployment.md).
+For deploying to Temporal Cloud + Google Cloud, see [cloud-deployment.md](cloud-deployment.md).
 
 Key deployment targets:
 
-- **Next.js App** → Vercel or AWS App Runner
-- **Temporal Workers** → AWS ECS Fargate
-- **Cassandra** → DataStax Astra DB or AWS Keyspaces
-- **Elasticsearch** → Elastic Cloud or Amazon OpenSearch
+- **Next.js App** → Google Cloud Run (serverless, scales to zero)
+- **Temporal Workers** → Google Cloud Run (always-on, `--min-instances 1`)
+- **Cassandra** → DataStax Astra DB
+- **Elasticsearch** → Elastic Cloud
 
 The unified worker process runs all six domain workers in a single container, sharing one mTLS connection to Temporal Cloud.
 
