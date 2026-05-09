@@ -6,7 +6,6 @@ export type ShippingAddress = Cart.ShippingAddress;
 
 export type CheckoutStep =
   | 'validating'
-  | 'auth'
   | 'shipping'
   | 'payment'
   | 'review'

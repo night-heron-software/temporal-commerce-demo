@@ -257,16 +257,14 @@ export async function checkoutWorkflow(
   const reserveResult = await renewReservationsForCheckout(input.cartId, input.items);
 
   if (!reserveResult.success) {
-    state.step = 'auth';
-    state.error = reserveResult.error || 'Some items are no longer available';
-    return {
-      success: false,
-      error: state.error,
-      finalState: state
-    };
+    log.warn('Reservation renewal failed, continuing to shipping', {
+      error: reserveResult.error,
+    });
+    state.error = reserveResult.error || 'Some items may have limited stock';
+  } else {
+    reservations = reserveResult.reservations;
   }
 
-  reservations = reserveResult.reservations;
   state.step = 'shipping';
 
   // Wait for order completion or cancellation (1 hour timeout)

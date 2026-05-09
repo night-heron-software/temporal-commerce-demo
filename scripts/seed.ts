@@ -46,7 +46,10 @@ async function seed() {
   // 2. Seed catalog (products, variants, collections) → Cassandra
   await call('Seed Catalog', 'POST', '/api/seed-cassandra');
 
-  // 3. Reindex catalog to ES
+  // 3. Seed inventory stock for all variants
+  await call('Seed Inventory', 'POST', '/api/seed-inventory');
+
+  // 4. Reindex catalog to ES
   await call('Reindex Collections', 'POST', '/api/dev/reindex', { index: 'collections' });
   await call('Reindex Products', 'POST', '/api/dev/reindex', { index: 'products' });
 
