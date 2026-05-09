@@ -49,9 +49,8 @@ async function seed() {
   // 3. Seed inventory stock for all variants
   await call('Seed Inventory', 'POST', '/api/seed-inventory');
 
-  // 4. Reindex catalog to ES
-  await call('Reindex Collections', 'POST', '/api/dev/reindex', { index: 'collections' });
-  await call('Reindex Products', 'POST', '/api/dev/reindex', { index: 'products' });
+  // 4. Reindex all Cassandra-backed data to ES
+  await call('Reindex All', 'POST', '/api/dev/reindex', { index: 'all' });
 
   console.log('\n✨ Seeding complete!');
   console.log(`   Storefront → ${BASE_URL}/shop`);

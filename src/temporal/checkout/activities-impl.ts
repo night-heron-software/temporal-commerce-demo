@@ -10,10 +10,12 @@ type PaymentMethod = Cart.PaymentMethod;
 export type ShippingAddress = Cart.ShippingAddress;
 import { v4 as uuidv4 } from 'uuid';
 
-import { executeCql, logger as log, sendEmail } from '../../lib';
+import { executeCql, logger as log, sendEmail, getElasticsearchClient } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
-import { ApplicationFailure } from '@temporalio/activity';
+
 import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
+import { Elasticsearch } from '../contracts';
+const { ES_INDICES } = Elasticsearch;
 
 interface VariantRow {
   blank_sku: string;
@@ -101,7 +103,7 @@ export async function processPayment(
   token: string,
   amount: number,
   currency: string,
-  idempotencyKey?: string
+  _idempotencyKey?: string
 ): Promise<boolean> {
   log.info(`[Activity] Processing MOCK payment: ${amount} ${currency} with token ${token}`);
   await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate processing
@@ -149,7 +151,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 export async function sendConfirmationEmail(
   email: string,
   confirmationNumber: string,
-  order: Order
+  _order: Order
 ): Promise<void> {
   await sendEmail({
     to: email,
@@ -267,6 +269,18 @@ export async function confirmReservations(reservations: ReservationInfo[]): Prom
   await Promise.all(
     reservations.map(r => InventoryCommandRepository.confirm(r.reservationId))
   );
+
+  // Update reservation status in ES
+  const esClient = getElasticsearchClient();
+  await Promise.all(
+    reservations.map(r =>
+      esClient.update({
+        index: ES_INDICES.reservations,
+        id: r.reservationId,
+        doc: { status: 'CONFIRMED', expiresAt: null }
+      }).catch(() => { /* ignore if not found */ })
+    )
+  );
 }
 
 /**
@@ -280,6 +294,17 @@ export async function releaseReservations(reservations: ReservationInfo[]): Prom
   await Promise.all(
     reservations.map(r => InventoryCommandRepository.release(r.reservationId))
   );
+
+  // Remove reservation docs from ES
+  const esClient = getElasticsearchClient();
+  await Promise.all(
+    reservations.map(r =>
+      esClient.delete({
+        index: ES_INDICES.reservations,
+        id: r.reservationId
+      }).catch(() => { /* ignore if not found */ })
+    )
+  );
 }
 
 /**
@@ -292,5 +317,16 @@ export async function cancelReservations(reservations: ReservationInfo[]): Promi
 
   await Promise.all(
     reservations.map(r => InventoryCommandRepository.cancel(r.reservationId))
+  );
+
+  // Remove reservation docs from ES
+  const esClient = getElasticsearchClient();
+  await Promise.all(
+    reservations.map(r =>
+      esClient.delete({
+        index: ES_INDICES.reservations,
+        id: r.reservationId
+      }).catch(() => { /* ignore if not found */ })
+    )
   );
 }

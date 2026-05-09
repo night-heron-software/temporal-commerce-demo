@@ -11,6 +11,7 @@ import { ES_INDICES } from '../contracts/elasticsearch';
 import type { OrderLineItem, SupplierResolutionContext, SupplierAssignment } from '../contracts/product-type';
 
 
+
 /**
  * Save order to database (writes to all three order tables)
  */
@@ -272,6 +273,16 @@ export async function indexSupplierOrder(doc: Elasticsearch.SupplierOrderDocumen
   log.info(`[Activity] Indexed supplier order ${doc.supplierOrderId} to Elasticsearch`);
 }
 
+export async function indexCustomer(doc: Elasticsearch.CustomerDocument): Promise<void> {
+  const client = getElasticsearchClient();
+  await client.index({
+    index: ES_INDICES.customers,
+    id: doc.email,
+    document: doc
+  });
+  log.info(`[Activity] Indexed customer ${doc.email} to Elasticsearch`);
+}
+
 /**
  * Insert a status history entry into order_status_history table
  */
@@ -378,6 +389,7 @@ export function createOmsActivities() {
     getOrderById,
     indexOrder,
     indexSupplierOrder,
+    indexCustomer,
     startFulfillmentWorkflow,
   };
 }

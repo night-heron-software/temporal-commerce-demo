@@ -84,6 +84,23 @@ export async function reserveCartItem(
 
     if (result.success) {
       logger.info({ reservationId, blankSku, quantity }, 'Reserved inventory');
+
+      // Index individual reservation to ES
+      const esClient = getElasticsearchClient();
+      await esClient.index({
+        index: ES_INDICES.reservations,
+        id: reservationId,
+        document: {
+          reservationId,
+          cartId,
+          variantId,
+          quantity,
+          status: 'TEMPORARY',
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          createdAt: new Date().toISOString()
+        }
+      }).catch((e: unknown) => logger.warn({ err: e }, 'Failed to index reservation'));
+
       return result.reservationId!;
     } else {
       logger.warn({ blankSku, error: result.error }, 'Reservation failed');
@@ -107,6 +124,14 @@ export async function releaseCartItem(
 
   try {
     await InventoryCommandRepository.release(reservationId);
+
+    // Remove reservation from ES
+    const esClient = getElasticsearchClient();
+    await esClient.delete({
+      index: ES_INDICES.reservations,
+      id: reservationId
+    }).catch(() => { /* ignore if not found */ });
+
     logger.info({ reservationId }, 'Released reservation');
   } catch (e) {
     logger.warn({ reservationId, err: e }, 'Release failed');
