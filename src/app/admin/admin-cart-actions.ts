@@ -26,6 +26,7 @@ export interface CartSummary {
   updatedAt: string;
   checkout?: {
     step: string;
+    workflowId?: string;
   };
 }
 
@@ -45,6 +46,16 @@ export async function getActiveCarts(): Promise<ActionResult<CartSummary[]>> {
         const handle = client.workflow.getHandle(workflow.workflowId);
         const details: Cart.CartDetails = await handle.query(Cart.getCartQuery);
 
+        // If cart is in checkout, query for the checkout workflow ID
+        let checkoutWorkflowId: string | null = null;
+        if (details.checkout) {
+          try {
+            checkoutWorkflowId = await handle.query(Cart.getCheckoutWorkflowIdQuery);
+          } catch {
+            // Query may not be available — skip
+          }
+        }
+
         carts.push({
           cartId: details.cartId,
           workflowId: workflow.workflowId,
@@ -55,7 +66,9 @@ export async function getActiveCarts(): Promise<ActionResult<CartSummary[]>> {
           userId: details.userId,
           createdAt: details.createdAt,
           updatedAt: details.updatedAt,
-          checkout: details.checkout ? { step: details.checkout.step } : undefined,
+          checkout: details.checkout
+            ? { step: details.checkout.step, workflowId: checkoutWorkflowId ?? undefined }
+            : undefined,
         });
       } catch {
         // Workflow may have completed between list and query — skip

@@ -298,6 +298,28 @@ export default function AdminCartsPage() {
                           ))}
                         </div>
                       )}
+
+                      {/* Workflow link */}
+                      <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700 flex items-center gap-4 text-sm">
+                        <a
+                          href={`http://localhost:8233/namespaces/default/workflows/${cart.workflowId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1"
+                        >
+                          ⚡ View Cart Workflow in Temporal UI →
+                        </a>
+                        {cart.checkout?.workflowId && (
+                          <a
+                            href={`http://localhost:8233/namespaces/default/workflows/${cart.checkout.workflowId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1"
+                          >
+                            ⚡ Checkout Workflow →
+                          </a>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="text-sm text-zinc-400 py-2">Unable to load details</div>

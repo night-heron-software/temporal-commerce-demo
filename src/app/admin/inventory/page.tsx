@@ -259,9 +259,7 @@ export default function AdminInventoryPage() {
                     </td>
                     <td className="px-4 py-3">
                       <a
-                        href={`http://localhost:8233/namespaces/default/workflows/cart-${row.cartId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        href={`/admin/carts#cart-${row.cartId}`}
                         className="text-xs font-mono text-cyan-600 dark:text-cyan-400 hover:underline"
                       >
                         {row.cartId.substring(0, 8)}…
