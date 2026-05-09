@@ -2,7 +2,7 @@
 # Temporal Commerce Demo — Worker Dockerfile
 # =============================================================================
 # Runs the unified Temporal worker process (all 6 domain workers).
-# Separate from the Next.js app — deployed as an ECS Fargate task.
+# Deployed as a Cloud Run service with --min-instances 1 and --no-cpu-throttling.
 #
 # Build:  docker build -f deploy/worker.Dockerfile -t temporal-commerce-worker .
 # Run:    docker run --env-file .env.local temporal-commerce-worker

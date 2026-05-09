@@ -44,8 +44,7 @@ These rules are mandatory for all workflow and activity code in `src/temporal/`:
 temporal-commerce-demo/
 ├── cassandra/              # CQL schema (single file: schema.cql)
 ├── deploy/                 # Cloud deployment artifacts
-│   ├── worker.Dockerfile   # Multi-stage Dockerfile for Temporal workers
-│   └── ecs-task-definition.json  # ECS Fargate task template
+│   └── worker.Dockerfile   # Multi-stage Dockerfile for Temporal workers
 ├── docs/                   # Deployment and architecture docs
 ├── sample-data/            # Catalog seed data (catalog.json)
 ├── scripts/                # Seed orchestrator (seed.ts)

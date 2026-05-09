@@ -1,37 +1,45 @@
 # Cloud Deployment Guide
 
-Deploy the Temporal Commerce Demo to Temporal Cloud + AWS for live presentation.
+Deploy the Temporal Commerce Demo to Temporal Cloud + Google Cloud for live presentation.
 
 ## Architecture
 
-```text
-┌──────────────────┐     ┌──────────────────────────┐
-│  Vercel / App     │     │  Temporal Cloud           │
-│  Runner           │     │  (mTLS, managed)          │
-│  ┌──────────────┐ │     │                           │
-│  │ Next.js App  │─┼────▶│  Namespace: your-ns       │
-│  │ (Storefront  │ │     │  ┌─────────┐ ┌─────────┐ │
-│  │  + Admin)    │ │     │  │ Cart WF │ │ OMS WF  │ │
-│  └──────────────┘ │     │  └─────────┘ └─────────┘ │
-└──────────────────┘     └──────────┬───────────────┘
-                                     │
-                          ┌──────────┴───────────────┐
-                          │  ECS Fargate              │
-                          │  ┌──────────────────────┐ │
-                          │  │ Temporal Worker       │ │
-                          │  │ (all 6 domains)      │ │
-                          │  └──────────────────────┘ │
-                          └──────────────────────────┘
-         ┌─────────────────────┐  ┌──────────────────────┐
-         │  Astra DB / AWS     │  │  Elastic Cloud /     │
-         │  Keyspaces           │  │  Amazon OpenSearch    │
-         │  (Cassandra)         │  │  (Search)             │
-         └─────────────────────┘  └──────────────────────┘
+```mermaid
+graph TB
+    subgraph CR_APP["Cloud Run — Next.js App"]
+        APP["Next.js<br/>(Storefront + Admin)"]
+    end
+
+    subgraph TC["Temporal Cloud (mTLS)"]
+        NS["Namespace: your-ns"]
+        CART["Cart WF"]
+        OMS["OMS WF"]
+        CHECKOUT["Checkout WF"]
+        INV["Inventory WF"]
+        FF["Fulfillment WF"]
+        ID["Identity WF"]
+    end
+
+    subgraph CR_WORKER["Cloud Run — Worker (always-on, min 1)"]
+        WORKER["Temporal Worker<br/>(all 6 domains)"]
+    end
+
+    subgraph DATA["Managed Data Services"]
+        ASTRA["Astra DB<br/>(Cassandra)"]
+        ELASTIC["Elastic Cloud<br/>(Search)"]
+    end
+
+    APP -- "start / query / signal" --> TC
+    WORKER -- "poll task queues" --> TC
+    WORKER --> ASTRA
+    WORKER --> ELASTIC
+    APP --> ASTRA
+    APP --> ELASTIC
 ```
 
 ## Prerequisites
 
-- AWS CLI configured with appropriate credentials
+- Google Cloud CLI (`gcloud`) configured with a project
 - Temporal Cloud account ([https://cloud.temporal.io](https://cloud.temporal.io))
 - Docker installed locally (for building images)
 
@@ -65,8 +73,6 @@ export TEMPORAL_NAMESPACE="temporal-commerce-demo"
 
 ## Step 2: Cassandra (Astra DB)
 
-### Option A: DataStax Astra DB (Recommended — Free Tier)
-
 1. Create a free account at [astra.datastax.com](https://astra.datastax.com)
 2. Create a database with keyspace `catalog`
 3. Download the secure connect bundle
@@ -87,119 +93,109 @@ export CASSANDRA_SECURE_BUNDLE_PATH=./secure-connect-bundle.zip
 export CASSANDRA_KEYSPACE=catalog
 ```
 
-### Option B: AWS Keyspaces
-
-```bash
-aws keyspaces create-keyspace --keyspace-name catalog
-
-# Apply schema (remove unsupported features like CUSTOM types)
-# AWS Keyspaces has CQL compatibility limits
-```
-
 ---
 
-## Step 3: Elasticsearch (Elastic Cloud or OpenSearch)
-
-### Option A: Elastic Cloud
+## Step 3: Elasticsearch (Elastic Cloud)
 
 1. Create a deployment at [cloud.elastic.co](https://cloud.elastic.co)
 2. Get the Cloud ID and API key:
 
 ```bash
-export ELASTICSEARCH_URL="https://your-deployment.es.us-east-1.aws.found.io"
+export ELASTICSEARCH_URL="https://your-deployment.es.cloud.elastic.co"
 export ELASTICSEARCH_API_KEY="your-api-key"
-```
-
-### Option B: Amazon OpenSearch
-
-```bash
-aws opensearch create-domain \
-  --domain-name temporal-commerce \
-  --engine-version OpenSearch_2.11 \
-  --cluster-config InstanceType=t3.small.search,InstanceCount=1
 ```
 
 ---
 
-## Step 4: Deploy Worker (ECS Fargate)
+## Step 4: Deploy Worker (Cloud Run)
+
+The Temporal worker runs as an always-on Cloud Run service with `--min-instances 1` — it must stay running to poll task queues. Cloud Run's serverless model eliminates all cluster management while keeping costs proportional to usage.
 
 ### Build and Push Image
 
 ```bash
-# Build
-docker build -f deploy/worker.Dockerfile -t temporal-commerce-worker .
+# Set your project ID
+export GCP_PROJECT=$(gcloud config get-value project)
 
-# Tag and push to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com
-
-docker tag temporal-commerce-worker:latest $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/temporal-commerce-worker:latest
-docker push $AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/temporal-commerce-worker:latest
+# Build and push to Artifact Registry in one step
+gcloud builds submit \
+  --tag us-docker.pkg.dev/$GCP_PROJECT/temporal-commerce/worker:latest \
+  -f deploy/worker.Dockerfile .
 ```
 
-### Store Secrets in SSM Parameter Store
+### Store Secrets in Secret Manager
 
 ```bash
-aws ssm put-parameter --name /temporal-commerce/TEMPORAL_ADDRESS --value "$TEMPORAL_ADDRESS" --type SecureString
-aws ssm put-parameter --name /temporal-commerce/TEMPORAL_NAMESPACE --value "$TEMPORAL_NAMESPACE" --type SecureString
-aws ssm put-parameter --name /temporal-commerce/TEMPORAL_TLS_CERT --value "$TEMPORAL_TLS_CERT" --type SecureString
-aws ssm put-parameter --name /temporal-commerce/TEMPORAL_TLS_KEY --value "$TEMPORAL_TLS_KEY" --type SecureString
-aws ssm put-parameter --name /temporal-commerce/CASSANDRA_CONTACT_POINTS --value "$CASSANDRA_CONTACT_POINTS" --type SecureString
-aws ssm put-parameter --name /temporal-commerce/CASSANDRA_KEYSPACE --value "$CASSANDRA_KEYSPACE" --type SecureString
-aws ssm put-parameter --name /temporal-commerce/CASSANDRA_USE_TLS --value "true" --type String
-aws ssm put-parameter --name /temporal-commerce/ELASTICSEARCH_URL --value "$ELASTICSEARCH_URL" --type SecureString
-aws ssm put-parameter --name /temporal-commerce/ELASTICSEARCH_API_KEY --value "$ELASTICSEARCH_API_KEY" --type SecureString
+echo -n "$TEMPORAL_ADDRESS"          | gcloud secrets create temporal-address --data-file=-
+echo -n "$TEMPORAL_NAMESPACE"        | gcloud secrets create temporal-namespace --data-file=-
+echo -n "$TEMPORAL_TLS_CERT"         | gcloud secrets create temporal-tls-cert --data-file=-
+echo -n "$TEMPORAL_TLS_KEY"          | gcloud secrets create temporal-tls-key --data-file=-
+echo -n "$CASSANDRA_CONTACT_POINTS"  | gcloud secrets create cassandra-contact-points --data-file=-
+echo -n "$CASSANDRA_KEYSPACE"        | gcloud secrets create cassandra-keyspace --data-file=-
+echo -n "$CASSANDRA_USE_TLS"         | gcloud secrets create cassandra-use-tls --data-file=-
+echo -n "$ELASTICSEARCH_URL"         | gcloud secrets create elasticsearch-url --data-file=-
+echo -n "$ELASTICSEARCH_API_KEY"     | gcloud secrets create elasticsearch-api-key --data-file=-
 ```
 
-### Register and Run Task
+### Deploy Worker Service
 
 ```bash
-# Substitute template variables
-envsubst < deploy/ecs-task-definition.json > /tmp/task-def.json
-
-# Register
-aws ecs register-task-definition --cli-input-json file:///tmp/task-def.json
-
-# Create service (or run task directly)
-aws ecs create-service \
-  --cluster default \
-  --service-name temporal-commerce-worker \
-  --task-definition temporal-commerce-worker \
-  --desired-count 1 \
-  --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[subnet-xxx],securityGroups=[sg-xxx],assignPublicIp=ENABLED}"
+gcloud run deploy temporal-commerce-worker \
+  --image us-docker.pkg.dev/$GCP_PROJECT/temporal-commerce/worker:latest \
+  --region us-central1 \
+  --no-allow-unauthenticated \
+  --min-instances 1 \
+  --max-instances 3 \
+  --memory 1Gi \
+  --cpu 1 \
+  --no-cpu-throttling \
+  --set-secrets "\
+TEMPORAL_ADDRESS=temporal-address:latest,\
+TEMPORAL_NAMESPACE=temporal-namespace:latest,\
+TEMPORAL_TLS_CERT=temporal-tls-cert:latest,\
+TEMPORAL_TLS_KEY=temporal-tls-key:latest,\
+CASSANDRA_CONTACT_POINTS=cassandra-contact-points:latest,\
+CASSANDRA_KEYSPACE=cassandra-keyspace:latest,\
+CASSANDRA_USE_TLS=cassandra-use-tls:latest,\
+ELASTICSEARCH_URL=elasticsearch-url:latest,\
+ELASTICSEARCH_API_KEY=elasticsearch-api-key:latest"
 ```
+
+> **Note:** `--no-cpu-throttling` is critical — without it, Cloud Run throttles CPU when no HTTP requests are active, which would stall the Temporal worker's task queue polling. Combined with `--min-instances 1`, this keeps at least one worker polling continuously.
 
 ---
 
-## Step 5: Deploy Next.js App
+## Step 5: Deploy Next.js App (Cloud Run)
 
-### Option A: Vercel (Recommended)
+### Build App Image
 
 ```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel --prod
-
-# Set env vars in Vercel dashboard:
-# TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_TLS_CERT, TEMPORAL_TLS_KEY
-# CASSANDRA_CONTACT_POINTS, CASSANDRA_KEYSPACE, CASSANDRA_USE_TLS
-# ELASTICSEARCH_URL, ELASTICSEARCH_API_KEY
+# Build the Next.js standalone image
+gcloud builds submit \
+  --tag us-docker.pkg.dev/$GCP_PROJECT/temporal-commerce/app:latest .
 ```
 
-### Option B: AWS App Runner
+### Deploy App Service
 
 ```bash
-# Create App Runner service from source
-aws apprunner create-service \
-  --service-name temporal-commerce-app \
-  --source-configuration '{
-    "ImageRepository": {
-      "ImageIdentifier": "'$AWS_ACCOUNT_ID'.dkr.ecr.us-east-1.amazonaws.com/temporal-commerce-app:latest",
-      "ImageRepositoryType": "ECR"
-    }
-  }'
+gcloud run deploy temporal-commerce-app \
+  --image us-docker.pkg.dev/$GCP_PROJECT/temporal-commerce/app:latest \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --min-instances 0 \
+  --max-instances 10 \
+  --memory 512Mi \
+  --cpu 1 \
+  --set-secrets "\
+TEMPORAL_ADDRESS=temporal-address:latest,\
+TEMPORAL_NAMESPACE=temporal-namespace:latest,\
+TEMPORAL_TLS_CERT=temporal-tls-cert:latest,\
+TEMPORAL_TLS_KEY=temporal-tls-key:latest,\
+CASSANDRA_CONTACT_POINTS=cassandra-contact-points:latest,\
+CASSANDRA_KEYSPACE=cassandra-keyspace:latest,\
+CASSANDRA_USE_TLS=cassandra-use-tls:latest,\
+ELASTICSEARCH_URL=elasticsearch-url:latest,\
+ELASTICSEARCH_API_KEY=elasticsearch-api-key:latest"
 ```
 
 ---
@@ -209,21 +205,25 @@ aws apprunner create-service \
 With the Next.js app running against cloud infrastructure:
 
 ```bash
-# Point seed script at the cloud app URL
-APP_URL=https://your-app.vercel.app npm run seed
+# Get the Cloud Run app URL
+APP_URL=$(gcloud run services describe temporal-commerce-app \
+  --region us-central1 --format='value(status.url)')
+
+# Run seed script
+APP_URL=$APP_URL npm run seed
 ```
 
 Or run directly:
 
 ```bash
-tsx scripts/seed.ts https://your-app.vercel.app
+tsx scripts/seed.ts https://temporal-commerce-app-xxxxx-uc.a.run.app
 ```
 
 ---
 
 ## Step 7: Verify
 
-1. Browse the storefront at your deployed URL
+1. Browse the storefront at your Cloud Run app URL
 2. Add items to cart, proceed through checkout
 3. Check order appears in the admin panel
 4. View workflow execution in [Temporal Cloud UI](https://cloud.temporal.io)
