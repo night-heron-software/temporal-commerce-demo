@@ -26,6 +26,7 @@ export interface OmsActivities {
   ): Promise<void>;
   indexOrder(doc: Elasticsearch.OrderDocument): Promise<void>;
   indexSupplierOrder(doc: Elasticsearch.SupplierOrderDocument): Promise<void>;
+  indexCustomer(doc: Elasticsearch.CustomerDocument): Promise<void>;
   startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string>;
 }
 
@@ -46,7 +47,8 @@ export const {
 // Elasticsearch projection activities
 export const {
   indexOrder,
-  indexSupplierOrder
+  indexSupplierOrder,
+  indexCustomer
 } = proxyActivities<OmsActivities>({
   startToCloseTimeout: '30s',
   retry: {

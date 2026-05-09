@@ -2,7 +2,6 @@ import { CartItem, Order, PaymentMethod, ShippingAddress } from './cart';
 
 export type CheckoutStep =
   | 'validating'
-  | 'auth'
   | 'shipping'
   | 'payment'
   | 'review'

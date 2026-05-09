@@ -339,3 +339,25 @@ CREATE TABLE IF NOT EXISTS inventory_stock_by_supplier (
     last_projected_at TIMESTAMP,
     PRIMARY KEY (supplier_id, blank_sku)
 );
+
+CREATE TABLE IF NOT EXISTS inventory_reservations_by_sku (
+    blank_sku TEXT,
+    reservation_id TEXT,
+    cart_id TEXT,
+    variant_id TEXT,
+    quantity INT,
+    status TEXT,
+    supplier_id TEXT,
+    expires_at TIMESTAMP,
+    created_at TIMESTAMP,
+    PRIMARY KEY (blank_sku, reservation_id)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_low_stock (
+    threshold_bucket TEXT,
+    available_stock INT,
+    blank_sku TEXT,
+    total_stock INT,
+    last_projected_at TIMESTAMP,
+    PRIMARY KEY (threshold_bucket, available_stock, blank_sku)
+) WITH CLUSTERING ORDER BY (available_stock ASC, blank_sku ASC);

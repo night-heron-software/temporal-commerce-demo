@@ -1,21 +1,15 @@
 /**
  * Cart Activity Implementations
- * Actual implementations called by the worker
+ * Wired to real InventoryCommandRepository for Cassandra-backed inventory
  */
 
-
+import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
 import { executeCql } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
 import { getElasticsearchClient } from '../../lib';
+import { logger } from '../../lib';
 import { Elasticsearch } from '../contracts';
 const { ES_INDICES } = Elasticsearch;
-
-const InventoryCommandRepository = {
-  getStockLevel: async (sku: string) => ({ available: 100 }),
-  reserve: async (req: any) => ({ success: true, reservationId: req.reservationId, error: '' }),
-  release: async (id: string) => true,
-};
-
 
 interface VariantRow {
   blank_sku: string;
@@ -36,30 +30,31 @@ async function resolveBlankSku(variantId: string): Promise<string | null> {
  * Reads from inventory_stock_w via InventoryCommandRepository.
  */
 export async function validateInventory(variantId: string, quantity: number): Promise<boolean> {
-  console.log(`[Activity] Checking inventory for variant ${variantId} (qty: ${quantity})`);
+  logger.info({ variantId, quantity }, 'Checking inventory');
 
   try {
     const blankSku = await resolveBlankSku(variantId);
     if (!blankSku) {
-      console.error(`[Activity] Variant not found: ${variantId}`);
+      logger.error({ variantId }, 'Variant not found');
       return false;
     }
 
     const stockLevel = await InventoryCommandRepository.getStockLevel(blankSku);
     const available = stockLevel.available >= quantity;
-    console.log(
-      `[Activity] Stock check: available=${stockLevel.available}, requested=${quantity}, result=${available}`
+    logger.info(
+      { blankSku, available: stockLevel.available, requested: quantity, result: available },
+      'Stock check complete'
     );
     return available;
   } catch (e) {
-    console.error(`[Activity] Inventory check failed for ${variantId}:`, e);
+    logger.error({ variantId, err: e }, 'Inventory check failed');
     return false;
   }
 }
 
 /**
  * Reserve inventory for a cart item.
- * Creates a TEMPORARY reservation with a 15-minute TTL.
+ * Creates a TEMPORARY reservation with a 15-minute TTL via real InventoryCommandRepository.
  * Returns the reservationId on success, null on failure.
  */
 export async function reserveCartItem(
@@ -67,12 +62,12 @@ export async function reserveCartItem(
   variantId: string,
   quantity: number
 ): Promise<string | null> {
-  console.log(`[Activity] Reserving inventory for cart ${cartId}, variant ${variantId} (qty: ${quantity})`);
+  logger.info({ cartId, variantId, quantity }, 'Reserving inventory for cart item');
 
   try {
     const blankSku = await resolveBlankSku(variantId);
     if (!blankSku) {
-      console.error(`[Activity] Variant not found for reservation: ${variantId}`);
+      logger.error({ variantId }, 'Variant not found for reservation');
       return null;
     }
 
@@ -88,14 +83,31 @@ export async function reserveCartItem(
     });
 
     if (result.success) {
-      console.log(`[Activity] Reserved: ${reservationId} (${blankSku} x${quantity})`);
+      logger.info({ reservationId, blankSku, quantity }, 'Reserved inventory');
+
+      // Index individual reservation to ES
+      const esClient = getElasticsearchClient();
+      await esClient.index({
+        index: ES_INDICES.reservations,
+        id: reservationId,
+        document: {
+          reservationId,
+          cartId,
+          variantId,
+          quantity,
+          status: 'TEMPORARY',
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          createdAt: new Date().toISOString()
+        }
+      }).catch((e: unknown) => logger.warn({ err: e }, 'Failed to index reservation'));
+
       return result.reservationId!;
     } else {
-      console.warn(`[Activity] Reservation failed: ${result.error}`);
+      logger.warn({ blankSku, error: result.error }, 'Reservation failed');
       return null;
     }
   } catch (e) {
-    console.error(`[Activity] Reserve failed for ${variantId}:`, e);
+    logger.error({ variantId, err: e }, 'Reserve failed');
     return null;
   }
 }
@@ -108,13 +120,21 @@ export async function releaseCartItem(
   variantId: string
 ): Promise<void> {
   const reservationId = `${cartId}-${variantId}`;
-  console.log(`[Activity] Releasing reservation ${reservationId}`);
+  logger.info({ reservationId }, 'Releasing reservation');
 
   try {
     await InventoryCommandRepository.release(reservationId);
-    console.log(`[Activity] Released: ${reservationId}`);
+
+    // Remove reservation from ES
+    const esClient = getElasticsearchClient();
+    await esClient.delete({
+      index: ES_INDICES.reservations,
+      id: reservationId
+    }).catch(() => { /* ignore if not found */ });
+
+    logger.info({ reservationId }, 'Released reservation');
   } catch (e) {
-    console.warn(`[Activity] Release failed for ${reservationId}:`, e);
+    logger.warn({ reservationId, err: e }, 'Release failed');
   }
 }
 

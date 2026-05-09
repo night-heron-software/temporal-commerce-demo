@@ -18,6 +18,7 @@ import {
   insertStatusHistoryEntry,
   indexOrder,
   indexSupplierOrder,
+  indexCustomer,
   startFulfillmentWorkflow
 } from './activities';
 import {
@@ -122,6 +123,17 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
   // Index order to Elasticsearch
   await indexOrder(getOrderDocument());
+
+  // Index/upsert customer to Elasticsearch
+  await indexCustomer({
+    email: input.customerEmail,
+    firstName: input.order.shippingAddress.firstName,
+    lastName: input.order.shippingAddress.lastName,
+    phone: input.order.shippingAddress.phone || '',
+    totalSpent: input.order.total,
+    orderCount: 1,
+    lastOrderAt: new Date().toISOString()
+  });
 
   // ============================================================================
   

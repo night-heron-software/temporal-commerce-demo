@@ -39,7 +39,8 @@ This populates the product catalog (~2,700 products across 40 collections) by ca
 | URL | What to Check |
 | --- | --- |
 | `http://localhost:3000/shop` | Product grid with images and prices |
-| `http://localhost:3000/admin` | Admin dashboard loads |
+| `http://localhost:3000/admin` | Admin dashboard loads with Orders, Inventory, Carts, Search cards |
+| `http://localhost:3000/admin/search` | Elasticsearch Explorer shows doc counts across all 11 indices |
 | `http://localhost:8233` | Temporal UI — Workflows page, no errors |
 
 ### 5. Set Fulfillment Mode
@@ -101,9 +102,11 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 1. Click into the `fulfillment-{orderId}` workflow — show status is `in_production`
 2. Open the **Admin Panel** at `http://localhost:3000/admin/orders`
 3. Show the order in the list with its current status
-4. Point out the Temporal UI link in the admin panel
+4. Open the **Elasticsearch Explorer** at `http://localhost:3000/admin/search`
+5. Search for the order ID — show results across orders, supplier_orders, fulfillments, and inventory indices
+6. Point out the Temporal UI link in the admin panel
 
-> "The fulfillment workflow is simulating supplier processing with `wf.sleep()` timers. Status updates signal the OMS, which projects to Elasticsearch. The admin panel reads from ES — it's a CQRS projection kept in sync by the workflow."
+> "The fulfillment workflow is simulating supplier processing with `wf.sleep()` timers. Status updates signal the OMS, which projects to Elasticsearch. The admin panel reads from ES — it's a CQRS projection kept in sync by the workflow. The search page lets us query across all 11 domain indices to verify every entity is being tracked."
 
 ### 4:00 — Wrap-Up (~30 seconds)
 

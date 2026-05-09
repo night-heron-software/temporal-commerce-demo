@@ -3,7 +3,7 @@
 A full-stack e-commerce application built entirely on [Temporal](https://temporal.io) durable execution. Every state transition — from adding an item to a cart through order fulfillment and delivery — is a Temporal workflow. No message queues, no cron jobs, no saga orchestrators. The business logic *is* the infrastructure.
 
 **Stack:** Next.js 15 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
-**Scale:** 111 source files · ~15,400 LOC · 6 Temporal workflow domains · 2,689 products
+**Scale:** 116 source files · ~18,300 LOC · 6 Temporal workflow domains · 2,689 products
 
 ---
 
@@ -145,8 +145,15 @@ Elasticsearch serves as the read projection layer with full-text search and face
 | --- | --- | --- |
 | `products` | Reindex API (bulk) | Storefront search, product detail |
 | `collections` | Reindex API (bulk) | Collection navigation |
-| `orders` | OMS workflow activities | Admin order list |
-| `supplier_orders` | OMS workflow activities | Admin order detail |
+| `orders` | OMS workflow activities | Admin order list, search |
+| `customers` | OMS workflow activities | Admin search |
+| `suppliers` | Reindex API (bulk) | Admin search |
+| `inventory` | Inventory service workflow | Admin inventory, search |
+| `supplier_orders` | OMS workflow activities | Admin order detail, search |
+| `carts` | Cart workflow activities | Admin carts, search |
+| `reservations` | Cart + checkout activities | Admin search |
+| `fulfillments` | Fulfillment workflow activities | Admin search |
+| `shipments` | Fulfillment workflow activities | Admin search |
 
 ### CQRS Flow
 
@@ -247,7 +254,11 @@ temporal-commerce-demo/
 ├── src/
 │   ├── app/
 │   │   ├── api/                # REST endpoints (search, product, seed, reindex)
-│   │   ├── admin/              # Admin panel (order management)
+│   │   ├── admin/              # Admin panel (orders, inventory, carts, search)
+│   │   │   ├── orders/         # Order management
+│   │   │   ├── inventory/      # Inventory monitoring
+│   │   │   ├── carts/          # Active cart monitoring
+│   │   │   └── search/         # Elasticsearch explorer (all 11 indices)
 │   │   └── shop/               # Storefront (catalog, product, checkout)
 │   ├── components/             # Shared UI (NavBar, CartDrawer, CheckoutProgress)
 │   ├── context/                # React context (CartProvider)
@@ -302,3 +313,4 @@ make seed            # Populate 2,689 products across 40 collections
 - [Demo Instructions](demo-instructions.md) — Streamlined 4–5 minute live demo walkthrough
 - [Developer Guide](developer-guide.md) — Local development setup and debugging
 - [Cloud Deployment](cloud-deployment.md) — Production deployment guide
+- [Temporal Lessons Learned](temporal-lessons-learned.md) — 25 hard-won lessons from building on Temporal durable execution

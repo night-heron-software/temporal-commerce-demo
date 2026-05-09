@@ -46,7 +46,6 @@ export interface Order {
 
 export type CheckoutStep =
   | 'validating'
-  | 'auth'
   | 'shipping'
   | 'payment'
   | 'review'

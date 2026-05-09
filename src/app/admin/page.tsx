@@ -7,7 +7,7 @@ export default function AdminDashboardPage() {
         Temporal Commerce Demo
       </h1>
       <p className="text-zinc-500 dark:text-zinc-400 mb-8">
-        Admin panel for monitoring orders and controlling fulfillment workflows.
+        Admin panel for monitoring orders, inventory, and controlling fulfillment workflows.
       </p>
 
       <div className="grid md:grid-cols-2 gap-6">
@@ -22,6 +22,48 @@ export default function AdminDashboardPage() {
           </h2>
           <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
             View orders, check workflow state, and manually control fulfillment progression.
+          </p>
+        </Link>
+
+        {/* Inventory */}
+        <Link
+          href="/admin/inventory"
+          className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-orange-400 dark:hover:border-orange-500 transition-all hover:shadow-lg"
+        >
+          <div className="text-3xl mb-3">🏭</div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">
+            Inventory
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            View stock levels, active reservations, and inventory utilization across all SKUs.
+          </p>
+        </Link>
+
+        {/* Carts */}
+        <Link
+          href="/admin/carts"
+          className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-violet-400 dark:hover:border-violet-500 transition-all hover:shadow-lg"
+        >
+          <div className="text-3xl mb-3">🛒</div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">
+            Carts
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            Monitor active shopping carts, checkout progress, and cart workflow state.
+          </p>
+        </Link>
+
+        {/* Search */}
+        <Link
+          href="/admin/search"
+          className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-emerald-400 dark:hover:border-emerald-500 transition-all hover:shadow-lg"
+        >
+          <div className="text-3xl mb-3">🔍</div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+            Search
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            Query all Elasticsearch indices — products, orders, inventory, customers, and more.
           </p>
         </Link>
 
