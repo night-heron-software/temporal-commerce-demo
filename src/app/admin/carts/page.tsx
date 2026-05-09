@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   getActiveCarts,
   getCartDetails,
@@ -16,7 +16,7 @@ export default function AdminCartsPage() {
   const [cartDetails, setCartDetails] = useState<Record<string, CartDetails>>({});
   const [loadingDetails, setLoadingDetails] = useState<string | null>(null);
 
-  const fetchCarts = useCallback(async () => {
+  const fetchCarts = async () => {
     setIsLoading(true);
     setError(null);
     const result = await getActiveCarts();
@@ -26,11 +26,19 @@ export default function AdminCartsPage() {
       setError(result.error);
     }
     setIsLoading(false);
-  }, []);
+  };
 
+  // Initial load: isLoading starts true, so we only need the async resolution
   useEffect(() => {
-    fetchCarts();
-  }, [fetchCarts]);
+    let active = true;
+    getActiveCarts().then(result => {
+      if (!active) return;
+      if (result.success) setCarts(result.data);
+      else setError(result.error);
+      setIsLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
 
   const toggleCartDetails = async (cartId: string) => {
     if (expandedCart === cartId) {
