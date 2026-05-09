@@ -313,3 +313,4 @@ make seed            # Populate 2,689 products across 40 collections
 - [Demo Instructions](demo-instructions.md) — Streamlined 4–5 minute live demo walkthrough
 - [Developer Guide](developer-guide.md) — Local development setup and debugging
 - [Cloud Deployment](cloud-deployment.md) — Production deployment guide
+- [Temporal Lessons Learned](temporal-lessons-learned.md) — 25 hard-won lessons from building on Temporal durable execution
