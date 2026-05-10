@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import ProductImageGallery from './ProductImageGallery';
 import ShopVariantSelector from './ShopVariantSelector';
 import { useCart } from '@/context/CartContext';
@@ -65,15 +66,23 @@ export default function ShopProductPageClient({ productId }: ShopProductPageClie
     await addItem(selectedVariant.id, 1, selectedVariant.price.amount);
   };
 
+  const searchParams = useSearchParams();
+  const requestedVariantId = searchParams.get('variantId');
+
   useEffect(() => {
     getProductDetail(productId).then((result) => {
       setData(result);
-      if (result?.defaultVariant) {
-        setSelectedVariant(result.defaultVariant);
+      if (result) {
+        // If a specific variant was requested (e.g. from shop page color filter),
+        // select it instead of the default
+        const targetVariant = requestedVariantId
+          ? result.variants.find((v) => v.id === requestedVariantId)
+          : null;
+        setSelectedVariant(targetVariant || result.defaultVariant);
       }
       setIsLoading(false);
     });
-  }, [productId]);
+  }, [productId, requestedVariantId]);
 
   if (isLoading) {
     return (

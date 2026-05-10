@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getElasticsearchClient } from '@/lib/es-client';
 
+// Printify uses inconsistent option type names across blank suppliers.
+// Group them by semantic category for search/faceting.
+const COLOR_OPTION_TYPES = ['Colors', 'Bella + Canvas Colors', 'AS Color colors', 'Comfort Colors® Colors'];
+const SIZE_OPTION_TYPES = ['Sizes', 'Clothing sizes'];
+
 interface SearchParams {
   q?: string;
   collection?: string;
@@ -23,6 +28,8 @@ interface ProductHit {
   collectionName?: string;
   defaultVariantId?: string;
   defaultVariantImageUrl?: string;
+  /** When set, the displayed image came from this specific variant (e.g. color filter match) */
+  displayVariantId?: string;
 }
 
 export async function GET(
@@ -80,7 +87,7 @@ export async function GET(
               query: {
                 bool: {
                   must: [
-                    { term: { 'variants.options.optionType': 'Color' } },
+                    { terms: { 'variants.options.optionType': COLOR_OPTION_TYPES } },
                     { term: { 'variants.options.value.label': params.color } }
                   ]
                 }
@@ -90,7 +97,7 @@ export async function GET(
           inner_hits: {
             name: 'color_variants',
             size: 1,
-            _source: ['variants.frontImageUrl']
+            _source: ['variants.id', 'variants.frontImageUrl']
           }
         }
       });
@@ -106,7 +113,7 @@ export async function GET(
               query: {
                 bool: {
                   must: [
-                    { term: { 'variants.options.optionType': 'Size' } },
+                    { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
                     { term: { 'variants.options.value.label': params.size } }
                   ]
                 }
@@ -156,7 +163,7 @@ export async function GET(
               nested: { path: 'variants.options' },
               aggs: {
                 color_filter: {
-                  filter: { term: { 'variants.options.optionType': 'Color' } },
+                  filter: { terms: { 'variants.options.optionType': COLOR_OPTION_TYPES } },
                   aggs: {
                     color_values: {
                       terms: { field: 'variants.options.value.label', size: 50 },
@@ -179,7 +186,7 @@ export async function GET(
               nested: { path: 'variants.options' },
               aggs: {
                 size_filter: {
-                  filter: { term: { 'variants.options.optionType': 'Size' } },
+                  filter: { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
                   aggs: {
                     size_values: {
                       terms: { field: 'variants.options.value.label', size: 50 }
@@ -201,9 +208,13 @@ export async function GET(
       if (params.color && hit.inner_hits?.color_variants) {
         const innerHits = hit.inner_hits.color_variants.hits.hits;
         if (innerHits.length > 0) {
-          const variantSource = innerHits[0]._source as { frontImageUrl?: string };
+          const variantSource = innerHits[0]._source as { id?: string; frontImageUrl?: string };
           if (variantSource?.frontImageUrl) {
-            return { ...product, defaultVariantImageUrl: variantSource.frontImageUrl };
+            return {
+              ...product,
+              defaultVariantImageUrl: variantSource.frontImageUrl,
+              displayVariantId: variantSource.id,
+            };
           }
         }
       }

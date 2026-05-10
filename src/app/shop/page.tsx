@@ -14,7 +14,10 @@ interface Product {
   price: { amount: number; currency: string };
   collectionId?: string;
   collectionName?: string;
+  defaultVariantId?: string;
   defaultVariantImageUrl?: string;
+  /** Variant whose image is being displayed (e.g. from color filter match) */
+  displayVariantId?: string;
 }
 
 interface Facets {
@@ -434,7 +437,7 @@ function ShopPageContent() {
                   {products.map((product) => (
                     <Link
                       key={product.id}
-                      href={`/shop/product/${product.id}`}
+                      href={`/shop/product/${product.id}${product.displayVariantId ? `?variantId=${product.displayVariantId}` : product.defaultVariantId ? `?variantId=${product.defaultVariantId}` : ''}`}
                       className="group block bg-white dark:bg-[var(--heron-forest)] rounded-lg border border-[var(--heron-cream-dark)] dark:border-[var(--heron-slate-dark)] shadow-sm hover:border-[var(--heron-slate)] dark:hover:border-[var(--heron-slate-light)] hover:shadow-lg transition-all duration-300 overflow-hidden"
                     >
                       <div className="aspect-square relative bg-[var(--heron-cream)] dark:bg-[var(--heron-slate-dark)] overflow-hidden">
