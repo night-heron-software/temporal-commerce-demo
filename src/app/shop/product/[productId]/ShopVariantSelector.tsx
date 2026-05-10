@@ -50,6 +50,34 @@ function getOptionHex(option: CassandraOption): string | null {
   return null;
 }
 
+// ─── Semantic option type detection ──────────────────────────────────────────
+// Printify uses inconsistent type names across blank suppliers:
+//   Colors: "Colors", "Bella + Canvas Colors", "AS Color colors", "Comfort Colors® Colors"
+//   Sizes:  "Sizes", "Clothing sizes"
+function isColorType(type: string): boolean {
+  const lower = type.toLowerCase();
+  return lower.includes('color');
+}
+
+function isSizeType(type: string): boolean {
+  const lower = type.toLowerCase();
+  return lower.includes('size');
+}
+
+// Canonical display label for grouped option types
+function getDisplayLabel(type: string): string {
+  if (isColorType(type)) return 'Color';
+  if (isSizeType(type)) return 'Size';
+  return type;
+}
+
+// Sort priority: Color first, then Size, then anything else
+function getGroupSortOrder(type: string): number {
+  if (isColorType(type)) return 0;
+  if (isSizeType(type)) return 1;
+  return 2;
+}
+
 // Represents an option value with availability info
 interface OptionValue {
   label: string;
@@ -61,7 +89,47 @@ interface OptionValue {
 // Represents an option type with all its possible values
 interface OptionGroup {
   type: string;
+  displayLabel: string;
+  isColor: boolean;
   values: OptionValue[];
+}
+
+// ─── Size sort order ─────────────────────────────────────────────────────────
+const SIZE_ORDER = [
+  // Infant/Toddler
+  'NB', '0-3M', '3-6M', '6-9M', '9-12M', '12mo', '12-18M', '18mo', '18-24M', '24mo',
+  '2T', '3T', '4T', '5T',
+  // Standard
+  'XXS', 'XS', 'Small', 'S', 'Medium', 'M', 'Large', 'L', 'XL',
+  '1X', '2XL', 'XXL', '2X', '3XL', 'XXXL', '3X', '4XL', '4X', '5XL', '5X', '6XL', '6X',
+  // Universal
+  'One Size', 'OS',
+];
+
+function sortSizes(values: OptionValue[]): void {
+  values.sort((a, b) => {
+    let aIdx = SIZE_ORDER.indexOf(a.label);
+    let bIdx = SIZE_ORDER.indexOf(b.label);
+
+    // Case-insensitive fallback
+    if (aIdx === -1) aIdx = SIZE_ORDER.findIndex((s) => s.toLowerCase() === a.label.toLowerCase());
+    if (bIdx === -1) bIdx = SIZE_ORDER.findIndex((s) => s.toLowerCase() === b.label.toLowerCase());
+
+    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+    if (aIdx >= 0) return -1;
+    if (bIdx >= 0) return 1;
+
+    // Numeric fallback (e.g. 11oz vs 15oz)
+    const aNum = parseFloat(a.label);
+    const bNum = parseFloat(b.label);
+    if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+
+    return a.label.localeCompare(b.label, undefined, { numeric: true });
+  });
+}
+
+function sortColors(values: OptionValue[]): void {
+  values.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export default function ShopVariantSelector({
@@ -164,83 +232,23 @@ export default function ShopVariantSelector({
         });
       });
 
-      // Sort sizes in a logical order
-      if (type.toLowerCase() === 'size' || type.toLowerCase() === 'clothing size') {
-        const sizeOrder = [
-          // Infant/Toddler
-          'NB',
-          '0-3M',
-          '3-6M',
-          '6-9M',
-          '9-12M',
-          '12mo',
-          '12-18M',
-          '18mo',
-          '18-24M',
-          '24mo',
-          '2T',
-          '3T',
-          '4T',
-          '5T',
-          // Standard
-          'XXS',
-          'XS',
-          'Small',
-          'S',
-          'Medium',
-          'M',
-          'Large',
-          'L',
-          'XL',
-          '1X',
-          '2XL',
-          'XXL',
-          '2X',
-          '3XL',
-          'XXXL',
-          '3X',
-          '4XL',
-          '4X',
-          '5XL',
-          '5X',
-          '6XL',
-          '6X',
-          // Universal
-          'One Size',
-          'OS'
-        ];
-
-        optionValues.sort((a, b) => {
-          const aLabel = a.label;
-          const bLabel = b.label;
-
-          // Exact match check first
-          let aIdx = sizeOrder.indexOf(aLabel);
-          let bIdx = sizeOrder.indexOf(bLabel);
-
-          // Case insensitive check if not found
-          if (aIdx === -1)
-            aIdx = sizeOrder.findIndex((s) => s.toLowerCase() === aLabel.toLowerCase());
-          if (bIdx === -1)
-            bIdx = sizeOrder.findIndex((s) => s.toLowerCase() === bLabel.toLowerCase());
-
-          if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-          if (aIdx >= 0) return -1;
-          if (bIdx >= 0) return 1;
-
-          // Try numeric sort for numeric sizes (e.g. 11oz vs 15oz)
-          const aNum = parseFloat(aLabel);
-          const bNum = parseFloat(bLabel);
-          if (!isNaN(aNum) && !isNaN(bNum)) {
-            return aNum - bNum;
-          }
-
-          return a.label.localeCompare(b.label, undefined, { numeric: true });
-        });
+      // Sort values based on semantic type
+      if (isSizeType(type)) {
+        sortSizes(optionValues);
+      } else if (isColorType(type)) {
+        sortColors(optionValues);
       }
 
-      result.push({ type, values: optionValues });
+      result.push({
+        type,
+        displayLabel: getDisplayLabel(type),
+        isColor: isColorType(type),
+        values: optionValues,
+      });
     });
+
+    // Sort groups: Color → Size → other
+    result.sort((a, b) => getGroupSortOrder(a.type) - getGroupSortOrder(b.type));
 
     return result;
   }, [allVariants, currentSelections]);
@@ -306,11 +314,11 @@ export default function ShopVariantSelector({
       <div className="space-y-6">
         {optionGroups.map((group) => (
           <div key={group.type}>
-            <label className="block text-sm font-medium text-zinc-500 mb-3">{group.type}</label>
+            <label className="block text-sm font-medium text-zinc-500 mb-3">{group.displayLabel}</label>
             <div className="flex flex-wrap gap-2">
               {group.values.map((value) => {
                 const isSelected = currentSelections.get(group.type) === value.label;
-                const isColor = group.type === 'Color' && value.hex;
+                const showSwatch = group.isColor && value.hex;
 
                 return (
                   <button
@@ -326,11 +334,11 @@ export default function ShopVariantSelector({
                             ? 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100'
                             : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed line-through'
                       }
-                      ${isColor ? 'pl-9' : ''}
+                      ${showSwatch ? 'pl-9' : ''}
                     `}
                     title={!value.available ? 'Unavailable' : value.label}
                   >
-                    {isColor && value.hex && (
+                    {showSwatch && value.hex && (
                       <span
                         className={`absolute left-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full border-2 ${
                           isSelected ? 'border-white' : 'border-zinc-300 dark:border-zinc-600'

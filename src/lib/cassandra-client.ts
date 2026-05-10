@@ -52,7 +52,8 @@ export function getCassandraClient(): Client {
 }
 
 /**
- * Execute a CQL query and return typed rows.
+ * Execute a CQL query and return typed rows (first page only — default 5000).
+ * Use executeCqlAll for full table scans with 5000+ rows.
  */
 export async function executeCql<T = Record<string, unknown>>(
   query: string,
@@ -61,6 +62,23 @@ export async function executeCql<T = Record<string, unknown>>(
   const client = getCassandraClient();
   const result = await client.execute(query, params, { prepare: true });
   return result.rows as unknown as T[];
+}
+
+/**
+ * Execute a CQL query and return ALL rows by auto-paging through the result set.
+ * Use this for full table scans where row count may exceed the default fetchSize (5000).
+ */
+export async function executeCqlAll<T = Record<string, unknown>>(
+  query: string,
+  params?: unknown[],
+): Promise<T[]> {
+  const client = getCassandraClient();
+  const result = await client.execute(query, params, { prepare: true, fetchSize: 5000 });
+  const allRows: T[] = [];
+  for await (const row of result) {
+    allRows.push(row as unknown as T);
+  }
+  return allRows;
 }
 
 /**

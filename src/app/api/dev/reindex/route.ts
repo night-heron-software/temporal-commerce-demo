@@ -4,7 +4,7 @@
  * Body: { index: 'products' | 'collections' | 'orders' | 'customers' | 'suppliers' | 'inventory' | 'supplier_orders' | 'carts' | 'fulfillments' | 'reservations' | 'shipments' | 'all' }
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { executeCql } from '@/lib';
+import { executeCql, executeCqlAll } from '@/lib';
 import { getElasticsearchClient } from '@/lib/es-client';
 import { INDEX_MAPPINGS } from '@/lib/es-index-mappings';
 
@@ -127,7 +127,7 @@ async function reindexProducts(esClient: EsClient, errors: string[]): Promise<nu
   }
 
   const productRows = await executeCql<ProductRow>('SELECT * FROM products');
-  const variantRows = await executeCql<VariantRow>('SELECT * FROM variants');
+  const variantRows = await executeCqlAll<VariantRow>('SELECT * FROM variants');
 
   // Group variants by product
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
