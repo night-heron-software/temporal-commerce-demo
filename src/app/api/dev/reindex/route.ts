@@ -476,7 +476,6 @@ async function reindexInventory(esClient: EsClient, errors: string[]): Promise<n
 }
 
 async function reindexSupplierOrders(esClient: EsClient, errors: string[]): Promise<number> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   interface OrderRow {
     order_id: CqlUuid;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
