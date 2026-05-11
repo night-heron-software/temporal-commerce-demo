@@ -199,15 +199,13 @@ export default function ShopProductPageClient({ productId }: ShopProductPageClie
             </div>
 
             {/* Variant Selector */}
-            {variants.length > 1 && (
-              <ShopVariantSelector
-                currentVariantId={selectedVariant.id}
-                currentOptions={selectedVariant.options ?? []}
-                relatedVariants={variants}
-                productId={productId}
-                onVariantChange={(v) => setSelectedVariant(v as VariantWithImages)}
-              />
-            )}
+            <ShopVariantSelector
+              currentVariantId={selectedVariant.id}
+              currentOptions={selectedVariant.options ?? []}
+              relatedVariants={variants}
+              productId={productId}
+              onVariantChange={(v) => setSelectedVariant(v as VariantWithImages)}
+            />
 
             {/* Add to Cart Button */}
             <button

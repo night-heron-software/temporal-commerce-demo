@@ -308,6 +308,40 @@ export default function ShopVariantSelector({
     });
   }, [optionGroups, currentSelections, handleOptionSelect]);
 
+  // ─── Determine display mode ───────────────────────────────────────────────
+  // No option groups at all → render nothing
+  if (optionGroups.length === 0) {
+    return null;
+  }
+
+  // Every group has exactly one value → show as static info, no interactive selector
+  const isSingleOption = optionGroups.every((g) => g.values.length <= 1);
+
+  if (isSingleOption) {
+    return (
+      <div className="bg-white dark:bg-zinc-950 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800">
+        <div className="flex flex-wrap gap-x-8 gap-y-3">
+          {optionGroups.map((group) => {
+            const value = group.values[0];
+            if (!value) return null;
+            return (
+              <div key={group.type} className="flex items-center gap-2">
+                <span className="text-sm font-medium text-zinc-500">{group.displayLabel}:</span>
+                {group.isColor && value.hex && (
+                  <span
+                    className="inline-block w-4 h-4 rounded-full border border-zinc-300 dark:border-zinc-600"
+                    style={{ backgroundColor: value.hex }}
+                  />
+                )}
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{value.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white dark:bg-zinc-950 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800">
       <h3 className="text-lg font-semibold mb-4">Select Options</h3>
