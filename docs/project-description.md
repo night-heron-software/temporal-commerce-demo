@@ -3,7 +3,7 @@
 A full-stack e-commerce application built entirely on [Temporal](https://temporal.io) durable execution. Every state transition — from adding an item to a cart through order fulfillment and delivery — is a Temporal workflow. No message queues, no cron jobs, no saga orchestrators. The business logic *is* the infrastructure.
 
 **Stack:** Next.js 15 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
-**Scale:** 116 source files · ~18,300 LOC · 6 Temporal workflow domains · 2,689 products
+**Scale:** 116 source files · ~18,300 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
 
 ---
 
@@ -243,7 +243,7 @@ The application follows a principle of **Redemptive State Recovery**: when a wor
 ```text
 temporal-commerce-demo/
 ├── cassandra/                  # CQL schema definitions
-├── sample-data/                # Product catalog (2,689 products, 40 collections)
+├── sample-data/                # Product catalog (266 products, 57 collections, 10,600 variants)
 ├── scripts/                    # Seed orchestrator
 ├── docs/
 │   ├── project-description.md  # This document
@@ -283,7 +283,7 @@ temporal-commerce-demo/
 npm install          # Install dependencies
 make init            # Start Docker infrastructure + Cassandra schema
 make app-start       # Start Next.js + Temporal workers
-make seed            # Populate 2,689 products across 40 collections
+make seed            # Populate 266 products across 57 collections
 ```
 
 | Resource | URL |

@@ -141,10 +141,9 @@ temporal-commerce-demo/
 ├── cassandra/                  # CQL schema definitions
 │   └── schema.cql             # All keyspace, UDTs, and tables
 ├── sample-data/
-│   └── catalog.json           # Generated product catalog (~6.5 MB)
+│   └── catalog.json           # Printify-imported product catalog (~8.2 MB)
 ├── scripts/
-│   ├── seed.ts                # API-driven seed orchestrator
-│   └── generate-catalog.ts    # Catalog JSON generator
+│   └── seed.ts                # API-driven seed orchestrator
 ├── src/
 │   ├── app/
 │   │   ├── api/
@@ -619,9 +618,9 @@ npx tsx scripts/seed.ts https://app.example.com  # Target a remote deployment
 3. `POST /api/seed-inventory` — Seed inventory stock for all variants
 4. `POST /api/dev/reindex` (`{index: "all"}`) — Sync all Cassandra-backed data to Elasticsearch
 
-### Catalog Generator
+### Catalog Source
 
-`scripts/generate-catalog.ts` generates the `sample-data/catalog.json` file with a full product catalog including collections, products, variants, and options.
+The `sample-data/catalog.json` file is exported from the Night Heron Platform via its Printify Catalog Sync and export tooling. It contains 266 products, 10,600 variants, and 57 collections with product images hosted on Google Cloud Storage.
 
 ---
 
