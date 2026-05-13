@@ -34,6 +34,7 @@ graph TB
 | **Order** | Processes order from placement through fulfillment | Supplier routing, assignment tracking, status projections |
 | **Fulfillment** | Simulates supplier order submission and shipping | Timer-based simulation, shipment tracking |
 | **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
+| **Identity** | Email-based shopper auth and address persistence | Cookie sessions, auto-create accounts, address pre-fill |
 
 ## Quick Start
 
@@ -99,18 +100,25 @@ temporal-commerce-demo/
 ├── scripts/                # Seed orchestrator
 ├── src/
 │   ├── app/
-│   │   ├── api/            # REST endpoints (search, product, seed)
-│   │   └── shop/           # Storefront pages + Server Actions
-│   ├── components/         # UI components (NavBar, CartDrawer, etc.)
-│   ├── context/            # React context (CartProvider)
+│   │   ├── api/
+│   │   │   ├── auth/shopper/ # Shopper auth (login, logout, me, address)
+│   │   │   ├── search/      # Product search API
+│   │   │   └── dev/         # Developer tools (ES init, reindex)
+│   │   ├── admin/           # Admin dashboard
+│   │   └── shop/            # Storefront pages + Server Actions
+│   │       ├── checkout/    # Multi-step checkout flow
+│   │       └── orders/      # Order lookup by email
+│   ├── components/         # UI components (NavBar, CartDrawer, AccountDropdown)
+│   ├── context/            # React context (CartProvider, ShopperProvider)
 │   ├── lib/                # Shared: Cassandra, ES, Temporal clients
 │   └── temporal/
 │       ├── contracts/      # Shared type definitions
-│       ├── cart/            # Cart workflow + activities
-│       ├── checkout/        # Checkout workflow + activities
+│       ├── cart/           # Cart workflow + activities
+│       ├── checkout/       # Checkout workflow + activities
 │       ├── oms/            # Order management workflow
 │       ├── fulfillment/    # Fulfillment simulation workflow
 │       ├── inventory/      # CQRS inventory workflow
+│       ├── identity/       # Shopper auth, users, API tokens, feature flags
 │       └── worker.ts       # Unified Temporal worker
 └── docker-compose.yml      # Local infrastructure
 ```

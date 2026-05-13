@@ -3,7 +3,7 @@
 A full-stack e-commerce application built entirely on [Temporal](https://temporal.io) durable execution. Every state transition — from adding an item to a cart through order fulfillment and delivery — is a Temporal workflow. No message queues, no cron jobs, no saga orchestrators. The business logic *is* the infrastructure.
 
 **Stack:** Next.js 15 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
-**Scale:** 116 source files · ~18,300 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
+**Scale:** 123 source files · ~19,000 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
 
 ---
 
@@ -117,9 +117,17 @@ The inventory service is a single long-running workflow that replaces an entire 
 | **Lazy start** | `signalWithStart` creates the inventory service on the first inventory mutation |
 | **Reservation lifecycle** | Temporary → Confirmed → Fulfilled/Released, with TTL-based expiration |
 
-### Identity — User and Store Management
+### Identity — Shopper Authentication and Address Persistence
 
-The identity domain manages user accounts, shoppers, API tokens, and store configuration through Temporal workflows.
+The identity domain provides email-based shopper authentication and saved shipping addresses. This is a password-less, demo-focused system — shoppers sign in with just an email address, and accounts are auto-created on first login.
+
+| Pattern | Implementation |
+| --- | --- |
+| **Email-only auth** | No passwords — `POST /api/auth/shopper/login` auto-creates accounts on first login |
+| **Cookie sessions** | `shopperId` cookie persists the session across page loads (30-day TTL) |
+| **Guest-to-member promotion** | Guest shoppers who complete checkout are automatically promoted to members using the shipping address email |
+| **Address pre-fill** | Returning shoppers have their checkout shipping form pre-populated from saved default addresses |
+| **Order lookup** | `/shop/orders` page allows signed-in shoppers to view order history with full shipping details |
 
 ---
 
@@ -135,7 +143,8 @@ Cassandra serves as the durable write store with partition-key isolation:
 | `orders`, `orders_by_customer`, `orders_by_confirmation` | Order persistence (3 denormalized views) |
 | `order_status_history` | Audit trail (TimeUUID clustering) |
 | `inventory_stock`, `inventory_reservations_w` | Inventory state |
-| `users`, `shoppers`, `api_tokens` | Identity management |
+| `shoppers` | Shopper accounts (email-keyed, no password) |
+| `shopper_shipping_addresses` | Saved shipping addresses (user_id partition) |
 
 ### Read Side — Elasticsearch
 
@@ -260,8 +269,8 @@ temporal-commerce-demo/
 │   │   │   ├── carts/          # Active cart monitoring
 │   │   │   └── search/         # Elasticsearch explorer (all 11 indices)
 │   │   └── shop/               # Storefront (catalog, product, checkout)
-│   ├── components/             # Shared UI (NavBar, CartDrawer, CheckoutProgress)
-│   ├── context/                # React context (CartProvider)
+│   ├── components/             # Shared UI (NavBar, CartDrawer, AccountDropdown)
+│   ├── context/                # React context (CartProvider, ShopperProvider)
 │   ├── lib/                    # Shared clients (Cassandra, ES, Temporal)
 │   └── temporal/
 │       ├── contracts/          # Shared type definitions and constants
@@ -270,7 +279,7 @@ temporal-commerce-demo/
 │       ├── oms/                # Order management domain
 │       ├── fulfillment/        # Fulfillment simulation domain
 │       ├── inventory/          # CQRS inventory domain
-│       ├── identity/           # User and store management domain
+│       ├── identity/           # Shopper auth, users, API tokens, feature flags
 │       └── worker.ts           # Unified worker launcher
 └── docker-compose.yml          # Local infrastructure
 ```

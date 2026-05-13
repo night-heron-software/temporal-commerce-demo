@@ -163,23 +163,27 @@ temporal-commerce-demo/
 │   │   │   ├── admin-inventory-actions.ts
 │   │   │   ├── admin-cart-actions.ts
 │   │   │   └── admin-search-actions.ts
-│   │   └── shop/              # Customer-facing storefront
+│   │   ├── shop/              # Customer-facing storefront
 │   │       ├── cart-actions.ts # Server Actions for cart/checkout
+│   │       ├── order-actions.ts # Server Actions for order lookup
 │   │       ├── checkout/      # Multi-step checkout flow
 │   │       │   ├── shipping/
 │   │       │   ├── payment/
 │   │       │   ├── review/
 │   │       │   └── confirmation/
 │   │       ├── collection/[id]/
-│   │       ├── product/[productId]/
+│   │       ├── orders/        # Order lookup by email
+│   │       └── product/[productId]/
 │   │       └── page.tsx       # Catalog landing page
 │   ├── components/            # Shared UI components
+│   │   ├── AccountDropdown.tsx # Shopper sign-in/out dropdown
 │   │   ├── CartDrawer.tsx
 │   │   ├── CartChangedBanner.tsx
 │   │   ├── CheckoutProgress.tsx
 │   │   └── ShopNavBar.tsx
 │   ├── context/
-│   │   └── CartContext.tsx     # Client-side cart state
+│   │   ├── CartContext.tsx     # Client-side cart state
+│   │   └── ShopperContext.tsx  # Client-side shopper session (cookie-based)
 │   ├── lib/                   # Shared infrastructure clients
 │   │   ├── cassandra-client.ts
 │   │   ├── es-client.ts
@@ -336,9 +340,31 @@ A CQRS inventory management system with separate write-side and read-side projec
 
 **Task Queue:** `identity-queue`
 
-Short-lived, fire-and-forget workflows for user management operations.
+The identity domain provides email-based shopper authentication and address persistence. This is a password-less, demo-focused system — shoppers sign in with just an email address, and accounts are auto-created on first login.
 
-**Operations:**
+**Shopper Authentication Flow:**
+
+1. Shopper enters email in the `AccountDropdown` or during checkout
+2. `POST /api/auth/shopper/login` checks for existing account → auto-creates if not found
+3. A `shopperId` cookie is set for session persistence (30-day TTL)
+4. On subsequent visits, `GET /api/auth/shopper/me` restores the session from the cookie
+
+**Address Persistence:**
+
+- Shipping addresses entered during checkout are saved to the `shopper_shipping_addresses` table
+- On return visits, the checkout shipping form is pre-populated with the shopper's saved default address
+- Guest shoppers who complete checkout are automatically promoted to members using the email from their shipping address
+
+**Auth API Routes:**
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/auth/shopper/login` | POST | Email-only sign-in (auto-creates account) |
+| `/api/auth/shopper/logout` | POST | Clear session cookie |
+| `/api/auth/shopper/me` | GET | Return current shopper profile + default address |
+| `/api/auth/shopper/address` | GET/POST | Retrieve or save shopper shipping addresses |
+
+**Workflow Operations:**
 
 - Feature flag CRUD (`upsertFeatureFlagWorkflow`, `deleteFeatureFlagWorkflow`)
 - User CRUD (`createUserWorkflow`, `updateUserNameWorkflow`, etc.)
@@ -370,6 +396,8 @@ The Cassandra schema is defined in `cassandra/schema.cql` and uses the `catalog`
 | `variants_by_product` | `product_id` | Variants for a product |
 | `orders` | `order_id` | Order details |
 | `orders_by_customer` | `customer_email` | Customer order history |
+| `shoppers` | `email` | Shopper accounts (email-only auth) |
+| `shopper_shipping_addresses` | `user_id` | Saved shipping addresses |
 | `inventory_stock_w` | `blank_sku, supplier_id` | Write-side stock levels |
 | `inventory_reservations_w` | `reservation_id` | Active inventory reservations |
 
@@ -405,8 +433,9 @@ Routes follow the established convention:
 
 | Prefix | Purpose | Examples |
 | --- | --- | --- |
-| `/shop` | Customer-facing storefront | Product browsing, cart, checkout |
+| `/shop` | Customer-facing storefront | Product browsing, cart, checkout, order lookup |
 | `/admin` | Business management | Order management, feature flags |
+| `/api/auth/*` | Shopper authentication | Login, logout, session, address |
 | `/api/admin/*` | Admin management APIs | Feature flag CRUD |
 | `/api/dev/*` | Developer tools | ES index init, reindex |
 | `/api/search` | Product search | Elasticsearch-backed search |
@@ -440,6 +469,10 @@ This unified wrapper:
 ### Client-Side State
 
 `CartContext.tsx` provides React context for cart state management. It polls the cart workflow state and provides actions that call Server Actions.
+
+`ShopperContext.tsx` provides React context for shopper session management. It reads the current session from `/api/auth/shopper/me` on mount and exposes `signIn`, `signOut`, and `refreshSession` actions. The session is persisted via an `httpOnly` cookie.
+
+The `AccountDropdown` component in the navbar uses `ShopperContext` to show sign-in/sign-out controls. When signed in, the shopper's email is displayed. During checkout, the shipping form auto-populates from the shopper's saved default address.
 
 ---
 

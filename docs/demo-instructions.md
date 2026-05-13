@@ -32,7 +32,7 @@ In a **second terminal**:
 make seed
 ```
 
-This populates the product catalog (~2,700 products across 40 collections) by calling the running app's API endpoints. Wait for `✨ Seeding complete!`.
+This populates the product catalog (266 products across 57 collections) by calling the running app's API endpoints. Wait for `✨ Seeding complete!`.
 
 ### 4. Verify
 
@@ -78,11 +78,12 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 
 1. Open the **cart drawer** and click **Checkout**
 2. Glance at Temporal UI — a `checkout-{uuid}` child workflow appeared
-3. On the **Shipping** page, click **🧪 Autofill Test Data**, then **Continue to Payment**
-4. On the **Payment** page, click **Continue with Mock Payment**
-5. On the **Review** page, pause briefly to show the order summary
+3. On the **Shipping** page, note the **Sign In** option in the navbar — if signed in, the email and saved address auto-populate
+4. Click **🧪 Autofill Test Data**, then **Continue to Payment**
+5. On the **Payment** page, click **Continue with Mock Payment**
+6. On the **Review** page, pause briefly to show the order summary
 
-> "Checkout is a child workflow of the cart. Each step — shipping, payment, review — is a Temporal Update with validation guards enforcing the state machine."
+> "Checkout is a child workflow of the cart. Each step — shipping, payment, review — is a Temporal Update with validation guards enforcing the state machine. If the shopper is signed in, their saved address pre-populates the form from Cassandra."
 
 ### 2:00 — Place Order (~1 minute)
 
