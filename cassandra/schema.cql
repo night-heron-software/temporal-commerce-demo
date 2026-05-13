@@ -361,3 +361,42 @@ CREATE TABLE IF NOT EXISTS inventory_low_stock (
     last_projected_at TIMESTAMP,
     PRIMARY KEY (threshold_bucket, available_stock, blank_sku)
 ) WITH CLUSTERING ORDER BY (available_stock ASC, blank_sku ASC);
+
+-- ===========================================
+-- Shopper Identity Tables
+-- ===========================================
+
+CREATE TABLE IF NOT EXISTS shoppers (
+    store_id TEXT,
+    email TEXT,
+    id UUID,
+    password_hash TEXT,
+    name TEXT,
+    phone TEXT,
+    failed_attempts INT,
+    locked_until TIMESTAMP,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    PRIMARY KEY (store_id, email)
+);
+
+CREATE TABLE IF NOT EXISTS shopper_shipping_addresses (
+    store_id TEXT,
+    user_id TEXT,
+    address_id UUID,
+    label TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    address1 TEXT,
+    address2 TEXT,
+    city TEXT,
+    state TEXT,
+    postal_code TEXT,
+    country TEXT,
+    phone TEXT,
+    email TEXT,
+    is_default BOOLEAN,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    PRIMARY KEY (store_id, user_id, address_id)
+);

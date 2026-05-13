@@ -1,8 +1,9 @@
 'use client';
 
 import { useCart } from '@/context/CartContext';
+import { useShopper } from '@/context/ShopperContext';
 import { useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { setShippingAddress } from '@/app/shop/cart-actions';
 import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
@@ -47,8 +48,12 @@ function generateTestAddress(): Cart.ShippingAddress {
 export default function ShippingPage() {
   const router = useRouter();
   const { cart, cartId, refreshCart } = useCart();
+  const { shopper, savedAddress, signIn, signOut, saveAddress } = useShopper();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSignIn, setShowSignIn] = useState(false);
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signingIn, setSigningIn] = useState(false);
 
   const [formData, setFormData] = useState<Cart.ShippingAddress>({
     firstName: '',
@@ -63,15 +68,50 @@ export default function ShippingPage() {
     email: ''
   });
 
-  // Pre-fill from existing checkout data
+  // Track whether we've already applied initial data to avoid re-running
+  const [initialized, setInitialized] = useState(false);
+
+  // Pre-fill from saved address (signed-in user) or existing checkout data
   useEffect(() => {
-    if (cart?.checkout?.shippingAddress) {
+    if (initialized) return;
+
+    if (shopper && savedAddress) {
+      // Signed in with saved address → pre-fill everything
+      setFormData({
+        firstName: savedAddress.firstName,
+        lastName: savedAddress.lastName,
+        address1: savedAddress.address1,
+        address2: savedAddress.address2 || '',
+        city: savedAddress.city,
+        state: savedAddress.state,
+        postalCode: savedAddress.postalCode,
+        country: savedAddress.country,
+        phone: savedAddress.phone || '',
+        email: shopper.email,
+      });
+      setInitialized(true);
+    } else if (shopper && !savedAddress) {
+      // Signed in but no saved address → just email
+      setFormData((prev) => ({ ...prev, email: shopper.email }));
+      setInitialized(true);
+    } else if (cart?.checkout?.shippingAddress) {
+      // Existing checkout data (e.g. going back from payment)
       setFormData(cart.checkout.shippingAddress);
+      setInitialized(true);
     }
-  }, [cart?.checkout?.shippingAddress]);
+  }, [shopper, savedAddress, cart?.checkout?.shippingAddress, initialized]);
 
   const handleAutofill = () => {
-    setFormData(generateTestAddress());
+    const testAddr = generateTestAddress();
+    if (shopper) {
+      // Signed in → fill everything EXCEPT email
+      setFormData((prev) => ({
+        ...testAddr,
+        email: prev.email,
+      }));
+    } else {
+      setFormData(testAddr);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -87,6 +127,25 @@ export default function ShippingPage() {
     setError(null);
 
     try {
+      // If not signed in, auto-create account from the email entered
+      if (!shopper) {
+        await signIn(formData.email.trim());
+      }
+
+      // Save the address for next time
+      await saveAddress({
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        address1: formData.address1,
+        address2: formData.address2,
+        city: formData.city,
+        state: formData.state,
+        postalCode: formData.postalCode,
+        country: formData.country,
+        phone: formData.phone,
+        email: formData.email,
+      });
+
       const checkoutState = await setShippingAddress(cartId, formData);
       if (checkoutState?.step === 'payment') {
         await refreshCart();
@@ -105,6 +164,29 @@ export default function ShippingPage() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handleShippingSignIn = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signInEmail.trim()) return;
+    setSigningIn(true);
+    setError(null);
+    const result = await signIn(signInEmail.trim());
+    if (result.ok) {
+      setShowSignIn(false);
+      setSignInEmail('');
+      // Reset initialized so the useEffect re-applies saved address
+      setInitialized(false);
+    } else {
+      setError(result.error || 'Sign in failed');
+    }
+    setSigningIn(false);
+  }, [signInEmail, signIn]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    // Clear form except keep what they've typed
+    setInitialized(false);
   };
 
   if (!cart) {
@@ -132,6 +214,68 @@ export default function ShippingPage() {
             🧪 Autofill Test Data
           </button>
         </div>
+
+        {/* ── Identity Banner ── */}
+        {shopper ? (
+          <div className="mb-6 flex items-center justify-between bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg px-4 py-3">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">
+                {shopper.name.charAt(0).toUpperCase()}
+              </span>
+              <span className="text-indigo-700 dark:text-indigo-300">
+                Signed in as <strong>{shopper.email}</strong>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              Sign Out
+            </button>
+          </div>
+        ) : (
+          !showSignIn ? (
+            <div className="mb-6">
+              <button
+                type="button"
+                onClick={() => setShowSignIn(true)}
+                className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+              >
+                Already have an account? Sign in for faster checkout →
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleShippingSignIn} className="mb-6 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4">
+              <div className="text-sm font-medium mb-2">Sign in with email</div>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  value={signInEmail}
+                  onChange={(e) => setSignInEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                  className="flex-1 px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:border-indigo-500 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={signingIn}
+                  className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors font-medium"
+                >
+                  {signingIn ? '…' : 'Sign In'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowSignIn(false); setSignInEmail(''); }}
+                  className="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-xs text-zinc-400 mt-2">No password needed — just enter your email</p>
+            </form>
+          )
+        )}
 
         {error && (
           <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 p-4 rounded-lg mb-6">
@@ -166,7 +310,8 @@ export default function ShippingPage() {
             <input
               type="email" name="email" value={formData.email} onChange={handleChange} required
               autoComplete="shipping email"
-              className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
+              readOnly={!!shopper}
+              className={`w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none ${shopper ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 cursor-not-allowed' : ''}`}
             />
           </div>
 

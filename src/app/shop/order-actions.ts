@@ -9,6 +9,19 @@
 
 import { executeCql } from '@/lib';
 
+export interface ShippingAddress {
+  firstName: string;
+  lastName: string;
+  address1: string;
+  address2?: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  phone?: string;
+  email: string;
+}
+
 export interface CustomerOrder {
   orderId: string;
   confirmationNumber: string;
@@ -16,10 +29,12 @@ export interface CustomerOrder {
   currency: string;
   status: string;
   createdAt: string;
+  shippingAddress?: ShippingAddress;
 }
 
 /**
- * Get orders for a specific customer email using the orders_by_customer table.
+ * Get orders for a specific customer email using the orders_by_customer table,
+ * then enrich with shipping address from the main orders table.
  */
 export async function getOrdersByEmail(email: string): Promise<{
   success: boolean;
@@ -42,14 +57,61 @@ export async function getOrdersByEmail(email: string): Promise<{
       [email.toLowerCase().trim()]
     );
 
-    const data: CustomerOrder[] = rows.map(row => ({
-      orderId: row.order_id.toString(),
-      confirmationNumber: row.confirmation_number,
-      total: row.total ?? 0,
-      currency: row.currency ?? 'USD',
-      status: row.status ?? 'unknown',
-      createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
-    }));
+    // Enrich each order with shipping address from the main orders table
+    const data: CustomerOrder[] = await Promise.all(
+      rows.map(async (row) => {
+        const orderId = row.order_id.toString();
+
+        // Fetch shipping address from main orders table
+        let shippingAddress: ShippingAddress | undefined;
+        try {
+          const orderRows = await executeCql<{
+            shipping_address: {
+              first_name: string;
+              last_name: string;
+              address1: string;
+              address2: string | null;
+              city: string;
+              state: string;
+              postal_code: string;
+              country: string;
+              phone: string | null;
+              email: string;
+            } | null;
+          }>(
+            `SELECT shipping_address FROM orders WHERE order_id = ?`,
+            [orderId]
+          );
+          const addr = orderRows[0]?.shipping_address;
+          if (addr) {
+            shippingAddress = {
+              firstName: addr.first_name,
+              lastName: addr.last_name,
+              address1: addr.address1,
+              address2: addr.address2 || undefined,
+              city: addr.city,
+              state: addr.state,
+              postalCode: addr.postal_code,
+              country: addr.country,
+              phone: addr.phone || undefined,
+              email: addr.email,
+            };
+          }
+        } catch {
+          // Non-fatal — show order without address
+        }
+
+        return {
+          orderId,
+          confirmationNumber: row.confirmation_number,
+          total: row.total ?? 0,
+          currency: row.currency ?? 'USD',
+          status: row.status ?? 'unknown',
+          createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
+          shippingAddress,
+        };
+      })
+    );
 
     return { success: true, data };
   } catch (e) {

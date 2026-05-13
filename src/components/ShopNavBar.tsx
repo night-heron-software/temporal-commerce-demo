@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
+import { AccountDropdown } from './AccountDropdown';
 
 interface ShopNavBarProps {
   onCartClick: () => void;
@@ -58,6 +59,9 @@ export function ShopNavBar({ onCartClick }: ShopNavBarProps) {
             >
               ⚡ Temporal UI
             </a>
+
+            {/* Account Dropdown */}
+            <AccountDropdown />
 
             {/* Cart */}
             <button

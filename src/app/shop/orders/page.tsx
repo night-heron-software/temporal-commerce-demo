@@ -3,22 +3,33 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getOrdersByEmail, type CustomerOrder } from '../order-actions';
+import { useShopper } from '@/context/ShopperContext';
 
 export default function ShopOrdersPage() {
+  const { shopper } = useShopper();
   const [email, setEmail] = useState('');
   const [loggedInEmail, setLoggedInEmail] = useState<string | null>(null);
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Check for saved email in sessionStorage
+  // If signed in via ShopperContext, use that email automatically
   useEffect(() => {
+    if (shopper?.email && !loggedInEmail) {
+      setLoggedInEmail(shopper.email);
+      setEmail(shopper.email);
+    }
+  }, [shopper, loggedInEmail]);
+
+  // Fallback: check for saved email in sessionStorage
+  useEffect(() => {
+    if (loggedInEmail) return; // already set from ShopperContext
     const saved = sessionStorage.getItem('shopperEmail');
     if (saved) {
       setLoggedInEmail(saved);
       setEmail(saved);
     }
-  }, []);
+  }, [loggedInEmail]);
 
   const fetchOrders = useCallback(async (customerEmail: string) => {
     setIsLoading(true);
@@ -231,7 +242,28 @@ export default function ShopOrdersPage() {
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-700">
+                    {/* Shipping Address */}
+                    {order.shippingAddress && (
+                      <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-700">
+                        <div className="text-xs font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
+                          Ship to
+                        </div>
+                        <div className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                          <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                            {order.shippingAddress.firstName} {order.shippingAddress.lastName}
+                          </span>
+                          <br />
+                          {order.shippingAddress.address1}
+                          {order.shippingAddress.address2 && (
+                            <>, {order.shippingAddress.address2}</>
+                          )}
+                          <br />
+                          {order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-3 border-t border-zinc-100 dark:border-zinc-700 mt-3">
                       <span className="text-sm text-zinc-500 dark:text-zinc-400">
                         {loggedInEmail}
                       </span>
