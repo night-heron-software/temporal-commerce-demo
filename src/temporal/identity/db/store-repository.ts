@@ -128,7 +128,6 @@ export class StoreRepository {
 
     return rows.map((row) => ({
       domain: row.domain,
-      storeId: row.store_id.toString(),
       isPrimary: row.is_primary,
       verified: row.verified,
       createdAt: row.created_at,

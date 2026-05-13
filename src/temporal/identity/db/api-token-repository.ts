@@ -10,7 +10,7 @@ export class ApiTokenRepository {
    * Generate a new API token. Returns the raw token (shown only once) and saves the hash.
    */
   async createToken(input: Identity.CreateTokenInput): Promise<{ rawToken: string; token: Identity.ApiToken }> {
-    logger.info({ name: input.name, userEmail: input.userEmail, storeId: input.storeId }, 'ApiTokenRepository.createToken');
+    logger.info({ name: input.name, userEmail: input.userEmail }, 'ApiTokenRepository.createToken');
 
     // Generate a secure random token
     const rawToken = `nh_${crypto.randomBytes(32).toString('hex')}`;
@@ -23,11 +23,10 @@ export class ApiTokenRepository {
     const expiresAt = new Date(now.getTime() + (input.expiresInDays || 365) * 24 * 60 * 60 * 1000);
 
     await executeCql(
-      `INSERT INTO api_tokens (token_id, store_id, token_hash, name, user_email, user_type, scopes, expires_at, last_used_at, created_at, revoked)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO api_tokens (token_id, token_hash, name, user_email, user_type, scopes, expires_at, last_used_at, created_at, revoked)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         tokenId,
-        input.storeId ? input.storeId : null,
         tokenHash,
         input.name,
         input.userEmail,
@@ -42,7 +41,6 @@ export class ApiTokenRepository {
 
     const token: Identity.ApiToken = {
       tokenId: tokenId.toString(),
-      storeId: input.storeId,
       tokenHash,
       name: input.name,
       userEmail: input.userEmail,
@@ -71,7 +69,6 @@ export class ApiTokenRepository {
 
     const rows = await executeCql<{
       token_id: types.Uuid;
-      store_id: types.Uuid | null;
       token_hash: string;
       name: string;
       user_email: string;
@@ -82,7 +79,7 @@ export class ApiTokenRepository {
       created_at: Date;
       revoked: boolean;
     }>(
-      `SELECT token_id, store_id, token_hash, name, user_email, user_type, scopes, expires_at, last_used_at, created_at, revoked 
+      `SELECT token_id, token_hash, name, user_email, user_type, scopes, expires_at, last_used_at, created_at, revoked 
        FROM api_tokens 
        WHERE token_hash = ?`,
       [tokenHash]
@@ -110,7 +107,6 @@ export class ApiTokenRepository {
 
     const token: Identity.ApiToken = {
       tokenId: row.token_id.toString(),
-      storeId: row.store_id ? row.store_id.toString() : undefined,
       tokenHash: row.token_hash,
       name: row.name,
       userEmail: row.user_email,
@@ -128,12 +124,11 @@ export class ApiTokenRepository {
   /**
    * Get all tokens for a user.
    */
-  async getTokensByUser(userEmail: string, storeId?: string): Promise<Identity.ApiToken[]> {
-    logger.info({ userEmail, storeId }, 'ApiTokenRepository.getTokensByUser');
+  async getTokensByUser(userEmail: string): Promise<Identity.ApiToken[]> {
+    logger.info({ userEmail }, 'ApiTokenRepository.getTokensByUser');
 
     const rows = await executeCql<{
       token_id: types.Uuid;
-      store_id: types.Uuid | null;
       token_hash: string;
       name: string;
       user_email: string;
@@ -144,7 +139,7 @@ export class ApiTokenRepository {
       created_at: Date;
       revoked: boolean;
     }>(
-      `SELECT token_id, store_id, token_hash, name, user_email, user_type, scopes, expires_at, last_used_at, created_at, revoked 
+      `SELECT token_id, token_hash, name, user_email, user_type, scopes, expires_at, last_used_at, created_at, revoked 
        FROM api_tokens 
        WHERE user_email = ?`,
       [userEmail]
@@ -152,7 +147,6 @@ export class ApiTokenRepository {
 
     let tokens = rows.map((row) => ({
       tokenId: row.token_id.toString(),
-      storeId: row.store_id ? row.store_id.toString() : undefined,
       tokenHash: row.token_hash,
       name: row.name,
       userEmail: row.user_email,
@@ -163,10 +157,6 @@ export class ApiTokenRepository {
       createdAt: row.created_at,
       revoked: row.revoked
     }));
-
-    if (storeId) {
-      tokens = tokens.filter(t => t.storeId === storeId);
-    }
 
     return tokens;
   }

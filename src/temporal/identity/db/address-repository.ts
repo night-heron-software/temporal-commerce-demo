@@ -5,8 +5,8 @@ import { types } from 'cassandra-driver';
 const logger = createLogger('identity:address-repository');
 
 export class AddressRepository {
-  async getByUserId(storeId: string, userId: string): Promise<Identity.SavedAddress[]> {
-    logger.info({ storeId, userId }, 'AddressRepository.getByUserId');
+  async getByUserId(userId: string): Promise<Identity.SavedAddress[]> {
+    logger.info({ userId }, 'AddressRepository.getByUserId');
 
     const rows = await executeCql<{
       address_id: types.Uuid;
@@ -29,8 +29,8 @@ export class AddressRepository {
               city, state, postal_code, country, phone, email,
               is_default, created_at, updated_at
        FROM shopper_shipping_addresses
-       WHERE store_id = ? AND user_id = ?`,
-      [storeId, userId]
+       WHERE user_id = ?`,
+      [userId]
     );
 
     return rows.map((row) => ({
@@ -52,23 +52,22 @@ export class AddressRepository {
     }));
   }
 
-  async save(storeId: string, userId: string, address: Identity.SavedAddress): Promise<void> {
-    logger.info({ storeId, userId, addressId: address.addressId }, 'AddressRepository.save');
+  async save(userId: string, address: Identity.SavedAddress): Promise<void> {
+    logger.info({ userId, addressId: address.addressId }, 'AddressRepository.save');
     const now = new Date();
 
     // If setting as default, clear existing defaults first
     if (address.isDefault) {
-      await this.clearDefaults(storeId, userId);
+      await this.clearDefaults(userId);
     }
 
     await executeCql(
       `INSERT INTO shopper_shipping_addresses
-       (store_id, user_id, address_id, label, first_name, last_name,
+       (user_id, address_id, label, first_name, last_name,
         address1, address2, city, state, postal_code, country,
         phone, email, is_default, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        storeId,
         userId,
         address.addressId,
         address.label,
@@ -89,39 +88,39 @@ export class AddressRepository {
     );
   }
 
-  async delete(storeId: string, userId: string, addressId: string): Promise<void> {
-    logger.info({ storeId, userId, addressId }, 'AddressRepository.delete');
+  async delete(userId: string, addressId: string): Promise<void> {
+    logger.info({ userId, addressId }, 'AddressRepository.delete');
 
     await executeCql(
-      `DELETE FROM shopper_shipping_addresses WHERE store_id = ? AND user_id = ? AND address_id = ?`,
-      [storeId, userId, addressId]
+      `DELETE FROM shopper_shipping_addresses WHERE user_id = ? AND address_id = ?`,
+      [userId, addressId]
     );
   }
 
-  async setDefault(storeId: string, userId: string, addressId: string): Promise<void> {
-    logger.info({ storeId, userId, addressId }, 'AddressRepository.setDefault');
+  async setDefault(userId: string, addressId: string): Promise<void> {
+    logger.info({ userId, addressId }, 'AddressRepository.setDefault');
 
     // Clear existing defaults
-    await this.clearDefaults(storeId, userId);
+    await this.clearDefaults(userId);
 
     // Set new default
     await executeCql(
       `UPDATE shopper_shipping_addresses SET is_default = true, updated_at = ?
-       WHERE store_id = ? AND user_id = ? AND address_id = ?`,
-      [new Date(), storeId, userId, addressId]
+       WHERE user_id = ? AND address_id = ?`,
+      [new Date(), userId, addressId]
     );
   }
 
-  private async clearDefaults(storeId: string, userId: string): Promise<void> {
-    const addresses = await this.getByUserId(storeId, userId);
+  private async clearDefaults(userId: string): Promise<void> {
+    const addresses = await this.getByUserId(userId);
     const defaults = addresses.filter((a) => a.isDefault);
 
     await Promise.all(
       defaults.map((addr) =>
         executeCql(
           `UPDATE shopper_shipping_addresses SET is_default = false, updated_at = ?
-           WHERE store_id = ? AND user_id = ? AND address_id = ?`,
-          [new Date(), storeId, userId, addr.addressId]
+           WHERE user_id = ? AND address_id = ?`,
+          [new Date(), userId, addr.addressId]
         )
       )
     );

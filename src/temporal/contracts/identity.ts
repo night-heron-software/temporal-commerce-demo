@@ -16,7 +16,6 @@ export interface User {
   passwordHash: string;
   name: string;
   role: 'admin' | 'developer' | 'user';
-  storeId?: string | null;
   failedAttempts?: number;
   lockedUntil?: Date | null;
 }
@@ -74,7 +73,6 @@ export type UserType = 'admin' | 'shopper';
 
 export interface ApiToken {
   tokenId: string;
-  storeId?: string;
   tokenHash: string;
   name: string;
   userEmail: string;
@@ -88,7 +86,6 @@ export interface ApiToken {
 
 export interface CreateTokenInput {
   name: string;
-  storeId?: string;
   userEmail: string;
   userType?: UserType;
   scopes: string[];
@@ -150,7 +147,6 @@ export interface AuditEntry {
 
 export interface UserInvitation {
   token: string;
-  storeId?: string;
   email: string;
   role: 'admin' | 'developer' | 'staff';
   invitedBy: string;
@@ -162,7 +158,6 @@ export interface UserInvitation {
 export interface CreateInvitationInput {
   email: string;
   role: 'admin' | 'developer' | 'staff';
-  storeId?: string;
   invitedBy: string;
   expiresInDays?: number;
 }
@@ -183,7 +178,6 @@ export interface Store {
 
 export interface StoreDomain {
   domain: string;
-  storeId: string;
   isPrimary: boolean;
   verified: boolean;
   createdAt: Date;
@@ -208,15 +202,15 @@ export interface IdentityActivities {
   updateUserPassword(email: string, hash: string): Promise<void>;
   deleteUser(email: string): Promise<void>;
 
-  createShopper(storeId: string, shopper: { id: string; email: string; passwordHash: string; name: string; phone?: string }): Promise<void>;
-  updateShopperProfile(storeId: string, email: string, updates: { name?: string; phone?: string }): Promise<void>;
-  updateShopperPassword(storeId: string, email: string, hash: string): Promise<void>;
+  createShopper(shopper: { id: string; email: string; passwordHash: string; name: string; phone?: string }): Promise<void>;
+  updateShopperProfile(email: string, updates: { name?: string; phone?: string }): Promise<void>;
+  updateShopperPassword(email: string, hash: string): Promise<void>;
 
   createApiToken(input: CreateTokenInput): Promise<{ rawToken: string; token: Omit<ApiToken, 'scopes'> & { scopes: string[] } }>;
   revokeApiToken(tokenId: string): Promise<boolean>;
   deleteApiToken(tokenId: string): Promise<boolean>;
 
-  logAudit(storeId: string, entry: AuditEntry): Promise<void>;
+  logAudit(entry: AuditEntry): Promise<void>;
 }
 
 // ============================================================================

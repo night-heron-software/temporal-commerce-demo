@@ -63,16 +63,16 @@ export async function deleteUser(email: string): Promise<void> {
 
 // ─── Shopper Activities ─────────────────────────────────────────────
 
-export async function createShopper(storeId: string, shopper: { id: string; email: string; passwordHash: string; name: string; phone?: string }): Promise<void> {
-  await shopperRepo.createShopper(storeId, shopper);
+export async function createShopper(shopper: { id: string; email: string; passwordHash: string; name: string; phone?: string }): Promise<void> {
+  await shopperRepo.createShopper(shopper);
 }
 
-export async function updateShopperProfile(storeId: string, email: string, updates: { name?: string; phone?: string }): Promise<void> {
-  await shopperRepo.updateShopper(storeId, email, updates);
+export async function updateShopperProfile(email: string, updates: { name?: string; phone?: string }): Promise<void> {
+  await shopperRepo.updateShopper(email, updates);
 }
 
-export async function updateShopperPassword(storeId: string, email: string, hash: string): Promise<void> {
-  await shopperRepo.updatePassword(storeId, email, hash);
+export async function updateShopperPassword(email: string, hash: string): Promise<void> {
+  await shopperRepo.updatePassword(email, hash);
 }
 
 // ─── API Token Activities ───────────────────────────────────────────
@@ -98,6 +98,6 @@ export async function deleteApiToken(tokenId: string): Promise<boolean> {
 
 // ─── Audit Activities ───────────────────────────────────────────────
 
-export async function logAudit(storeId: string, entry: Identity.AuditEntry): Promise<void> {
-  await auditRepo.log(storeId, entry);
+export async function logAudit(entry: Identity.AuditEntry): Promise<void> {
+  await auditRepo.log('demo', entry);
 }

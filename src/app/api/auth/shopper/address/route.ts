@@ -21,7 +21,7 @@ export async function GET() {
     return NextResponse.json({ addresses: [] });
   }
 
-  const addresses = await addressRepo.getByUserId('demo', shopperId);
+  const addresses = await addressRepo.getByUserId(shopperId);
   return NextResponse.json({ addresses });
 }
 
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
 
   // Check if there's an existing default address to update
-  const existing = await addressRepo.getByUserId('demo', shopperId);
+  const existing = await addressRepo.getByUserId(shopperId);
   const defaultAddr = existing.find((a) => a.isDefault);
 
   const address = {
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     isDefault: true,
   };
 
-  await addressRepo.save('demo', shopperId, address);
+  await addressRepo.save(shopperId, address);
 
   return NextResponse.json({ ok: true, address });
 }

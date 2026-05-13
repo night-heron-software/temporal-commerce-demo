@@ -367,7 +367,6 @@ CREATE TABLE IF NOT EXISTS inventory_low_stock (
 -- ===========================================
 
 CREATE TABLE IF NOT EXISTS shoppers (
-    store_id TEXT,
     email TEXT,
     id UUID,
     password_hash TEXT,
@@ -377,11 +376,10 @@ CREATE TABLE IF NOT EXISTS shoppers (
     locked_until TIMESTAMP,
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
-    PRIMARY KEY (store_id, email)
+    PRIMARY KEY (email)
 );
 
 CREATE TABLE IF NOT EXISTS shopper_shipping_addresses (
-    store_id TEXT,
     user_id TEXT,
     address_id UUID,
     label TEXT,
@@ -398,5 +396,5 @@ CREATE TABLE IF NOT EXISTS shopper_shipping_addresses (
     is_default BOOLEAN,
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
-    PRIMARY KEY (store_id, user_id, address_id)
+    PRIMARY KEY (user_id, address_id)
 );

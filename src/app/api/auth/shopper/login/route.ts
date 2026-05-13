@@ -23,19 +23,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Email is required' }, { status: 400 });
   }
 
-  let shopper = await shopperRepo.getShopperByEmail('demo', email);
+  let shopper = await shopperRepo.getShopperByEmail(email);
 
   if (!shopper) {
     // Auto-create shopper (email-only, no password for demo)
     const id = uuidv4();
     const name = email.split('@')[0]; // derive display name from email
-    await shopperRepo.createShopper('demo', {
+    await shopperRepo.createShopper({
       id,
       email,
       passwordHash: 'demo-no-password',
       name,
     });
-    shopper = await shopperRepo.getShopperByEmail('demo', email);
+    shopper = await shopperRepo.getShopperByEmail(email);
   }
 
   if (!shopper) {
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
   });
 
   // Load saved address
-  const addresses = await addressRepo.getByUserId('demo', shopper.id);
+  const addresses = await addressRepo.getByUserId(shopper.id);
   const defaultAddress = addresses.find((a) => a.isDefault) || addresses[0] || null;
 
   return NextResponse.json({

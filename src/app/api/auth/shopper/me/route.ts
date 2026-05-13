@@ -22,14 +22,14 @@ export async function GET() {
     return NextResponse.json({ shopper: null, savedAddress: null });
   }
 
-  // Look up shopper by ID (need to scan by ID since PK is (store_id, email))
+  // Look up shopper by ID
   const rows = await executeCql<{
     id: types.Uuid;
     email: string;
     name: string;
   }>(
-    `SELECT id, email, name FROM shoppers WHERE store_id = ? AND id = ? ALLOW FILTERING`,
-    ['demo', shopperId]
+    `SELECT id, email, name FROM shoppers WHERE id = ? ALLOW FILTERING`,
+    [shopperId]
   );
 
   if (rows.length === 0) {
@@ -39,7 +39,7 @@ export async function GET() {
   }
 
   const row = rows[0];
-  const addresses = await addressRepo.getByUserId('demo', shopperId);
+  const addresses = await addressRepo.getByUserId(shopperId);
   const defaultAddress = addresses.find((a) => a.isDefault) || addresses[0] || null;
 
   return NextResponse.json({

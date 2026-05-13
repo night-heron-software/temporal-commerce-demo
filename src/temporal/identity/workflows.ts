@@ -62,27 +62,27 @@ export async function deleteUserWorkflow(email: string): Promise<void> {
 
 // ─── Shopper Workflows ─────────────────────────────────────────────
 
-export async function createShopperWorkflow(storeId: string, shopper: { id: string; email: string; passwordHash: string; name: string; phone?: string }): Promise<void> {
-  await createShopper(storeId, shopper);
+export async function createShopperWorkflow(shopper: { id: string; email: string; passwordHash: string; name: string; phone?: string }): Promise<void> {
+  await createShopper(shopper);
 }
 
-export async function updateShopperProfileWorkflow(storeId: string, email: string, updates: { name?: string; phone?: string }): Promise<void> {
-  await updateShopperProfile(storeId, email, updates);
+export async function updateShopperProfileWorkflow(email: string, updates: { name?: string; phone?: string }): Promise<void> {
+  await updateShopperProfile(email, updates);
 }
 
-export async function updateShopperPasswordWorkflow(storeId: string, email: string, hash: string): Promise<void> {
-  await updateShopperPassword(storeId, email, hash);
+export async function updateShopperPasswordWorkflow(email: string, hash: string): Promise<void> {
+  await updateShopperPassword(email, hash);
 }
 
 // ─── API Token Workflows ───────────────────────────────────────────
 
 export async function createApiTokenWorkflow(
   input: Identity.CreateTokenInput,
-  auditContext: { storeId: string; actorEmail: string; actorRole: string }
+  auditContext: { actorEmail: string; actorRole: string }
 ): Promise<{ rawToken: string; token: Omit<Identity.ApiToken, 'scopes'> & { scopes: string[] } }> {
   const result = await createApiToken(input);
   
-  await logAudit(auditContext.storeId, {
+  await logAudit({
     actorEmail: auditContext.actorEmail,
     actorRole: auditContext.actorRole,
     action: 'create_token',
@@ -98,12 +98,12 @@ export async function revokeApiTokenWorkflow(
   tokenId: string,
   tokenName: string,
   tokenUserType: string,
-  auditContext: { storeId: string; lookupEmail: string; actorEmail: string; actorRole: string }
+  auditContext: { lookupEmail: string; actorEmail: string; actorRole: string }
 ): Promise<boolean> {
   const success = await revokeApiToken(tokenId);
   
   if (success) {
-    await logAudit(auditContext.storeId, {
+    await logAudit({
       actorEmail: auditContext.actorEmail,
       actorRole: auditContext.actorRole,
       action: 'revoke_token',

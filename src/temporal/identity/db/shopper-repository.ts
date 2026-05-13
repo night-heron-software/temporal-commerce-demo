@@ -9,8 +9,8 @@ const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
 export class ShopperRepository {
-  async getShopperByEmail(storeId: string, email: string): Promise<Identity.Shopper | null> {
-    logger.info({ storeId, email }, 'ShopperRepository.getShopperByEmail');
+  async getShopperByEmail(email: string): Promise<Identity.Shopper | null> {
+    logger.info({ email }, 'ShopperRepository.getShopperByEmail');
 
     const rows = await executeCql<{
       id: types.Uuid;
@@ -25,8 +25,8 @@ export class ShopperRepository {
     }>(
       `SELECT id, email, password_hash, name, phone, failed_attempts, locked_until, created_at, updated_at
        FROM shoppers
-       WHERE store_id = ? AND email = ?`,
-      [storeId, email]
+       WHERE email = ?`,
+      [email]
     );
 
     if (rows.length === 0) return null;
@@ -45,21 +45,20 @@ export class ShopperRepository {
     };
   }
 
-  async createShopper(storeId: string, shopper: {
+  async createShopper(shopper: {
     id: string;
     email: string;
     passwordHash: string;
     name: string;
     phone?: string;
   }): Promise<void> {
-    logger.info({ storeId, email: shopper.email }, 'ShopperRepository.createShopper');
+    logger.info({ email: shopper.email }, 'ShopperRepository.createShopper');
     const now = new Date();
 
     await executeCql(
-      `INSERT INTO shoppers (store_id, id, email, password_hash, name, phone, failed_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO shoppers (id, email, password_hash, name, phone, failed_attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        storeId,
         shopper.id,
         shopper.email,
         shopper.passwordHash,
@@ -72,22 +71,22 @@ export class ShopperRepository {
     );
   }
 
-  async updatePassword(storeId: string, email: string, newHash: string): Promise<void> {
-    logger.info({ storeId, email }, 'ShopperRepository.updatePassword');
+  async updatePassword(email: string, newHash: string): Promise<void> {
+    logger.info({ email }, 'ShopperRepository.updatePassword');
     const now = new Date();
 
     await executeCql(
       `UPDATE shoppers 
        SET password_hash = ?, updated_at = ?, failed_attempts = 0, locked_until = null
-       WHERE store_id = ? AND email = ?`,
-      [newHash, now, storeId, email]
+       WHERE email = ?`,
+      [newHash, now, email]
     );
   }
 
-  async recordFailedLogin(storeId: string, email: string): Promise<{ locked: boolean; attempts: number }> {
-    logger.info({ storeId, email }, 'ShopperRepository.recordFailedLogin');
+  async recordFailedLogin(email: string): Promise<{ locked: boolean; attempts: number }> {
+    logger.info({ email }, 'ShopperRepository.recordFailedLogin');
     
-    const shopper = await this.getShopperByEmail(storeId, email);
+    const shopper = await this.getShopperByEmail(email);
     if (!shopper) return { locked: false, attempts: 0 };
 
     const newAttempts = (shopper.failedAttempts || 0) + 1;
@@ -98,8 +97,8 @@ export class ShopperRepository {
       await executeCql(
         `UPDATE shoppers 
          SET failed_attempts = ?, locked_until = ?, updated_at = ?
-         WHERE store_id = ? AND email = ?`,
-        [newAttempts, lockUntil, now, storeId, email]
+         WHERE email = ?`,
+        [newAttempts, lockUntil, now, email]
       );
       return { locked: true, attempts: newAttempts };
     }
@@ -107,54 +106,54 @@ export class ShopperRepository {
     await executeCql(
       `UPDATE shoppers 
        SET failed_attempts = ?, updated_at = ?
-       WHERE store_id = ? AND email = ?`,
-      [newAttempts, now, storeId, email]
+       WHERE email = ?`,
+      [newAttempts, now, email]
     );
     return { locked: false, attempts: newAttempts };
   }
 
-  async clearFailedLogins(storeId: string, email: string): Promise<void> {
-    logger.info({ storeId, email }, 'ShopperRepository.clearFailedLogins');
+  async clearFailedLogins(email: string): Promise<void> {
+    logger.info({ email }, 'ShopperRepository.clearFailedLogins');
     const now = new Date();
 
     await executeCql(
       `UPDATE shoppers 
        SET failed_attempts = 0, locked_until = null, updated_at = ?
-       WHERE store_id = ? AND email = ?`,
-      [now, storeId, email]
+       WHERE email = ?`,
+      [now, email]
     );
   }
 
-  async isAccountLocked(storeId: string, email: string): Promise<boolean> {
-    const shopper = await this.getShopperByEmail(storeId, email);
+  async isAccountLocked(email: string): Promise<boolean> {
+    const shopper = await this.getShopperByEmail(email);
     if (!shopper || !shopper.lockedUntil) return false;
     return shopper.lockedUntil > new Date();
   }
 
-  async validatePassword(storeId: string, email: string, password: string): Promise<Identity.Shopper | null> {
-    const shopper = await this.getShopperByEmail(storeId, email);
+  async validatePassword(email: string, password: string): Promise<Identity.Shopper | null> {
+    const shopper = await this.getShopperByEmail(email);
     if (!shopper) return null;
 
     // Check if account is locked
     if (shopper.lockedUntil && shopper.lockedUntil > new Date()) {
-      logger.warn({ storeId, email }, 'Shopper account is locked');
+      logger.warn({ email }, 'Shopper account is locked');
       return null;
     }
 
     const isValid = await bcrypt.compare(password, shopper.passwordHash);
     
     if (!isValid) {
-      await this.recordFailedLogin(storeId, email);
+      await this.recordFailedLogin(email);
       return null;
     }
 
     // Clear failed attempts on successful login
-    await this.clearFailedLogins(storeId, email);
+    await this.clearFailedLogins(email);
     return shopper;
   }
 
-  async getAllShoppers(storeId: string): Promise<Array<{ id: string; email: string; name: string; phone?: string; createdAt?: Date }>> {
-    logger.info({ storeId }, 'ShopperRepository.getAllShoppers');
+  async getAllShoppers(): Promise<Array<{ id: string; email: string; name: string; phone?: string; createdAt?: Date }>> {
+    logger.info('ShopperRepository.getAllShoppers');
 
     const rows = await executeCql<{
       id: types.Uuid;
@@ -163,8 +162,7 @@ export class ShopperRepository {
       phone: string | null;
       created_at: Date;
     }>(
-      `SELECT id, email, name, phone, created_at FROM shoppers WHERE store_id = ?`,
-      [storeId]
+      `SELECT id, email, name, phone, created_at FROM shoppers`
     );
 
     return rows.map((row) => ({
@@ -176,8 +174,8 @@ export class ShopperRepository {
     }));
   }
 
-  async updateShopper(storeId: string, email: string, updates: { name?: string; phone?: string }): Promise<void> {
-    logger.info({ storeId, email, updates }, 'ShopperRepository.updateShopper');
+  async updateShopper(email: string, updates: { name?: string; phone?: string }): Promise<void> {
+    logger.info({ email, updates }, 'ShopperRepository.updateShopper');
     const now = new Date();
 
     const setClauses: string[] = ['updated_at = ?'];
@@ -192,11 +190,10 @@ export class ShopperRepository {
       params.push(updates.phone);
     }
 
-    params.push(storeId);
     params.push(email);
 
     await executeCql(
-      `UPDATE shoppers SET ${setClauses.join(', ')} WHERE store_id = ? AND email = ?`,
+      `UPDATE shoppers SET ${setClauses.join(', ')} WHERE email = ?`,
       params
     );
   }
@@ -206,11 +203,10 @@ export class ShopperRepository {
    * Returns basic info without sensitive data (password hash, etc.)
    */
   async searchShoppers(
-    storeId: string,
     query: string,
     limit: number = 10
   ): Promise<Array<{ id: string; email: string; name: string }>> {
-    logger.info({ storeId, query, limit }, 'ShopperRepository.searchShoppers');
+    logger.info({ query, limit }, 'ShopperRepository.searchShoppers');
 
     if (!query || query.trim().length === 0) {
       return [];
@@ -225,8 +221,7 @@ export class ShopperRepository {
       email: string;
       name: string;
     }>(
-      `SELECT id, email, name FROM shoppers WHERE store_id = ?`,
-      [storeId]
+      `SELECT id, email, name FROM shoppers`
     );
 
     const filtered = rows

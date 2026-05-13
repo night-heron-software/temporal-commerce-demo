@@ -13,7 +13,6 @@ export class UserRepository {
 
     const rows = await executeCql<{
       id: types.Uuid;
-      store_id: types.Uuid | null;
       email: string;
       password_hash: string;
       name: string;
@@ -21,7 +20,7 @@ export class UserRepository {
       failed_attempts: number | null;
       locked_until: Date | null;
     }>(
-      `SELECT id, store_id, email, password_hash, name, role, failed_attempts, locked_until 
+      `SELECT id, email, password_hash, name, role, failed_attempts, locked_until 
        FROM users 
        WHERE email = ?`,
       [email]
@@ -34,7 +33,6 @@ export class UserRepository {
     const row = rows[0];
     return {
       id: row.id.toString(),
-      storeId: row.store_id ? row.store_id.toString() : null,
       email: row.email,
       passwordHash: row.password_hash,
       name: row.name,
@@ -49,7 +47,6 @@ export class UserRepository {
 
     const rows = await executeCql<{
       id: types.Uuid;
-      store_id: types.Uuid | null;
       email: string;
       password_hash: string;
       name: string;
@@ -57,12 +54,11 @@ export class UserRepository {
       failed_attempts: number | null;
       locked_until: Date | null;
     }>(
-      `SELECT id, store_id, email, password_hash, name, role, failed_attempts, locked_until FROM users`
+      `SELECT id, email, password_hash, name, role, failed_attempts, locked_until FROM users`
     );
 
     let users = rows.map(row => ({
       id: row.id.toString(),
-      storeId: row.store_id ? row.store_id.toString() : null,
       email: row.email,
       passwordHash: row.password_hash,
       name: row.name,
@@ -99,11 +95,10 @@ export class UserRepository {
     const now = new Date();
 
     await executeCql(
-      `INSERT INTO users (id, store_id, email, password_hash, name, role, failed_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, email, password_hash, name, role, failed_attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         user.id,
-        user.storeId ? user.storeId : null,
         user.email,
         user.passwordHash,
         user.name,
@@ -158,11 +153,10 @@ export class UserRepository {
     
     // Insert with new email (Cassandra uses email as primary key)
     await executeCql(
-      `INSERT INTO users (id, store_id, email, password_hash, name, role, failed_attempts, locked_until, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, email, password_hash, name, role, failed_attempts, locked_until, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         user.id,
-        user.storeId ? user.storeId : null,
         newEmail,
         user.passwordHash,
         user.name,
