@@ -48,6 +48,7 @@ export async function getCartId(): Promise<string | null> {
 /**
  * Unified wrapper for Temporal cart updates with error handling.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Temporal SDK overloads require any
 async function executeCartUpdate<TReturn, TArgs extends any[]>(
   cartId: string,
   updateDef: any,
@@ -71,11 +72,11 @@ async function executeCartUpdate<TReturn, TArgs extends any[]>(
       });
       return await client.workflow.executeUpdateWithStart(updateDef, {
         startWorkflowOperation: startOp,
-        args: args as any
+        args: args as unknown as [any, ...any[]]
       });
     } else {
       const handle = client.workflow.getHandle(workflowId);
-      return await handle.executeUpdate(updateDef, { args: args as any });
+      return await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
     }
   } catch (e) {
     const error = e as { name?: string; cause?: { type?: string } };
@@ -92,6 +93,7 @@ async function executeCartUpdate<TReturn, TArgs extends any[]>(
 /**
  * Unified wrapper for checkout workflow updates.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Temporal SDK overloads require any
 async function executeCheckoutUpdate<TReturn, TArgs extends any[]>(
   checkoutWorkflowId: string,
   updateDef: any,
@@ -100,7 +102,7 @@ async function executeCheckoutUpdate<TReturn, TArgs extends any[]>(
   const client = await getTemporalClient();
   const handle = client.workflow.getHandle(checkoutWorkflowId);
   try {
-    return await handle.executeUpdate(updateDef, { args: args as any });
+    return await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
   } catch (e) {
     const error = e as { name?: string; cause?: { type?: string } };
     if (
@@ -143,8 +145,8 @@ export async function addItemToCart(
 ): Promise<Cart.CartDetails | null> {
   return executeCartUpdate(
     cartId,
-    Cart.addItemToCartUpdate,
-    [{ variantId, quantity, price }],
+    Cart.cartUpdate,
+    [{ type: 'addItem' as const, variantId, quantity, price }],
     { createIfMissing: true }
   );
 }
@@ -153,7 +155,7 @@ export async function removeFromCart(
   cartId: string,
   lineItemId: string
 ): Promise<Cart.CartDetails | null> {
-  return executeCartUpdate(cartId, Cart.removeItemUpdate, [{ lineItemId }]);
+  return executeCartUpdate(cartId, Cart.cartUpdate, [{ type: 'removeItem' as const, lineItemId }]);
 }
 
 export async function updateItemQuantity(
@@ -161,7 +163,7 @@ export async function updateItemQuantity(
   lineItemId: string,
   quantity: number
 ): Promise<Cart.CartDetails | null> {
-  return executeCartUpdate(cartId, Cart.updateQuantityUpdate, [{ lineItemId, quantity }]);
+  return executeCartUpdate(cartId, Cart.cartUpdate, [{ type: 'updateQuantity' as const, lineItemId, quantity }]);
 }
 
 // ==================
@@ -169,7 +171,7 @@ export async function updateItemQuantity(
 // ==================
 
 export async function beginCheckout(cartId: string): Promise<Cart.CartDetails | null> {
-  return executeCartUpdate(cartId, Cart.beginCheckoutUpdate, [{}]);
+  return executeCartUpdate(cartId, Cart.cartUpdate, [{ type: 'beginCheckout' as const }]);
 }
 
 export async function getCheckoutWorkflowId(cartId: string): Promise<string | null> {
@@ -263,11 +265,4 @@ export async function acknowledgeCartChange(
   const checkoutWfId = await getCheckoutWorkflowId(cartId);
   if (!checkoutWfId) return null;
   return executeCheckoutUpdate(checkoutWfId, Checkout.acknowledgeCartChangeUpdate, [{ cartVersion }]) as Promise<Cart.CheckoutState | null>;
-}
-
-/**
- * Legacy simple checkout (used by CartContext).
- */
-export async function checkout(cartId: string): Promise<Cart.CartDetails | null> {
-  return executeCartUpdate(cartId, Cart.checkoutUpdate, [{ checkoutUrl: '/checkout' }]);
 }

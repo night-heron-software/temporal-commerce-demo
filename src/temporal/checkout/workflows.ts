@@ -1,11 +1,12 @@
 import {
   allHandlersFinished,
+  CancelledFailure,
   condition,
   getExternalWorkflowHandle,
   log,
   setHandler
 } from '@temporalio/workflow';
-const getFeatureFlag = async (flag: string) => false;
+const getFeatureFlag = async (_flag: string) => false;
 import {
   calculateShipping,
   calculateTax,
@@ -85,6 +86,7 @@ export async function checkoutWorkflow(
   let checkoutCancelled = false;
   let reservations: ReservationInfo[] = [];
   let parentCartWorkflowId = input.parentCartWorkflowId;
+  const checkoutVersion = input.checkoutVersion;
 
   // Query for current checkout state
   setHandler(getCheckoutStateQuery, () => state);
@@ -135,7 +137,12 @@ export async function checkoutWorkflow(
       const { clientSecret } = await createPaymentIntent(totalPrice, input.currency);
       state.clientSecret = clientSecret;
     } catch (e) {
+      if (e instanceof CancelledFailure) throw e;
       log.error('Failed to create payment intent', { error: String(e) });
+      // Return to shipping with error instead of advancing without a clientSecret
+      state.step = 'shipping';
+      state.error = 'Payment setup failed. Please try again.';
+      return state;
     }
 
     state.step = 'payment';
@@ -257,10 +264,26 @@ export async function checkoutWorkflow(
   const reserveResult = await renewReservationsForCheckout(input.cartId, input.items);
 
   if (!reserveResult.success) {
-    log.warn('Reservation renewal failed, continuing to shipping', {
+    log.warn('Reservation renewal failed, signalling parent with failure', {
       error: reserveResult.error,
     });
     state.error = reserveResult.error || 'Some items may have limited stock';
+    state.step = 'failed';
+
+    const failResult: CheckoutWorkflowResult = {
+      success: false,
+      order: undefined,
+      error: state.error,
+      finalState: state,
+      checkoutVersion
+    };
+    try {
+      const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
+      await parentHandle.signal(checkoutCompletedSignal, failResult);
+    } catch (err) {
+      log.warn('Failed to signal parent cart with reservation failure', { parentCartWorkflowId, err });
+    }
+    return failResult;
   } else {
     reservations = reserveResult.reservations;
   }
@@ -268,30 +291,61 @@ export async function checkoutWorkflow(
   state.step = 'shipping';
 
   // Wait for order completion or cancellation (1 hour timeout)
-  const completedBeforeTimeout = await condition(() => orderComplete || checkoutCancelled, '1 hour');
-  await condition(allHandlersFinished);
-
-  // If checkout times out or is cancelled, release reservations
-  if (!orderComplete && reservations.length > 0) {
-    await releaseReservations(reservations);
-  }
-
-  const result: CheckoutWorkflowResult = {
-    success: orderComplete,
-    cancelled: checkoutCancelled,
-    timedOut: !completedBeforeTimeout && !orderComplete && !checkoutCancelled,
-    order: state.order,
-    error: state.error,
-    finalState: state
-  };
-
-  // Signal the parent cart with the result
   try {
-    const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
-    await parentHandle.signal(checkoutCompletedSignal, result);
-  } catch (err) {
-    log.warn('Failed to signal parent cart with checkout result', { parentCartWorkflowId, err });
-  }
+    const completedBeforeTimeout = await condition(() => orderComplete || checkoutCancelled, '1 hour');
+    await condition(allHandlersFinished);
 
-  return result;
+    // If checkout times out or is cancelled, release reservations
+    if (!orderComplete && reservations.length > 0) {
+      await releaseReservations(reservations);
+    }
+
+    const result: CheckoutWorkflowResult = {
+      success: orderComplete,
+      cancelled: checkoutCancelled,
+      timedOut: !completedBeforeTimeout && !orderComplete && !checkoutCancelled,
+      order: state.order,
+      error: state.error,
+      finalState: state,
+      checkoutVersion
+    };
+
+    // Signal the parent cart with the result
+    try {
+      const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
+      await parentHandle.signal(checkoutCompletedSignal, result);
+    } catch (err) {
+      log.warn('Failed to signal parent cart with checkout result', { parentCartWorkflowId, err });
+    }
+
+    return result;
+  } catch (err) {
+    if (err instanceof CancelledFailure) {
+      log.warn('Checkout cancelled via CancelledFailure', { cartId: input.cartId });
+      // Release reservations in non-cancellable scope
+      if (reservations.length > 0) {
+        await releaseReservations(reservations);
+      }
+
+      state.step = 'cancelled';
+      const cancelResult: CheckoutWorkflowResult = {
+        success: false,
+        cancelled: true,
+        order: undefined,
+        error: 'Checkout was cancelled',
+        finalState: state,
+        checkoutVersion
+      };
+
+      try {
+        const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
+        await parentHandle.signal(checkoutCompletedSignal, cancelResult);
+      } catch {
+        log.warn('Failed to signal parent cart after cancellation', { parentCartWorkflowId });
+      }
+
+      return cancelResult;
+    }
+    throw err;
+  }
 }

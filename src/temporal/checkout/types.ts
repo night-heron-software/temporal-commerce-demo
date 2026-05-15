@@ -1,4 +1,4 @@
-import { Cart, Fulfillment } from '../contracts';
+import { Cart } from '../contracts';
 export type CartItem = Cart.CartItem;
 export type Order = Cart.Order;
 export type PaymentMethod = Cart.PaymentMethod;
@@ -38,6 +38,7 @@ export interface CheckoutWorkflowInput {
   appliedCoupons: string[];
   isGuest: boolean;
   cartVersion: number;
+  checkoutVersion: number;
 }
 
 export interface CheckoutWorkflowResult {
@@ -47,6 +48,7 @@ export interface CheckoutWorkflowResult {
   order?: Order;
   error?: string;
   finalState: CheckoutState;
+  checkoutVersion: number;
 }
 
 export interface SetShippingSignal {
