@@ -48,7 +48,7 @@ export async function getCartId(): Promise<string | null> {
 /**
  * Unified wrapper for Temporal cart updates with error handling.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Temporal SDK overloads require any
+/* eslint-disable @typescript-eslint/no-explicit-any -- Temporal SDK executeUpdate overloads require any */
 async function executeCartUpdate<TReturn, TArgs extends any[]>(
   cartId: string,
   updateDef: any,
@@ -89,11 +89,12 @@ async function executeCartUpdate<TReturn, TArgs extends any[]>(
     throw e;
   }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Unified wrapper for checkout workflow updates.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Temporal SDK overloads require any
+/* eslint-disable @typescript-eslint/no-explicit-any -- Temporal SDK executeUpdate overloads require any */
 async function executeCheckoutUpdate<TReturn, TArgs extends any[]>(
   checkoutWorkflowId: string,
   updateDef: any,
@@ -114,6 +115,7 @@ async function executeCheckoutUpdate<TReturn, TArgs extends any[]>(
     throw e;
   }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Get cart details by querying the workflow.
