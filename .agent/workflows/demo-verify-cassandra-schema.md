@@ -17,7 +17,7 @@ The demo uses a single consolidated schema file:
 ## Prerequisites
 
 - Access to the file system to `grep` source files
-- Cassandra running with schema applied (`make dev && make db-init`)
+- Cassandra running with schema applied (`npm run infra:start && npm run db:init`)
 
 ## Step 1: Extract DDL Table Definitions
 

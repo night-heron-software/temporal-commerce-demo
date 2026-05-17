@@ -14,16 +14,19 @@ Set up Cassandra, Elasticsearch, Temporal, and seed all catalog data on a fresh 
 
 ## Automated Full Reset
 
+> [!TIP]
+> **Shortcut**: `npm run reset:seed` automates the entire sequence below (clean → init → start → seed) in a single command.
+
 // turbo
 
 ```bash
-make docker-ready
+npm run docker:ready
 ```
 
 // turbo
 
 ```bash
-make clean
+npm run infra:clean
 ```
 
 Then:
@@ -31,23 +34,23 @@ Then:
 // turbo
 
 ```bash
-make init
+npm run init
 ```
 
 > [!NOTE]
-> `make init` calls `make dev`, which calls `make docker-ready`. If Docker Desktop is not running, it will be started automatically.
+> `npm run init` calls `npm run infra:start`, which calls `npm run docker:ready`. If Docker Desktop is not running, it will be started automatically.
 
 This will:
 
-1. `make dev` — Start Cassandra, Elasticsearch, Temporal containers
-2. `make db-init` — Apply `cassandra/schema.cql` to the `demo-cassandra` container
+1. `npm run infra:start` — Start Cassandra, Elasticsearch, Temporal containers
+2. `npm run db:init` — Apply `cassandra/schema.cql` to the `demo-cassandra` container
 
 ### After Init: Start and Seed
 
 Start the app in one terminal:
 
 ```bash
-make app-start
+npm run start:all
 ```
 
 Then seed in another terminal:
@@ -55,7 +58,7 @@ Then seed in another terminal:
 // turbo
 
 ```bash
-make seed
+npm run seed
 ```
 
 The seed script (`scripts/seed.ts`) calls the running app's APIs in order:
@@ -75,13 +78,13 @@ If you need to run steps individually:
 ### 1. Start Infrastructure
 
 ```bash
-make dev
+npm run infra:start
 ```
 
 ### 2. Initialize Cassandra Schema
 
 ```bash
-make db-init
+npm run db:init
 ```
 
 This runs:
@@ -95,13 +98,13 @@ docker exec -i demo-cassandra cqlsh < cassandra/schema.cql
 All seed steps call app API routes. Workers must be running for Temporal operations:
 
 ```bash
-make app-start
+npm run start:all
 ```
 
 ### 4. Seed Data
 
 ```bash
-make seed
+npm run seed
 ```
 
 ### 5. Verify
@@ -114,23 +117,23 @@ Open the storefront at `http://localhost:3000/shop` and confirm products are vis
 
 | Problem | Solution |
 | --- | --- |
-| Cassandra connection refused | Run `make dev` and wait for healthy status |
+| Cassandra connection refused | Run `npm run infra:start` and wait for healthy status |
 | Schema errors on `db-init` | Ensure `demo-cassandra` container is healthy before running |
-| Seed shows "fetch failed" | Storefront not running — start `make app-start` first |
-| ES sync shows 0 records | Ensure `make seed` completed successfully |
-| No products in storefront | Check `make seed` output for errors; try `make seed` again |
+| Seed shows "fetch failed" | Storefront not running — start `npm run start:all` first |
+| ES sync shows 0 records | Ensure `npm run seed` completed successfully |
+| No products in storefront | Check `npm run seed` output for errors; try `npm run seed` again |
 
 ---
 
-## Make Targets Reference
+## NPM Scripts Reference
 
-| Target | Description |
+| Script | Description |
 | --- | --- |
-| `make init` | `dev` + `db-init` (infrastructure + schema) |
-| `make dev` | Start Docker infrastructure |
-| `make stop` | Stop infrastructure containers |
-| `make clean` | Stop + wipe Docker volumes (nuclear reset) |
-| `make db-init` | Apply Cassandra schema |
-| `make seed` | Run full API seed pipeline (requires app running) |
-| `make app-start` | Start storefront + workers |
-| `make app-stop` | Kill storefront and worker processes |
+| `npm run init` | `infra:start` + `db:init` (infrastructure + schema) |
+| `npm run infra:start` | Start Docker infrastructure |
+| `npm run infra:stop` | Stop infrastructure containers |
+| `npm run infra:clean` | Stop + wipe Docker volumes (nuclear reset) |
+| `npm run db:init` | Apply Cassandra schema |
+| `npm run seed` | Run full API seed pipeline (requires app running) |
+| `npm run start:all` | Start storefront + workers |
+| `npm run stop:all` | Kill storefront and worker processes |

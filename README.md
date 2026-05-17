@@ -52,7 +52,7 @@ npm install
 ### 2. Start infrastructure
 
 ```bash
-make init
+npm run init
 ```
 
 This starts Cassandra, Elasticsearch, and Temporal via Docker Compose, then initializes the Cassandra schema.
@@ -60,7 +60,7 @@ This starts Cassandra, Elasticsearch, and Temporal via Docker Compose, then init
 ### 3. Start the application
 
 ```bash
-make app-start
+npm run start:all
 ```
 
 This starts the Next.js dev server and Temporal workers concurrently.
@@ -70,7 +70,7 @@ This starts the Next.js dev server and Temporal workers concurrently.
 In another terminal:
 
 ```bash
-make seed
+npm run seed
 ```
 
 ### 5. Browse
@@ -78,18 +78,24 @@ make seed
 - **Storefront** → [http://localhost:3000/shop](http://localhost:3000/shop)
 - **Temporal UI** → [http://localhost:8233](http://localhost:8233)
 
-## Makefile Targets
+## NPM Scripts
 
-| Target | Description |
+| Script | Description |
 | -------- | ------------- |
-| `make dev` | Start infrastructure (Cassandra, ES, Temporal) |
-| `make init` | Full init: infrastructure + Cassandra schema |
-| `make app-start` | Start storefront + Temporal workers |
-| `make app-stop` | Stop application processes |
-| `make seed` | Populate demo catalog data |
-| `make workers` | Start Temporal workers only |
-| `make stop` | Stop infrastructure containers |
-| `make clean` | Stop + wipe all data volumes |
+| `npm run up` | Start infrastructure + storefront + workers |
+| `npm run shutdown` | Stop everything (app + infrastructure) |
+| `npm run reset:seed` | Full reset: wipe → init → start → seed |
+| `npm run init` | Start infrastructure + apply Cassandra schema |
+| `npm run start:all` | Start storefront + Temporal workers |
+| `npm run stop:all` | Stop application processes |
+| `npm run seed` | Populate demo catalog data |
+| `npm run temporal:worker` | Start Temporal workers only |
+| `npm run infra:start` | Start Docker infrastructure only |
+| `npm run infra:stop` | Stop Docker containers |
+| `npm run infra:clean` | Stop + wipe all data volumes |
+| `npm run infra:ps` | List running containers |
+
+See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 
 ## Project Structure
 

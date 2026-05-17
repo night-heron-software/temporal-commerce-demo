@@ -8,7 +8,19 @@
     "start": "next start",
     "lint": "eslint",
     "temporal:worker": "tsx --env-file=.env.local ./src/temporal/worker.ts",
-    "seed": "tsx --env-file=.env.local ./scripts/seed.ts"
+    "seed": "tsx --env-file=.env.local ./scripts/seed.ts",
+    "docker:ready": "bash scripts/docker-ready.sh",
+    "infra:start": "bash scripts/infra-start.sh",
+    "infra:stop": "docker-compose stop && echo '✓ Stopped'",
+    "infra:clean": "docker-compose stop && docker-compose down -v && echo '✓ All data wiped'",
+    "infra:ps": "docker-compose ps",
+    "db:init": "docker exec -i demo-cassandra cqlsh < cassandra/schema.cql && echo '✓ Schema initialized'",
+    "init": "bash scripts/init.sh",
+    "start:all": "concurrently --names next,workers --prefix-colors cyan,magenta --kill-others-on-fail \"npm run dev\" \"npm run temporal:worker\"",
+    "stop:all": "pkill -f 'next-server' 2>/dev/null; pkill -f 'next dev' 2>/dev/null; pkill -f 'tsx.*worker' 2>/dev/null; sleep 1; echo '✓ Application stopped'",
+    "reset:seed": "bash scripts/reset-and-seed.sh",
+    "shutdown": "npm run stop:all && npm run infra:stop",
+    "up": "npm run infra:start && npm run start:all"
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.19.1",

@@ -6,16 +6,19 @@ description: Stop all services started by local-development (Cassandra, Elastics
 
 Stop all infrastructure and application processes in reverse order.
 
+> [!TIP]
+> **Shortcut**: `npm run shutdown` does both steps below in a single command.
+
 ## Steps
 
 ### 1. Stop Storefront and Workers
 
-If running `make app-start`, press **Ctrl+C** in that terminal. Otherwise:
+If running `npm run start:all`, press **Ctrl+C** in that terminal. Otherwise:
 
 // turbo
 
 ```bash
-make app-stop
+npm run stop:all
 ```
 
 ### 2. Stop Infrastructure
@@ -23,7 +26,7 @@ make app-stop
 // turbo
 
 ```bash
-make stop
+npm run infra:stop
 ```
 
 ### 3. Verify
@@ -37,7 +40,7 @@ All containers should show as `Exited` or not appear.
 ---
 
 > [!TIP]
-> To wipe all data volumes as well (nuclear reset), run `make clean` instead of `make stop`.
+> To wipe all data volumes as well (nuclear reset), run `npm run infra:clean` instead of `npm run infra:stop`.
 
 > [!TIP]
 > To start services again, use `/demo-start-local-dev`.

@@ -11,7 +11,7 @@ Allow **5–10 minutes** before the demo to start infrastructure and seed data.
 ### 1. Start Infrastructure
 
 ```bash
-make init
+npm run init
 ```
 
 Wait for Docker containers (Cassandra, Elasticsearch, Temporal) to report healthy.
@@ -19,7 +19,7 @@ Wait for Docker containers (Cassandra, Elasticsearch, Temporal) to report health
 ### 2. Start the Application
 
 ```bash
-make app-start
+npm run start:all
 ```
 
 Wait for `▲ Next.js 15.x.x — Local: http://localhost:3000`.
@@ -29,7 +29,7 @@ Wait for `▲ Next.js 15.x.x — Local: http://localhost:3000`.
 In a **second terminal**:
 
 ```bash
-make seed
+npm run seed
 ```
 
 This populates the product catalog (266 products across 57 collections) by calling the running app's API endpoints. Wait for `✨ Seeding complete!`.
@@ -121,11 +121,11 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 ## Quick Reset Between Demos
 
 ```bash
-make app-stop
-make clean
-make init
-make app-start    # Terminal 1
-make seed         # Terminal 2
+npm run stop:all
+npm run infra:clean
+npm run init
+npm run start:all     # Terminal 1
+npm run seed          # Terminal 2
 ```
 
 Takes about 2–3 minutes for a complete reset.
@@ -136,12 +136,12 @@ Takes about 2–3 minutes for a complete reset.
 
 | Problem | Quick Fix |
 | --- | --- |
-| Storefront shows no products | Run `make seed` again |
+| Storefront shows no products | Run `npm run seed` again |
 | "Workflow not found" errors | Cart cookie expired; clear cookies and add new items |
 | Checkout stuck | Clear cookies, start a new cart |
-| Temporal UI not loading | Check Docker: `make ps` |
+| Temporal UI not loading | Check Docker: `npm run infra:ps` |
 | Worker crash on start | Check Temporal is running: `docker ps \| grep temporal` |
-| Admin shows no orders | Place an order first; check `make seed` output |
+| Admin shows no orders | Place an order first; check `npm run seed` output |
 | Fulfillment not advancing | Check worker logs; verify fulfillment mode is set to Automatic |
 
 ---
