@@ -86,40 +86,29 @@ export interface CartDetails {
   updatedAt: string;
 }
 
-export interface AddItemSignal {
-  variantId: string;
-  quantity: number;
-  price: number;
-  properties?: Record<string, unknown>;
-}
+// ==================
+// Cart Event Discriminated Union
+// ==================
 
-export interface addItemToCartUpdatePayload {
-  variantId: string;
-  quantity: number;
-  price: number;
-  properties?: Record<string, unknown>;
-}
+export type CartEvent =
+  | { type: 'addItem';        variantId: string; quantity: number; price: number; properties?: Record<string, unknown> }
+  | { type: 'updateQuantity'; lineItemId: string; quantity: number }
+  | { type: 'removeItem';     lineItemId: string }
+  | { type: 'applyCoupon';    code: string }
+  | { type: 'linkUser';       userId: string }
+  | { type: 'mergeCarts';     sourceCartId: string; sourceItems: CartItem[]; checkoutWorkflowId?: string }
+  | { type: 'adoptCheckout';  checkoutWorkflowId: string }
+  | { type: 'disownCheckout' }
+  | { type: 'beginCheckout' }
+  | { type: 'destroyCart' };
 
-export interface UpdateQuantitySignal {
-  lineItemId: string;
-  quantity: number;
-}
+// Update response: either the updated cart state or void for terminal operations
+export type CartUpdateResponse = CartDetails | void;
 
-export interface RemoveItemSignal {
-  lineItemId: string;
-}
+// ==================
+// Checkout Workflow Input/Output
+// ==================
 
-export interface ApplyCouponSignal {
-  code: string;
-}
-
-export interface CheckoutSignal {
-  checkoutUrl: string;
-}
-
-export type BeginCheckoutSignal = object;
-
-// Checkout workflow input/output types (duplicated from checkout/types to avoid cross-module imports)
 export interface CheckoutWorkflowInput {
   cartId: string;
   parentCartWorkflowId: string;
@@ -130,6 +119,7 @@ export interface CheckoutWorkflowInput {
   appliedCoupons: string[];
   isGuest: boolean;
   cartVersion: number;
+  checkoutVersion: number;
 }
 
 export interface CheckoutWorkflowResult {
@@ -139,56 +129,17 @@ export interface CheckoutWorkflowResult {
   order?: Order;
   error?: string;
   finalState: CheckoutState;
+  checkoutVersion: number;
 }
 
-// User-Cart linking signals
-export interface LinkUserSignal {
-  userId: string;
-}
-
-export interface MergeCartsSignal {
-  sourceCartId: string; // Cart to merge items FROM
-  sourceItems: CartItem[]; // Items to merge
-  checkoutWorkflowId?: string; // If the source cart had a running checkout, transfer it
-}
-
-export interface AdoptCheckoutSignal {
-  checkoutWorkflowId: string;
-}
-
-export interface CheckoutCompletedPayload {
-  success: boolean;
-  cancelled?: boolean;
-  order?: Order;
-  error?: string;
-  finalState: CheckoutState;
-}
-
+// ==================
+// Workflow Definitions
+// ==================
 
 import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
 
-
-// ==================
-// Cart Workflow Updates & Queries
-// ==================
-
-// Cart management updates
-export const addItemToCartUpdate = defineUpdate<CartDetails, [AddItemSignal]>(
-  'addItemToCartUpdate'
-);
-export const updateQuantityUpdate = defineUpdate<CartDetails, [UpdateQuantitySignal]>(
-  'updateQuantity'
-);
-export const removeItemUpdate = defineUpdate<CartDetails, [RemoveItemSignal]>('removeItemUpdate');
-export const applyCouponUpdate = defineUpdate<CartDetails, [ApplyCouponSignal]>('applyCoupon');
-
-// Begin checkout - spawns child workflow
-export const beginCheckoutUpdate = defineUpdate<CartDetails, [BeginCheckoutSignal]>(
-  'beginCheckout'
-);
-
-// Legacy checkout (kept for compatibility)
-export const checkoutUpdate = defineUpdate<CartDetails, [CheckoutSignal]>('checkout');
+// Single consolidated cart update
+export const cartUpdate = defineUpdate<CartUpdateResponse, [CartEvent]>('cartUpdate');
 
 // Queries
 export const getCartQuery = defineQuery<CartDetails>('getCart');
@@ -196,13 +147,5 @@ export const getCheckoutStateQuery = defineQuery<CheckoutState | null>('getCheck
 export const getCheckoutWorkflowIdQuery = defineQuery<string | null>('getCheckoutWorkflowId');
 export const getUserIdQuery = defineQuery<string | undefined>('getUserId');
 
-// User-cart linking updates
-export const linkUserUpdate = defineUpdate<CartDetails, [LinkUserSignal]>('linkUser');
-export const mergeCartsUpdate = defineUpdate<CartDetails, [MergeCartsSignal]>('mergeCarts');
-export const destroyCartUpdate = defineUpdate<void, []>('destroyCart');
-export const adoptCheckoutUpdate = defineUpdate<CartDetails, [AdoptCheckoutSignal]>('adoptCheckout');
-
-// Signals
-export const checkoutCompletedSignal = defineSignal<[CheckoutCompletedPayload]>('checkoutCompleted');
-
-
+// Signals (from checkout child → cart parent)
+export const checkoutCompletedSignal = defineSignal<[CheckoutWorkflowResult]>('checkoutCompleted');

@@ -2,7 +2,7 @@
 
 import {
   addItemToCart,
-  checkout,
+  beginCheckout,
   getCart,
   getCartId,
   getOrCreateCartId,
@@ -140,8 +140,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!cartId) return;
     setLoading(true);
     try {
-      const newCart = await checkout(cartId);
-      if (newCart && newCart.status === 'completed') {
+      const newCart = await beginCheckout(cartId);
+      if (newCart && newCart.status === 'checkout') {
+        setCart(newCart);
+        // Navigate to checkout flow — the status is now 'checkout'
+      } else if (newCart && newCart.status === 'completed') {
         setCart(null);
         setCartId(null);
       }

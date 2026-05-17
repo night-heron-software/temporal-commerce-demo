@@ -3,8 +3,9 @@ import { getElasticsearchClient } from '@/lib/es-client';
 
 // Printify uses inconsistent option type names across blank suppliers.
 // Group them by semantic category for search/faceting.
-const COLOR_OPTION_TYPES = ['Colors', 'Bella + Canvas Colors', 'AS Color colors', 'Comfort Colors® Colors'];
-const SIZE_OPTION_TYPES = ['Sizes', 'Clothing sizes'];
+// 'Color'/'Size' are normalized names used in the demo catalog.json.
+const COLOR_OPTION_TYPES = ['Color', 'Colors', 'Bella + Canvas Colors', 'AS Color colors', 'Comfort Colors® Colors'];
+const SIZE_OPTION_TYPES = ['Size', 'Sizes', 'Clothing sizes'];
 
 interface SearchParams {
   q?: string;
@@ -30,6 +31,95 @@ interface ProductHit {
   defaultVariantImageUrl?: string;
   /** When set, the displayed image came from this specific variant (e.g. color filter match) */
   displayVariantId?: string;
+}
+
+/**
+ * Build variant-scoped facet aggregations.
+ * Each facet is filtered by the OPPOSITE active variant filter so that
+ * only valid combinations appear in the sidebar.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildVariantFacetAggs(params: SearchParams): Record<string, any> {
+  // Helper: build a nested option-level filter clause
+  function optionFilter(optionTypes: string[], label: string) {
+    return {
+      nested: {
+        path: 'variants.options',
+        query: {
+          bool: {
+            must: [
+              { terms: { 'variants.options.optionType': optionTypes } },
+              { term: { 'variants.options.value.label': label } }
+            ]
+          }
+        }
+      }
+    };
+  }
+
+  // Color facet: scope to variants matching the active SIZE filter (if any)
+  const colorVariantFilter = params.size
+    ? { bool: { must: [optionFilter(SIZE_OPTION_TYPES, params.size)] } }
+    : { match_all: {} };
+
+  // Size facet: scope to variants matching the active COLOR filter (if any)
+  const sizeVariantFilter = params.color
+    ? { bool: { must: [optionFilter(COLOR_OPTION_TYPES, params.color)] } }
+    : { match_all: {} };
+
+  return {
+    color_facets: {
+      nested: { path: 'variants' },
+      aggs: {
+        scoped_variants: {
+          filter: colorVariantFilter,
+          aggs: {
+            variant_options: {
+              nested: { path: 'variants.options' },
+              aggs: {
+                color_filter: {
+                  filter: { terms: { 'variants.options.optionType': COLOR_OPTION_TYPES } },
+                  aggs: {
+                    color_values: {
+                      terms: { field: 'variants.options.value.label', size: 50 },
+                      aggs: {
+                        hex: {
+                          terms: { field: 'variants.options.value.hex', size: 1 }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    size_facets: {
+      nested: { path: 'variants' },
+      aggs: {
+        scoped_variants: {
+          filter: sizeVariantFilter,
+          aggs: {
+            variant_options: {
+              nested: { path: 'variants.options' },
+              aggs: {
+                size_filter: {
+                  filter: { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
+                  aggs: {
+                    size_values: {
+                      terms: { field: 'variants.options.value.label', size: 50 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
 }
 
 export async function GET(
@@ -77,49 +167,59 @@ export async function GET(
       filter.push({ range: { 'price.amount': range } });
     }
 
+    // Color and size filters must match the SAME variant, so combine them
+    // into a single nested query when both are active.
+    const variantOptionFilters: object[] = [];
+
     if (params.color) {
-      filter.push({
+      variantOptionFilters.push({
         nested: {
-          path: 'variants',
+          path: 'variants.options',
           query: {
-            nested: {
-              path: 'variants.options',
-              query: {
-                bool: {
-                  must: [
-                    { terms: { 'variants.options.optionType': COLOR_OPTION_TYPES } },
-                    { term: { 'variants.options.value.label': params.color } }
-                  ]
-                }
-              }
+            bool: {
+              must: [
+                { terms: { 'variants.options.optionType': COLOR_OPTION_TYPES } },
+                { term: { 'variants.options.value.label': params.color } }
+              ]
             }
-          },
-          inner_hits: {
-            name: 'color_variants',
-            size: 1,
-            _source: ['variants.id', 'variants.frontImageUrl']
           }
         }
       });
     }
 
     if (params.size) {
+      variantOptionFilters.push({
+        nested: {
+          path: 'variants.options',
+          query: {
+            bool: {
+              must: [
+                { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
+                { term: { 'variants.options.value.label': params.size } }
+              ]
+            }
+          }
+        }
+      });
+    }
+
+    if (variantOptionFilters.length > 0) {
       filter.push({
         nested: {
           path: 'variants',
           query: {
-            nested: {
-              path: 'variants.options',
-              query: {
-                bool: {
-                  must: [
-                    { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
-                    { term: { 'variants.options.value.label': params.size } }
-                  ]
-                }
-              }
+            bool: {
+              must: variantOptionFilters
             }
-          }
+          },
+          // Return the matching variant for display image swap
+          ...(params.color ? {
+            inner_hits: {
+              name: 'color_variants',
+              size: 1,
+              _source: ['variants.id', 'variants.frontImageUrl']
+            }
+          } : {})
         }
       });
     }
@@ -156,47 +256,10 @@ export async function GET(
             ]
           }
         },
-        color_facets: {
-          nested: { path: 'variants' },
-          aggs: {
-            variant_options: {
-              nested: { path: 'variants.options' },
-              aggs: {
-                color_filter: {
-                  filter: { terms: { 'variants.options.optionType': COLOR_OPTION_TYPES } },
-                  aggs: {
-                    color_values: {
-                      terms: { field: 'variants.options.value.label', size: 50 },
-                      aggs: {
-                        hex: {
-                          terms: { field: 'variants.options.value.hex', size: 1 }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        size_facets: {
-          nested: { path: 'variants' },
-          aggs: {
-            variant_options: {
-              nested: { path: 'variants.options' },
-              aggs: {
-                size_filter: {
-                  filter: { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
-                  aggs: {
-                    size_values: {
-                      terms: { field: 'variants.options.value.label', size: 50 }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+        // Build variant-scoped facet aggregations.
+        // When a color is active, size facets only count sizes on variants with that color.
+        // When a size is active, color facets only count colors on variants with that size.
+        ...buildVariantFacetAggs(params)
       },
       sort: params.q ? ['_score'] : [{ 'name.keyword': 'asc' }]
     });
@@ -233,8 +296,8 @@ export async function GET(
     const collectionBuckets = aggs?.collections?.buckets || [];
     const typeBuckets = aggs?.types?.buckets || [];
     const priceBuckets = aggs?.price_ranges?.buckets || [];
-    const colorBuckets = aggs?.color_facets?.variant_options?.color_filter?.color_values?.buckets || [];
-    const sizeBuckets = aggs?.size_facets?.variant_options?.size_filter?.size_values?.buckets || [];
+    const colorBuckets = aggs?.color_facets?.scoped_variants?.variant_options?.color_filter?.color_values?.buckets || [];
+    const sizeBuckets = aggs?.size_facets?.scoped_variants?.variant_options?.size_filter?.size_values?.buckets || [];
 
     const facets = {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

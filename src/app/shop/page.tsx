@@ -43,6 +43,10 @@ function ShopPageContent() {
   const initialQuery = searchParams.get('q') || '';
   const initialType = searchParams.get('type');
   const initialSize = searchParams.get('size');
+  const initialColor = searchParams.get('color');
+  const initialPage = parseInt(searchParams.get('page') || '1', 10);
+  const initialPriceMin = searchParams.get('priceMin');
+  const initialPriceMax = searchParams.get('priceMax');
 
   // Search state
   const [searchQuery, setSearchQuery] = useState(initialQuery);
@@ -51,18 +55,22 @@ function ShopPageContent() {
   const [total, setTotal] = useState(0);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialPage);
   const pageSize = 24;
 
   // Filter state - initialize from URL params
   const [selectedCollection, setSelectedCollection] = useState<string | null>(initialCollection);
   const [selectedType, setSelectedType] = useState<string | null>(initialType);
-  const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  const [selectedColor, setSelectedColor] = useState<string | null>(initialColor);
   const [selectedSize, setSelectedSize] = useState<string | null>(initialSize);
   const [selectedPriceRange, setSelectedPriceRange] = useState<{
     min?: number;
     max?: number;
-  } | null>(null);
+  } | null>(
+    initialPriceMin || initialPriceMax
+      ? { min: initialPriceMin ? parseInt(initialPriceMin, 10) : undefined, max: initialPriceMax ? parseInt(initialPriceMax, 10) : undefined }
+      : null
+  );
 
   // Debounce search and reset page when query changes
   useEffect(() => {
@@ -85,13 +93,14 @@ function ShopPageContent() {
       params.set('priceMin', String(selectedPriceRange.min));
     if (selectedPriceRange?.max !== undefined)
       params.set('priceMax', String(selectedPriceRange.max));
+    if (page > 1) params.set('page', String(page));
 
     const queryString = params.toString();
     const newUrl = queryString ? `/shop?${queryString}` : '/shop';
 
     // Use replaceState to avoid cluttering browser history
     window.history.replaceState(null, '', newUrl);
-  }, [debouncedQuery, selectedCollection, selectedType, selectedColor, selectedSize, selectedPriceRange]);
+  }, [debouncedQuery, selectedCollection, selectedType, selectedColor, selectedSize, selectedPriceRange, page]);
 
   // Build search URL
   const buildSearchUrl = useCallback(() => {
