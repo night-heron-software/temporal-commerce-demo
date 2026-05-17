@@ -98,13 +98,11 @@ npm run seed
 ### Daily Development
 
 ```bash
-# Start infrastructure (Docker)
-npm run infra:start
-
-# Start storefront + workers together
-npm run start:all
+# Start infrastructure + app in one command
+npm run up
 
 # Or start them separately for independent debugging:
+npm run infra:start      # Start Docker infrastructure
 npm run dev              # Next.js storefront only
 npm run temporal:worker  # Temporal workers only (with pino-pretty)
 ```
@@ -112,24 +110,31 @@ npm run temporal:worker  # Temporal workers only (with pino-pretty)
 ### Full Reset
 
 ```bash
+npm run reset:seed    # One command: wipe → init → start → seed
+
+# Or manually:
 npm run infra:clean   # Stop + wipe all Docker volumes
 npm run init          # Re-create schema
-npm run seed          # Re-populate data (after npm run start:all)
+npm run start:all     # Start app (in one terminal)
+npm run seed          # Re-populate data (in another terminal)
 ```
 
 ### NPM Scripts
 
 | Script | Description |
 | --- | --- |
-| `npm run infra:start` | Start infrastructure (Cassandra, ES, Temporal) |
-| `npm run init` | Full init: infrastructure + Cassandra schema |
+| `npm run up` | Start infrastructure + storefront + workers |
+| `npm run shutdown` | Stop everything (app + infrastructure) |
+| `npm run reset:seed` | Full reset: wipe → init → start → seed |
+| `npm run init` | Start infrastructure + apply Cassandra schema |
 | `npm run start:all` | Start storefront + Temporal workers |
 | `npm run stop:all` | Stop application processes |
 | `npm run temporal:worker` | Start Temporal workers only |
 | `npm run seed` | Populate demo catalog data |
-| `npm run infra:stop` | Stop infrastructure containers |
+| `npm run infra:start` | Start Docker infrastructure only |
+| `npm run infra:stop` | Stop Docker containers |
 | `npm run infra:clean` | Stop + wipe all data volumes |
-| `npm run infra:ps` | List running infrastructure containers |
+| `npm run infra:ps` | List running containers |
 
 ---
 
@@ -213,7 +218,6 @@ temporal-commerce-demo/
 │       ├── identity/          # Users, shoppers, API tokens, feature flags
 │       └── worker.ts          # Unified worker launcher
 ├── docker-compose.yml         # Local infrastructure (6 containers)
-├── Makefile                   # Development orchestration
 └── .env.example               # Environment variable template
 ```
 

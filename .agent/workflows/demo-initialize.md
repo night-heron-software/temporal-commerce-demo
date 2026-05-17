@@ -14,6 +14,9 @@ Set up Cassandra, Elasticsearch, Temporal, and seed all catalog data on a fresh 
 
 ## Automated Full Reset
 
+> [!TIP]
+> **Shortcut**: `npm run reset:seed` automates the entire sequence below (clean → init → start → seed) in a single command.
+
 // turbo
 
 ```bash

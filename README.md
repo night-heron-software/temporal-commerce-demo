@@ -82,14 +82,20 @@ npm run seed
 
 | Script | Description |
 | -------- | ------------- |
-| `npm run infra:start` | Start infrastructure (Cassandra, ES, Temporal) |
-| `npm run init` | Full init: infrastructure + Cassandra schema |
+| `npm run up` | Start infrastructure + storefront + workers |
+| `npm run shutdown` | Stop everything (app + infrastructure) |
+| `npm run reset:seed` | Full reset: wipe → init → start → seed |
+| `npm run init` | Start infrastructure + apply Cassandra schema |
 | `npm run start:all` | Start storefront + Temporal workers |
 | `npm run stop:all` | Stop application processes |
 | `npm run seed` | Populate demo catalog data |
 | `npm run temporal:worker` | Start Temporal workers only |
-| `npm run infra:stop` | Stop infrastructure containers |
+| `npm run infra:start` | Start Docker infrastructure only |
+| `npm run infra:stop` | Stop Docker containers |
 | `npm run infra:clean` | Stop + wipe all data volumes |
+| `npm run infra:ps` | List running containers |
+
+See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 
 ## Project Structure
 

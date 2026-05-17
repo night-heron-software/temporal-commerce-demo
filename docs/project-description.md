@@ -318,6 +318,7 @@ npm run seed         # Populate 266 products across 57 collections
 
 ## Related Documentation
 
+- [Getting Started](../GETTING_STARTED.md) — Clone-to-running setup guide for macOS
 - [Presentation Script](presentation-script.md) — 30–40 minute talk with code excerpts and live demo instructions
 - [Demo Instructions](demo-instructions.md) — Streamlined 4–5 minute live demo walkthrough
 - [Developer Guide](developer-guide.md) — Local development setup and debugging

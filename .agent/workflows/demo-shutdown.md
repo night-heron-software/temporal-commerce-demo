@@ -6,6 +6,9 @@ description: Stop all services started by local-development (Cassandra, Elastics
 
 Stop all infrastructure and application processes in reverse order.
 
+> [!TIP]
+> **Shortcut**: `npm run shutdown` does both steps below in a single command.
+
 ## Steps
 
 ### 1. Stop Storefront and Workers

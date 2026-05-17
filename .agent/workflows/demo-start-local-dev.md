@@ -52,7 +52,10 @@ npm run temporal:worker  # Temporal workers only
 ---
 
 > [!TIP]
-> To stop all services, use `/demo-shutdown`.
+> **Shortcut**: `npm run up` combines both steps (infra:start + start:all) in a single command.
+
+> [!TIP]
+> To stop all services, use `npm run shutdown` or `/demo-shutdown`.
 
 ## Quick Reference
 

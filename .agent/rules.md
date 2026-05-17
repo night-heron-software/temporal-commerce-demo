@@ -47,7 +47,7 @@ temporal-commerce-demo/
 │   └── worker.Dockerfile   # Multi-stage Dockerfile for Temporal workers
 ├── docs/                   # Deployment and architecture docs
 ├── sample-data/            # Catalog seed data (catalog.json)
-├── scripts/                # Seed orchestrator (seed.ts)
+├── scripts/                # Dev orchestration + seed (seed.ts, init.sh, etc.)
 ├── src/
 │   ├── app/
 │   │   ├── admin/          # Admin panel (no auth — demo mode)
@@ -78,11 +78,14 @@ temporal-commerce-demo/
 All canonical operations go through `npm run`.
 
 ```bash
-npm run infra:start    # Start infrastructure (Cassandra, Elasticsearch, Temporal)
+npm run up             # Start infrastructure + storefront + workers
+npm run shutdown        # Stop everything (app + infrastructure)
+npm run reset:seed     # Full reset: wipe → init → start → seed
 npm run init           # infra:start + db:init (schema creation) — first-time setup
 npm run start:all      # Start storefront (3000) + all workers together
 npm run temporal:worker # Start only Temporal workers
 npm run seed           # Seed catalog data (requires storefront + workers running)
+npm run infra:start    # Start infrastructure (Cassandra, Elasticsearch, Temporal)
 npm run infra:stop     # Stop infrastructure containers
 npm run infra:clean    # Stop + wipe all Docker data volumes
 npm run stop:all       # Kill storefront and worker processes
