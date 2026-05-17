@@ -66,7 +66,8 @@ temporal-commerce-demo/
 │       ├── contracts/       # Shared type contracts
 │       └── worker.ts        # Unified worker launcher (all domains)
 ├── docker-compose.yml      # Local: Cassandra + Elasticsearch + Temporal
-├── Makefile                # Canonical entry point for all dev operations
+├── Makefile                # Legacy dev operations (npm scripts preferred)
+├── package.json            # Canonical entry point for all dev operations
 └── .env.example            # Environment variable template
 ```
 
@@ -74,18 +75,18 @@ temporal-commerce-demo/
 
 ## Key Commands
 
-All canonical operations go through `make`. Do not bypass the Makefile.
+All canonical operations go through `npm run`.
 
 ```bash
-make dev          # Start infrastructure (Cassandra, Elasticsearch, Temporal)
-make init         # dev + db-init (schema creation) — first-time setup
-make app-start    # Start storefront (3000) + all workers together
-make workers      # Start only Temporal workers
-make seed         # Seed catalog data (requires storefront + workers running)
-make stop         # Stop infrastructure containers
-make clean        # Stop + wipe all Docker data volumes
-make app-stop     # Kill storefront and worker processes
-make help         # Show all targets
+npm run infra:start    # Start infrastructure (Cassandra, Elasticsearch, Temporal)
+npm run init           # infra:start + db:init (schema creation) — first-time setup
+npm run start:all      # Start storefront (3000) + all workers together
+npm run temporal:worker # Start only Temporal workers
+npm run seed           # Seed catalog data (requires storefront + workers running)
+npm run infra:stop     # Stop infrastructure containers
+npm run infra:clean    # Stop + wipe all Docker data volumes
+npm run stop:all       # Kill storefront and worker processes
+npm run infra:ps       # List running infrastructure containers
 ```
 
 ---
@@ -149,10 +150,10 @@ This demo differs from the full platform in several intentional ways:
 
 ## Gotchas
 
-1. **Workflow Code Changes**: Workers do NOT auto-reload. After changing any file in `src/temporal/`, restart `make workers` or `make app-start`.
+1. **Workflow Code Changes**: Workers do NOT auto-reload. After changing any file in `src/temporal/`, restart `npm run temporal:worker` or `npm run start:all`.
 2. **Temporal UI Port**: The demo uses port `8233` (not `8080` like the full platform) to avoid conflicts.
-3. **Docker Desktop Required**: `make dev` requires Docker Desktop running. It will not auto-start Docker.
-4. **Seeding Order**: `make seed` requires the Next.js app + workers to be running. Always start `make app-start` first.
+3. **Docker Desktop Required**: `npm run infra:start` requires Docker Desktop running. It will auto-start Docker Desktop if not running.
+4. **Seeding Order**: `npm run seed` requires the Next.js app + workers to be running. Always start `npm run start:all` first.
 5. **Inventory Seeding**: The seed pipeline uses `InventoryCommandRepository.setSupplierStock()` which flows through the inventory-service workflow (CQRS projections + ES sync). Workers must be running for this to work.
 
 ---

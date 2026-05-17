@@ -186,7 +186,7 @@ These nightheron-specific concerns should **not** be included:
 
 After each phase:
 1. `npx tsc --noEmit` — full compilation
-2. `make init` — reinitialize platform with seeded data
+2. `npm run init` — reinitialize platform with seeded data
 3. Manual storefront walkthrough: add items → checkout → shipping → payment → review → submit
 4. Verify Temporal UI shows proper workflow hierarchy (cart parent → checkout child)
 5. Test cancel flow: start checkout → cancel → verify cart returns to active

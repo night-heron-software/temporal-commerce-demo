@@ -81,13 +81,13 @@ graph TB
 npm install
 
 # 2. Start infrastructure + initialize schema
-make init
+npm run init
 
 # 3. Start the application (in one terminal)
-make app-start
+npm run start:all
 
 # 4. Seed demo data (in another terminal)
-make seed
+npm run seed
 
 # 5. Browse
 #    Storefront  → http://localhost:3000/shop
@@ -99,10 +99,10 @@ make seed
 
 ```bash
 # Start infrastructure (Docker)
-make dev
+npm run infra:start
 
 # Start storefront + workers together
-make app-start
+npm run start:all
 
 # Or start them separately for independent debugging:
 npm run dev              # Next.js storefront only
@@ -112,25 +112,24 @@ npm run temporal:worker  # Temporal workers only (with pino-pretty)
 ### Full Reset
 
 ```bash
-make clean   # Stop + wipe all Docker volumes
-make init    # Re-create schema
-make seed    # Re-populate data (after make app-start)
+npm run infra:clean   # Stop + wipe all Docker volumes
+npm run init          # Re-create schema
+npm run seed          # Re-populate data (after npm run start:all)
 ```
 
-### Make Targets
+### NPM Scripts
 
-| Target | Description |
+| Script | Description |
 | --- | --- |
-| `make dev` | Start infrastructure (Cassandra, ES, Temporal) |
-| `make init` | Full init: infrastructure + Cassandra schema |
-| `make app-start` | Start storefront + Temporal workers |
-| `make app-stop` | Stop application processes |
-| `make workers` | Start Temporal workers only |
-| `make seed` | Populate demo catalog data |
-| `make stop` | Stop infrastructure containers |
-| `make clean` | Stop + wipe all data volumes |
-| `make ps` | List running infrastructure containers |
-| `make logs SERVICE=temporal` | Tail logs for a specific container |
+| `npm run infra:start` | Start infrastructure (Cassandra, ES, Temporal) |
+| `npm run init` | Full init: infrastructure + Cassandra schema |
+| `npm run start:all` | Start storefront + Temporal workers |
+| `npm run stop:all` | Stop application processes |
+| `npm run temporal:worker` | Start Temporal workers only |
+| `npm run seed` | Populate demo catalog data |
+| `npm run infra:stop` | Stop infrastructure containers |
+| `npm run infra:clean` | Stop + wipe all data volumes |
+| `npm run infra:ps` | List running infrastructure containers |
 
 ---
 
@@ -640,7 +639,7 @@ Feature flags are managed via the admin API at `/api/admin/feature-flags`.
 The seed script (`scripts/seed.ts`) orchestrates data population via API calls to the running Next.js app:
 
 ```bash
-make seed                               # Uses localhost:3000
+npm run seed                            # Uses localhost:3000
 npx tsx scripts/seed.ts https://app.example.com  # Target a remote deployment
 ```
 
@@ -685,9 +684,9 @@ Key log namespaces:
 ### Docker Container Logs
 
 ```bash
-make logs SERVICE=cassandra
-make logs SERVICE=temporal
-make logs SERVICE=elasticsearch
+docker-compose logs -f cassandra
+docker-compose logs -f temporal
+docker-compose logs -f elasticsearch
 ```
 
 ### Common Debugging Scenarios
@@ -699,7 +698,7 @@ make logs SERVICE=elasticsearch
 | Checkout stuck on "processing" | Check the checkout workflow in Temporal UI for failed activities |
 | Fulfillment not advancing | Check `MANUAL_FULFILLMENT` feature flag; if enabled, send manual signals |
 | Inventory reservation errors | Check the inventory service workflow is running (`inventory-service` in Temporal UI) |
-| Worker crash on startup | Check Temporal server is healthy: `make ps` |
+| Worker crash on startup | Check Temporal server is healthy: `npm run infra:ps` |
 
 ### Port Conflicts
 
