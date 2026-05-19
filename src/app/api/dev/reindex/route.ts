@@ -144,7 +144,7 @@ async function reindexProducts(esClient: EsClient, errors: string[]): Promise<nu
         optionType: o.option_type,
         value: { label: o.label, hex: o.attributes?.hex }
       })),
-      frontImageUrl: v.images?.['front']
+      images: v.images ?? {},
     };
     if (!variantsByProduct.has(pid)) variantsByProduct.set(pid, []);
     variantsByProduct.get(pid)!.push(variantDoc);

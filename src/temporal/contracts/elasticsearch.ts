@@ -37,8 +37,7 @@ export interface VariantDocument {
   price: PriceDocument;
   available: boolean;
   options: OptionDocument[];
-  frontImageUrl?: string;
-  localFrontImageUrl?: string;
+  images?: Record<string, string>;
 }
 
 export interface OptionDocument {

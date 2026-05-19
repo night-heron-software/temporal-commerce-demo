@@ -56,9 +56,9 @@ export async function GET(request: Request, { params }: RouteParams) {
       blankSku: v.blankSku || v.sku,
       price: v.price || { amount: source.price?.amount || 0, currency: 'USD' },
       available: v.available !== false,
-      variantImageUrl: v.frontImageUrl || source.defaultVariantImageUrl || '',
+      variantImageUrl: v.images?.['front'] || source.defaultVariantImageUrl || '',
       options: v.options || [],
-      images: v.frontImageUrl ? { front: v.frontImageUrl } : {}
+      images: v.images ?? {}
     }));
 
     // If no variants in ES doc, create a synthetic one from the product

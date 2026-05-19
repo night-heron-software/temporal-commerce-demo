@@ -34,7 +34,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
             }
           },
           available: { type: 'boolean' },
-          frontImageUrl: { type: 'keyword', index: false },
+          images: { type: 'object', enabled: false },
           options: {
             type: 'nested',
             properties: {
