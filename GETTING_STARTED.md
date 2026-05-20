@@ -64,25 +64,25 @@ You have two options:
 
 #### Option A: Fully automated (one command)
 
-This wipes any previous data, starts all infrastructure, starts the application, and seeds the product catalog:
+This wipes any previous data, starts all infrastructure, starts the application, seeds the product catalog, and stops the application storefront/workers (leaving infrastructure running in Docker):
 
 ```bash
-npm run reset:seed
+npm run dev:init
 ```
 
-This takes 2–4 minutes on first run (Docker images need to download). When you see `✨ Full reset complete!`, the app is ready. The storefront + workers stay running in the foreground — press Ctrl+C to stop.
+This takes 2–4 minutes on first run (Docker images need to download). When you see `✨ Full reset & seeding complete!`, the database is ready and seeded.
 
 #### Option B: Step by step
 
 ```bash
 # Start infrastructure + apply Cassandra schema
-npm run init
+npm run infra:up && npm run db:init
 
 # Start storefront + Temporal workers (in one terminal)
-npm run start:all
+npm run dev:up
 
 # Seed demo data (in another terminal, after storefront is ready)
-npm run seed
+npm run dev:seed
 ```
 
 ### 5. Open the app
@@ -110,7 +110,7 @@ If all three work, you're fully operational.
 ### Starting up (database already initialized)
 
 ```bash
-npm run up
+npm run dev:up
 ```
 
 This starts Docker infrastructure (Cassandra, Elasticsearch, Temporal), waits for health checks, then launches the Next.js storefront and Temporal workers.
@@ -118,7 +118,7 @@ This starts Docker infrastructure (Cassandra, Elasticsearch, Temporal), waits fo
 ### Shutting down
 
 ```bash
-npm run shutdown
+npm run dev:down
 ```
 
 This stops the application processes and all Docker containers. Data is preserved for next time.
@@ -126,7 +126,7 @@ This stops the application processes and all Docker containers. Data is preserve
 ### Full reset
 
 ```bash
-npm run reset:seed
+npm run dev:init
 ```
 
 Wipes all data, recreates the schema, and re-seeds the catalog from scratch.
@@ -137,19 +137,19 @@ Wipes all data, recreates the schema, and re-seeds the catalog from scratch.
 
 | Script | Description |
 | --- | --- |
-| `npm run up` | Start infrastructure + storefront + workers |
-| `npm run shutdown` | Stop everything (app + infrastructure) |
-| `npm run reset:seed` | Full reset: wipe → init → start → seed |
-| `npm run init` | Start infrastructure + apply Cassandra schema |
-| `npm run start:all` | Start storefront + workers (requires infra running) |
-| `npm run stop:all` | Stop app processes only |
-| `npm run seed` | Populate demo catalog (requires app running) |
-| `npm run infra:start` | Start Docker containers only |
-| `npm run infra:stop` | Stop Docker containers only |
-| `npm run infra:clean` | Stop + wipe all Docker volumes |
+| `npm run dev:up` | Start infrastructure + storefront + workers |
+| `npm run dev:down` | Stop everything (app + infrastructure) |
+| `npm run dev:init` | Full reset: wipe → init → start → seed → stop app |
+| `npm run dev:storefront` | Start storefront app (Next.js) only |
+| `npm run dev:worker` | Start Temporal workers only |
+| `npm run dev:seed` | Populate demo catalog data |
+| `npm run dev:status` | Check status of all services and processes |
+| `npm run db:init` | Apply Cassandra schema |
+| `npm run db:verify` | Verify Cassandra schema consistency |
+| `npm run infra:up` | Start Docker infrastructure only |
+| `npm run infra:down` | Stop Docker containers |
+| `npm run infra:clean` | Stop + wipe all data volumes |
 | `npm run infra:ps` | List running containers |
-| `npm run dev` | Next.js dev server only |
-| `npm run temporal:worker` | Temporal workers only |
 
 ---
 
@@ -191,7 +191,7 @@ npm install
 
 ### Cassandra takes a long time to start
 
-First startup can take 60–90 seconds while Cassandra initializes. The `npm run infra:start` script waits for the health check automatically — don't interrupt it.
+- First startup can take 60–90 seconds while Cassandra initializes. The `npm run infra:up` script waits for the health check automatically — don't interrupt it.
 
 ### Port conflicts
 
@@ -208,7 +208,7 @@ Kill the conflicting process or stop the other service before starting the demo.
 
 ### Seed shows "fetch failed"
 
-The seed script calls the running Next.js app's API endpoints. Make sure the storefront is running and healthy at `http://localhost:3000` before running `npm run seed`.
+- The seed script calls the running Next.js app's API endpoints. Make sure the storefront is running and healthy at `http://localhost:3000` before running `npm run dev:seed`.
 
 ### Temporal workers crash on startup
 

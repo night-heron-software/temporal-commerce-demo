@@ -5,7 +5,7 @@
  * No plugin registry — simulated fulfillment is directly integrated.
  *
  * Usage:
- *   npm run temporal:worker
+ *   npm run dev:worker
  *   # or: npx tsx --env-file=.env.local ./src/temporal/worker.ts
  */
 

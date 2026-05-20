@@ -290,9 +290,9 @@ temporal-commerce-demo/
 
 ```bash
 npm install          # Install dependencies
-npm run init         # Start Docker infrastructure + Cassandra schema
-npm run start:all    # Start Next.js + Temporal workers
-npm run seed         # Populate 266 products across 57 collections
+npm run infra:up && npm run db:init  # Start Docker infrastructure + Cassandra schema
+npm run dev:up        # Start Next.js + Temporal workers
+npm run dev:seed     # Populate 266 products across 57 collections
 ```
 
 | Resource | URL |

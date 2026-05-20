@@ -477,9 +477,9 @@ try {
 ### Pre-Demo Setup
 
 ```bash
-npm run init       # Start infrastructure + schema
-npm run start:all  # Start Next.js + workers
-npm run seed       # Populate catalog
+npm run infra:up && npm run db:init  # Start infrastructure + schema
+npm run dev:up                       # Start Next.js + workers
+npm run dev:seed                     # Populate catalog
 ```
 
 ### Demo URLs

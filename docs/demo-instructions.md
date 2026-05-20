@@ -11,7 +11,7 @@ Allow **5–10 minutes** before the demo to start infrastructure and seed data.
 ### 1. Start Infrastructure
 
 ```bash
-npm run init
+npm run infra:up && npm run db:init
 ```
 
 Wait for Docker containers (Cassandra, Elasticsearch, Temporal) to report healthy.
@@ -19,17 +19,17 @@ Wait for Docker containers (Cassandra, Elasticsearch, Temporal) to report health
 ### 2. Start the Application
 
 ```bash
-npm run start:all
+npm run dev:up
 ```
 
-Wait for `▲ Next.js 15.x.x — Local: http://localhost:3000`.
+Wait for `▲ Next.js 16.x.x — Local: http://localhost:3000`.
 
 ### 3. Seed Demo Data
 
 In a **second terminal**:
 
 ```bash
-npm run seed
+npm run dev:seed
 ```
 
 This populates the product catalog (266 products across 57 collections) by calling the running app's API endpoints. Wait for `✨ Seeding complete!`.
@@ -120,12 +120,20 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 
 ## Quick Reset Between Demos
 
+Using the single unified command (wipes data, starts infra, seeds, then stops background processes):
+
 ```bash
-npm run stop:all
+npm run dev:init
+```
+
+Or step-by-step:
+
+```bash
+npm run dev:down
 npm run infra:clean
-npm run init
-npm run start:all     # Terminal 1
-npm run seed          # Terminal 2
+npm run infra:up && npm run db:init
+npm run dev:up        # Terminal 1
+npm run dev:seed      # Terminal 2
 ```
 
 Takes about 2–3 minutes for a complete reset.
@@ -136,12 +144,12 @@ Takes about 2–3 minutes for a complete reset.
 
 | Problem | Quick Fix |
 | --- | --- |
-| Storefront shows no products | Run `npm run seed` again |
+| Storefront shows no products | Run `npm run dev:seed` again |
 | "Workflow not found" errors | Cart cookie expired; clear cookies and add new items |
 | Checkout stuck | Clear cookies, start a new cart |
 | Temporal UI not loading | Check Docker: `npm run infra:ps` |
 | Worker crash on start | Check Temporal is running: `docker ps \| grep temporal` |
-| Admin shows no orders | Place an order first; check `npm run seed` output |
+| Admin shows no orders | Place an order first; check `npm run dev:seed` output |
 | Fulfillment not advancing | Check worker logs; verify fulfillment mode is set to Automatic |
 
 ---

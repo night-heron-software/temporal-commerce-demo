@@ -52,7 +52,7 @@ npm install
 ### 2. Start infrastructure
 
 ```bash
-npm run init
+npm run infra:up && npm run db:init
 ```
 
 This starts Cassandra, Elasticsearch, and Temporal via Docker Compose, then initializes the Cassandra schema.
@@ -60,7 +60,7 @@ This starts Cassandra, Elasticsearch, and Temporal via Docker Compose, then init
 ### 3. Start the application
 
 ```bash
-npm run start:all
+npm run dev:up
 ```
 
 This starts the Next.js dev server and Temporal workers concurrently.
@@ -70,7 +70,7 @@ This starts the Next.js dev server and Temporal workers concurrently.
 In another terminal:
 
 ```bash
-npm run seed
+npm run dev:seed
 ```
 
 ### 5. Browse
@@ -82,16 +82,17 @@ npm run seed
 
 | Script | Description |
 | -------- | ------------- |
-| `npm run up` | Start infrastructure + storefront + workers |
-| `npm run shutdown` | Stop everything (app + infrastructure) |
-| `npm run reset:seed` | Full reset: wipe → init → start → seed |
-| `npm run init` | Start infrastructure + apply Cassandra schema |
-| `npm run start:all` | Start storefront + Temporal workers |
-| `npm run stop:all` | Stop application processes |
-| `npm run seed` | Populate demo catalog data |
-| `npm run temporal:worker` | Start Temporal workers only |
-| `npm run infra:start` | Start Docker infrastructure only |
-| `npm run infra:stop` | Stop Docker containers |
+| `npm run dev:up` | Start infrastructure + storefront + workers |
+| `npm run dev:down` | Stop everything (app + infrastructure) |
+| `npm run dev:init` | Full reset: wipe → init → start → seed → stop app |
+| `npm run dev:storefront` | Start storefront app (Next.js) only |
+| `npm run dev:worker` | Start Temporal workers only |
+| `npm run dev:seed` | Populate demo catalog data |
+| `npm run dev:status` | Check status of all services and processes |
+| `npm run db:init` | Apply Cassandra schema |
+| `npm run db:verify` | Verify Cassandra schema consistency |
+| `npm run infra:up` | Start Docker infrastructure only |
+| `npm run infra:down` | Stop Docker containers |
 | `npm run infra:clean` | Stop + wipe all data volumes |
 | `npm run infra:ps` | List running containers |
 

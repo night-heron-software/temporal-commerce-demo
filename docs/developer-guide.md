@@ -81,13 +81,13 @@ graph TB
 npm install
 
 # 2. Start infrastructure + initialize schema
-npm run init
+npm run infra:up && npm run db:init
 
 # 3. Start the application (in one terminal)
-npm run start:all
+npm run dev:up
 
 # 4. Seed demo data (in another terminal)
-npm run seed
+npm run dev:seed
 
 # 5. Browse
 #    Storefront  → http://localhost:3000/shop
@@ -648,7 +648,7 @@ Feature flags are managed via the admin API at `/api/admin/feature-flags`.
 The seed script (`scripts/seed.ts`) orchestrates data population via API calls to the running Next.js app:
 
 ```bash
-npm run seed                            # Uses localhost:3000
+npm run dev:seed                        # Uses localhost:3000
 npx tsx scripts/seed.ts https://app.example.com  # Target a remote deployment
 ```
 
@@ -681,7 +681,7 @@ The Temporal UI at `http://localhost:8233` is the primary debugging tool. Use it
 Workers use `pino` for structured logging. Run with `pino-pretty` for human-readable output:
 
 ```bash
-npm run temporal:worker  # Automatically uses pino-pretty in dev
+npm run dev:worker  # Automatically uses pino-pretty in dev
 ```
 
 Key log namespaces:
