@@ -49,18 +49,19 @@ npm run dev:seed
 
 # --- Done ---
 echo ""
-echo "════════════════════════════════════════════════════════"
-echo "  ✨ Full reset complete!"
-echo ""
-echo "  The storefront + workers are running in this terminal."
-echo "  Press Ctrl+C to stop."
-echo ""
-echo "  Storefront  → http://localhost:3000/shop"
-echo "  Admin       → http://localhost:3000/admin"
-echo "  Temporal UI → http://localhost:8233"
-echo "════════════════════════════════════════════════════════"
-
-# Keep the script alive so the background app stays running
-# Remove the EXIT trap since we want the app to keep running
+cleanup
 trap - EXIT
-wait $APP_PID
+
+echo ""
+echo "════════════════════════════════════════════════════════"
+echo "  ✨ Full reset & seeding complete!"
+echo ""
+echo "  The database infrastructure is running in Docker."
+echo ""
+echo "  How to start the application storefront and workers:"
+echo "    - Run: npm run dev:up"
+echo "    - Or launch the debugger in VS Code (using 'Debug: Storefront & Workers')"
+echo ""
+echo "  How to shut down the database infrastructure:"
+echo "    - Run: npm run dev:down"
+echo "════════════════════════════════════════════════════════"
