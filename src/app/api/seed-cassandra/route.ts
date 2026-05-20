@@ -21,8 +21,6 @@ interface SampleData {
     description?: string;
     base_price_amount: number;
     base_price_currency: string;
-    blank_brand?: string;
-    blank_model?: string;
     default_variant_id?: string;
     default_variant_image_url?: string;
     collection_ids?: string[];
@@ -40,31 +38,20 @@ interface SampleData {
     images?: Record<string, string>;
     options?: Array<{ option_type: string; label: string; attributes?: Record<string, string> }>;
   }>;
-  option_types: Array<{ name: string; description: string }>;
-  option_values: Array<{ option_type: string; label: string; attributes: Record<string, string> }>;
 }
 
 export async function POST() {
   const results = {
     reset: false,
-    store: false,
     collections: 0,
     products: 0,
     variants: 0,
-    option_types: 0,
-    option_values: 0,
     errors: [] as string[]
   };
 
   try {
     const now = new Date();
 
-    // Create demo store
-    await executeCql(
-      `INSERT INTO stores (id, name, slug, status, owner_email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [types.Uuid.fromString('00000000-0000-0000-0000-000000000001'), 'Temporal Commerce Demo', 'demo', 'active', 'demo@example.com', now, now]
-    );
-    results.store = true;
 
     // Load sample data
     const dataPath = path.join(process.cwd(), 'sample-data', 'catalog.json');
@@ -90,10 +77,10 @@ export async function POST() {
         await executeCql(
           `INSERT INTO products (
             id, type, collection_ids, collection_names, name, description,
-            base_price_amount, base_price_currency, blank_brand, blank_model,
+            base_price_amount, base_price_currency,
             default_variant_id, default_variant_image_url,
             created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             types.Uuid.fromString(product.id),
             product.type,
@@ -103,8 +90,6 @@ export async function POST() {
             product.description ?? null,
             product.base_price_amount,
             product.base_price_currency,
-            product.blank_brand ?? null,
-            product.blank_model ?? null,
             product.default_variant_id ? types.Uuid.fromString(product.default_variant_id) : null,
             product.default_variant_image_url ?? null,
             now,
@@ -192,31 +177,6 @@ export async function POST() {
       }
     }
 
-    // Insert option types
-    for (const optionType of sampleData.option_types) {
-      try {
-        await executeCql(`INSERT INTO option_types (name, description) VALUES (?, ?)`, [
-          optionType.name,
-          optionType.description
-        ]);
-        results.option_types++;
-      } catch (error) {
-        results.errors.push(`OptionType ${optionType.name}: ${error}`);
-      }
-    }
-
-    // Insert option values
-    for (const optionValue of sampleData.option_values) {
-      try {
-        await executeCql(
-          `INSERT INTO option_values_by_type (option_type, label, attributes) VALUES (?, ?, ?)`,
-          [optionValue.option_type, optionValue.label, optionValue.attributes]
-        );
-        results.option_values++;
-      } catch (error) {
-        results.errors.push(`OptionValue ${optionValue.option_type}/${optionValue.label}: ${error}`);
-      }
-    }
 
     return NextResponse.json({
       success: true,

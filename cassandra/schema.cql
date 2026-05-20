@@ -85,19 +85,6 @@ CREATE TYPE IF NOT EXISTS supplier_order (
     updated_at TIMESTAMP
 );
 
--- ===========================================
--- Store (single demo store — kept for reference only)
--- ===========================================
-
-CREATE TABLE IF NOT EXISTS stores (
-    id UUID PRIMARY KEY,
-    name TEXT,
-    slug TEXT,
-    status TEXT,
-    owner_email TEXT,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP
-);
 
 -- ===========================================
 -- Catalog Tables
@@ -112,8 +99,6 @@ CREATE TABLE IF NOT EXISTS products (
     description TEXT,
     base_price_amount INT,
     base_price_currency TEXT,
-    blank_brand TEXT,
-    blank_model TEXT,
     default_variant_id UUID,
     default_variant_image_url TEXT,
     created_at TIMESTAMP,
@@ -163,18 +148,6 @@ CREATE TABLE IF NOT EXISTS collections (
     name TEXT,
     description TEXT,
     created_at TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS option_types (
-    name TEXT PRIMARY KEY,
-    description TEXT
-);
-
-CREATE TABLE IF NOT EXISTS option_values_by_type (
-    option_type TEXT,
-    label TEXT,
-    attributes MAP<TEXT, TEXT>,
-    PRIMARY KEY (option_type, label)
 );
 
 -- ===========================================
