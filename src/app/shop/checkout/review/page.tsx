@@ -148,7 +148,7 @@ export default function ReviewPage() {
           {payment && (
             <div className="text-sm text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)]">
               <p>
-                {payment.type === 'mock' ? 'Demo Payment' : payment.type === 'stripe' ? 'Credit Card' : 'Card'}
+                {payment.type === 'mock' ? 'Demo Payment' : 'Credit Card'}
                 {payment.last4 && <span> ending in {payment.last4}</span>}
               </p>
             </div>

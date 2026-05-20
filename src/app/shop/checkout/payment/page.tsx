@@ -7,7 +7,7 @@ import { setPaymentMethod, getCheckoutState } from '@/app/shop/cart-actions';
 
 /**
  * Mock Payment Page — Demo version
- * Simulates payment collection without Stripe.
+ * Simulates payment collection.
  */
 export default function PaymentPage() {
   const router = useRouter();

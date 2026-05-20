@@ -1,6 +1,7 @@
 import {
   allHandlersFinished,
   CancelledFailure,
+  CancellationScope,
   condition,
   getExternalWorkflowHandle,
   log,
@@ -322,11 +323,6 @@ export async function checkoutWorkflow(
   } catch (err) {
     if (err instanceof CancelledFailure) {
       log.warn('Checkout cancelled via CancelledFailure', { cartId: input.cartId });
-      // Release reservations in non-cancellable scope
-      if (reservations.length > 0) {
-        await releaseReservations(reservations);
-      }
-
       state.step = 'cancelled';
       const cancelResult: CheckoutWorkflowResult = {
         success: false,
@@ -337,12 +333,17 @@ export async function checkoutWorkflow(
         checkoutVersion
       };
 
-      try {
-        const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
-        await parentHandle.signal(checkoutCompletedSignal, cancelResult);
-      } catch {
-        log.warn('Failed to signal parent cart after cancellation', { parentCartWorkflowId });
-      }
+      await CancellationScope.nonCancellable(async () => {
+        if (reservations.length > 0) {
+          await releaseReservations(reservations);
+        }
+        try {
+          const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
+          await parentHandle.signal(checkoutCompletedSignal, cancelResult);
+        } catch {
+          log.warn('Failed to signal parent cart after cancellation', { parentCartWorkflowId });
+        }
+      });
 
       return cancelResult;
     }

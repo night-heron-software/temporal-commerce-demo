@@ -1,6 +1,7 @@
 import {
   allHandlersFinished,
   CancelledFailure,
+  CancellationScope,
   condition,
   continueAsNew,
   getExternalWorkflowHandle,
@@ -191,7 +192,8 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
   // ==================
   log.info('cartWorkflow STARTED', { cartId, updateCount, checkoutVersion });
 
-  while (!orderComplete && !shouldExit) {
+  try {
+    while (!orderComplete && !shouldExit) {
     // Wait for: an update event, a checkout completion signal, or 30 day timeout
     const woke = await condition(
       () => updateExchange.current !== null || checkoutResult !== null,
@@ -490,23 +492,53 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
       }
     }
   }
-
-  // ── Cleanup ──
-  log.info('cartWorkflow EXITING: waiting for final allHandlersFinished', { cartId, orderComplete, shouldExit });
-  await condition(allHandlersFinished);
-
-  // Cancel child checkout if we're exiting without order completion
-  if (!orderComplete && checkoutInProgress && checkoutWorkflowId) {
-    try {
-      const handle = getExternalWorkflowHandle(checkoutWorkflowId);
-      await handle.cancel();
-    } catch {
-      log.warn('Failed to cancel checkout on exit', { cartId, checkoutWorkflowId });
+} catch (err) {
+    if (err instanceof CancelledFailure) {
+      log.warn('Cart workflow cancelled', { cartId });
+      cart.status = 'abandoned';
+      shouldExit = true;
+    } else {
+      throw err;
     }
-  }
+  } finally {
+    await CancellationScope.nonCancellable(async () => {
+      log.info('cartWorkflow EXITING: waiting for final allHandlersFinished', { cartId, orderComplete, shouldExit });
+      try {
+        await condition(allHandlersFinished);
+      } catch {
+        // ignore
+      }
 
-  // Final projection
-  await flushCart();
+      // Cancel child checkout if we're exiting without order completion
+      if (!orderComplete && checkoutInProgress && checkoutWorkflowId) {
+        try {
+          const handle = getExternalWorkflowHandle(checkoutWorkflowId);
+          await handle.cancel();
+        } catch {
+          log.warn('Failed to cancel checkout on exit', { cartId, checkoutWorkflowId });
+        }
+      }
+
+      // Release all inventory reservations if abandoned or cancelled
+      if (!orderComplete && (cart.status === 'abandoned' || shouldExit)) {
+        log.info('Releasing all cart reservations on workflow exit', { cartId });
+        for (const item of cart.items) {
+          try {
+            await releaseCartItem(cartId, item.variantId);
+          } catch (e) {
+            log.error('Failed to release item reservation on exit', { cartId, variantId: item.variantId, error: String(e) });
+          }
+        }
+      }
+
+      // Final projection
+      try {
+        await flushCart();
+      } catch {
+        // ignore
+      }
+    });
+  }
 
   log.info('cartWorkflow EXITED', { cartId, orderComplete, shouldExit, status: cart.status });
   return cart;

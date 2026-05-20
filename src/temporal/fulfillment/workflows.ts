@@ -28,7 +28,6 @@ import {
 import {
   getFeatureFlag,
   submitSupplierOrder,
-  pollSupplierStatus,
   sendShippedEmail,
   sendDeliveredEmail,
   transferInventoryReservations,
@@ -41,7 +40,7 @@ import { buildFulfillmentDocument } from "./document-builder";
 export type FulfillmentStatusUpdate = OMS.FulfillmentStatusUpdate;
 export type SupplierOrderStatus = OMS.SupplierOrderStatus;
 
-const POLLING_INTERVAL = "15 minutes";
+
 
 // ============================================================================
 // Status Mapping
@@ -224,28 +223,12 @@ export async function fulfillmentWorkflow(
     for (const supplierOrder of state.supplierOrders) {
       if ((state.status as string) === "cancelled") break;
 
-      if (supplierOrder.supplierType === "simulated") {
-        await runSimulatedFulfillment(
-          state,
-          supplierOrder,
-          request,
-          syncProjections,
-        );
-      } else if (
-        supplierOrder.supplierType === "printify-dynamic" ||
-        supplierOrder.supplierType === "swiftpod"
-      ) {
-        await runDynamicFulfillment(
-          state,
-          supplierOrder,
-          request,
-          syncProjections,
-        );
-      } else {
-        supplierOrder.status = "failed";
-        supplierOrder.errorMessage = `Unsupported supplier type: ${supplierOrder.supplierType}`;
-        await signalParentOMSWorkflow(state, supplierOrder);
-      }
+      await runSimulatedFulfillment(
+        state,
+        supplierOrder,
+        request,
+        syncProjections,
+      );
 
       // Handle inventory lifecycle per supplier order
       if (supplierOrder.status === "delivered") {
@@ -353,80 +336,7 @@ function buildResult(state: FulfillmentWorkflowState): FulfillmentResult {
   };
 }
 
-// ============================================================================
-// Dynamic Fulfillment Strategy
-// ============================================================================
 
-async function runDynamicFulfillment(
-  state: FulfillmentWorkflowState,
-  so: FulfillmentSupplierOrderState,
-  request: FulfillmentOrderRequest,
-  syncProjections: () => Promise<void>,
-): Promise<void> {
-  // 1. Validate items (all items must have a productId)
-  so.status = "validating";
-  so.items.forEach((i) => (i.status = "pending"));
-  state.updatedAt = new Date().toISOString();
-
-  const missingProducts = so.items
-    .filter((i) => !i.productId)
-    .map((i) => i.sku);
-  if (missingProducts.length > 0) {
-    so.status = "failed";
-    so.errorMessage = `Items missing productId for dynamic order: ${missingProducts.join(", ")}`;
-    await signalParentOMSWorkflow(state, so);
-    return;
-  }
-
-  // 2. Submit to supplier
-  so.status = "submitting";
-  state.updatedAt = new Date().toISOString();
-
-  const result = await submitSupplierOrder({
-    fulfillmentId: wf.workflowInfo().workflowId,
-    supplierType: so.supplierType as "printify-dynamic" | "swiftpod",
-    items: so.items.map((item) => ({
-      sku: item.sku,
-      productId: item.productId,
-      quantity: item.quantity,
-      supplierProductId: "",
-      supplierVariantId: "",
-    })),
-    shippingAddress: request.shippingAddress,
-    shippingMethod: request.shippingMethod ?? "standard",
-  });
-
-  if (!result.success) {
-    so.status = "failed";
-    so.errorMessage = result.errorMessage;
-    await signalParentOMSWorkflow(state, so);
-    return;
-  }
-
-  so.supplierExternalId = result.supplierOrderId;
-  so.submittedAt = new Date().toISOString();
-  state.updatedAt = new Date().toISOString();
-
-  so.items.forEach((item) => {
-    item.status = "submitted";
-    const lineItemIdRecord = (result.lineItemIds ?? {}) as Record<
-      string,
-      string
-    >;
-    if (item.sku in lineItemIdRecord) {
-      item.supplierLineItemId = lineItemIdRecord[item.sku];
-    }
-  });
-
-  so.status = "in_production";
-  so.items.forEach((i) => (i.status = "in_production"));
-  state.updatedAt = new Date().toISOString();
-  await syncProjections();
-  await signalParentOMSWorkflow(state, so);
-
-  // 3. Wait for completion with periodic polling
-  await waitForSupplierCompletion(state, so, syncProjections);
-}
 
 // ============================================================================
 // Simulated Fulfillment Strategy
@@ -629,77 +539,7 @@ async function runAutomaticSimulatedFulfillment(
   }
 }
 
-// ============================================================================
-// Polling / Signal Waiting (Printify)
-// ============================================================================
 
-async function waitForSupplierCompletion(
-  state: FulfillmentWorkflowState,
-  so: FulfillmentSupplierOrderState,
-  syncProjections: () => Promise<void>,
-): Promise<void> {
-  const isTerminal = () =>
-    so.status === "delivered" ||
-    so.status === "failed" ||
-    so.status === "cancelled";
-
-  let previousStatus = so.status;
-
-  while (!isTerminal()) {
-    // Wake up if we reach a terminal state OR if a signal changed our status
-    const statusChanged = () => so.status !== previousStatus;
-    const conditionMet = await wf.condition(
-      () => isTerminal() || statusChanged(),
-      POLLING_INTERVAL,
-    );
-
-    if (!conditionMet && !isTerminal() && so.supplierExternalId) {
-      try {
-        const update = await pollSupplierStatus({
-          supplierOrderId: so.supplierExternalId,
-          supplierType: so.supplierType,
-        });
-        handleSupplierUpdate(so, update);
-      } catch {
-        // Polling failed, will retry next interval
-      }
-    }
-
-    // Process any status changes (whether from signal or polling)
-    if (so.status !== previousStatus) {
-      if (state.customerEmail) {
-        const confirmNumber = state.confirmationNumber || state.orderId;
-
-        if (so.status === "shipped" && so.shipments?.length) {
-          const latestShipment = so.shipments[so.shipments.length - 1];
-          await sendShippedEmail(
-            state.customerEmail,
-            state.orderId,
-            confirmNumber,
-            {
-              carrier: latestShipment.carrier,
-              trackingNumber: latestShipment.trackingNumber,
-              trackingUrl: latestShipment.trackingUrl,
-            },
-          );
-        } else if (so.status === "delivered") {
-          await sendDeliveredEmail(
-            state.customerEmail,
-            state.orderId,
-            confirmNumber,
-          );
-        }
-      }
-
-      // Sync ES projection on every status transition
-      await syncProjections();
-      await signalParentOMSWorkflow(state, so);
-      previousStatus = so.status;
-    }
-  }
-
-  await syncProjections();
-}
 
 // ============================================================================
 // Supplier Update Handler

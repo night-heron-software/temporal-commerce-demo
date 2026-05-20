@@ -20,7 +20,7 @@ export interface ShippingAddress {
 }
 
 export interface PaymentMethod {
-  type: 'card' | 'mock' | 'stripe';
+  type: 'card' | 'mock';
   last4?: string;
   token: string; // In real impl, this would be a tokenized payment reference
 }

@@ -32,7 +32,7 @@ export interface FulfillmentOrderRequest {
 export interface FulfillmentSupplierOrderInput {
   supplierOrderId: string; // OMS-generated ID
   supplierId: string;
-  supplierType: 'simulated' | 'printify-dynamic' | 'swiftpod';
+  supplierType: 'simulated';
   items: FulfillmentItem[];
 }
 
@@ -91,7 +91,7 @@ export interface FulfillmentWorkflowState {
 export interface FulfillmentSupplierOrderState {
   supplierOrderId: string; // OMS ID for signal matching
   supplierId: string;
-  supplierType: 'simulated' | 'printify-dynamic' | 'swiftpod';
+  supplierType: 'simulated';
   items: FulfillmentLineItemState[];
   status: FulfillmentOrderStatus;
   omsStatus?: SupplierOrderStatus; // Mapped status for OMS signaling

@@ -51,7 +51,7 @@ function getOptionHex(option: CassandraOption): string | null {
 }
 
 // ─── Semantic option type detection ──────────────────────────────────────────
-// Printify uses inconsistent type names across blank suppliers:
+// Option type names can be inconsistent across suppliers:
 //   Colors: "Colors", "Bella + Canvas Colors", "AS Color colors", "Comfort Colors® Colors"
 //   Sizes:  "Sizes", "Clothing sizes"
 function isColorType(type: string): boolean {

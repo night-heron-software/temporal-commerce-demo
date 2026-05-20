@@ -174,11 +174,9 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     });
   }
 
-  const printifyDynamicCount = state.assignments.filter(a => a.supplierId === 'printify-dynamic').length;
   const simulatedCount = state.assignments.filter(a => a.supplierId === 'simulated').length;
   log.info('[OMS] Auto-assignment complete', {
     totalAssignments: state.assignments.length,
-    printifyDynamic: printifyDynamicCount,
     simulated: simulatedCount
   });
   if (dataFlowEnabled) {
@@ -550,7 +548,7 @@ async function triggerFulfillment(
     fulfillmentSupplierOrders.push({
       supplierOrderId,
       supplierId,
-      supplierType: isSimulated ? 'simulated' : (supplierId as 'printify-dynamic'),
+      supplierType: 'simulated',
       items: fulfillmentItems
     });
   }
