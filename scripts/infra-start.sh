@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Ensure Docker is running
-npm run docker:ready
+npm run infra:ready
 
 echo "Starting local infrastructure..."
 docker-compose up -d

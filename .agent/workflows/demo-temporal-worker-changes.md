@@ -7,7 +7,7 @@ description: Guidelines for Temporal workflow/worker code changes
 **IMPORTANT**: The Temporal workers do NOT auto-reload when workflow or activity code changes.
 
 > [!NOTE]
-> Workers are launched via `npm run temporal:worker` (or `npm run start:all`), which runs `npx tsx --env-file=.env.local ./src/temporal/worker.ts`.
+> Workers are launched via `npm run dev:worker` (or `npm run dev:up`), which runs `npx tsx --env-file=.env.local ./src/temporal/worker.ts`.
 > Since `tsx` transpiles TypeScript on the fly, a worker restart picks up code changes **without** a separate build step.
 
 ## When to Restart Workers
@@ -25,15 +25,15 @@ After making changes to any of these files, suggest restarting workers:
 ## How to Restart Workers
 
 ```bash
-# If running `npm run start:all`, press Ctrl+C and restart:
-npm run start:all
+# If running `npm run dev:up`, press Ctrl+C and restart:
+npm run dev:up
 
 # If running workers separately:
 # Stop (Ctrl+C or:)
-npm run stop:all
+npm run dev:down
 
 # Restart
-npm run temporal:worker
+npm run dev:worker
 ```
 
 ## Domain Workers Launched

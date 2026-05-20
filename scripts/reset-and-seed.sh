@@ -8,7 +8,7 @@ echo ""
 
 # --- Step 1: Stop any running app processes ---
 echo "🛑 Stopping any running app processes..."
-npm run stop:all 2>/dev/null || true
+npm run dev:down 2>/dev/null || true
 
 # --- Step 2: Wipe and rebuild infrastructure ---
 echo ""
@@ -17,12 +17,12 @@ npm run infra:clean
 
 echo ""
 echo "🏗️  Starting infrastructure + applying schema..."
-npm run init
+npm run infra:up && npm run db:init
 
 # --- Step 3: Start app in background ---
 echo ""
 echo "🚀 Starting storefront + workers in background..."
-npm run start:all &
+npm run dev:storefront-workers &
 APP_PID=$!
 
 # Ensure background processes are cleaned up on exit
@@ -45,7 +45,7 @@ echo "✓ Storefront ready"
 # --- Step 5: Seed ---
 echo ""
 echo "🌱 Seeding demo data..."
-npm run seed
+npm run dev:seed
 
 # --- Done ---
 echo ""

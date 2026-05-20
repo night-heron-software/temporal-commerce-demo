@@ -12,18 +12,14 @@ Set up Cassandra, Elasticsearch, Temporal, and seed all catalog data on a fresh 
 - **Dependencies** - `npm install` completed
 - **Docker Desktop** - Will be auto-started if not running
 
-## Automated Full Reset
+## Automated Initialization
 
 > [!TIP]
-> **Shortcut**: `npm run reset:seed` automates the entire sequence below (clean → init → start → seed) in a single command.
-
-// turbo
+> **Shortcut**: `npm run dev:init` automates the entire sequence below (clean → init → start → seed → shutdown) in a single command.
 
 ```bash
-npm run docker:ready
+npm run infra:ready
 ```
-
-// turbo
 
 ```bash
 npm run infra:clean
@@ -31,34 +27,31 @@ npm run infra:clean
 
 Then:
 
-// turbo
-
 ```bash
-npm run init
+npm run dev:init
 ```
 
 > [!NOTE]
-> `npm run init` calls `npm run infra:start`, which calls `npm run docker:ready`. If Docker Desktop is not running, it will be started automatically.
+> `npm run dev:init` internally manages stopping any running apps, wiping docker volumes, starting infrastructure (which calls `infra:ready`), applying the database schema, starting the application, and running the seeds.
 
 This will:
 
-1. `npm run infra:start` — Start Cassandra, Elasticsearch, Temporal containers
+1. `npm run infra:up` — Start Cassandra, Elasticsearch, Temporal containers
 2. `npm run db:init` — Apply `cassandra/schema.cql` to the `demo-cassandra` container
+3. `npm run dev:seed` — Load catalog data
 
-### After Init: Start and Seed
+### After Init: Start and Run
 
 Start the app in one terminal:
 
 ```bash
-npm run start:all
+npm run dev:up
 ```
 
-Then seed in another terminal:
-
-// turbo
+Then seed in another terminal (if not doing a full `dev:init`):
 
 ```bash
-npm run seed
+npm run dev:seed
 ```
 
 The seed script (`scripts/seed.ts`) calls the running app's APIs in order:
@@ -78,7 +71,7 @@ If you need to run steps individually:
 ### 1. Start Infrastructure
 
 ```bash
-npm run infra:start
+npm run infra:up
 ```
 
 ### 2. Initialize Cassandra Schema
@@ -98,13 +91,13 @@ docker exec -i demo-cassandra cqlsh < cassandra/schema.cql
 All seed steps call app API routes. Workers must be running for Temporal operations:
 
 ```bash
-npm run start:all
+npm run dev:up
 ```
 
 ### 4. Seed Data
 
 ```bash
-npm run seed
+npm run dev:seed
 ```
 
 ### 5. Verify
@@ -117,11 +110,11 @@ Open the storefront at `http://localhost:3000/shop` and confirm products are vis
 
 | Problem | Solution |
 | --- | --- |
-| Cassandra connection refused | Run `npm run infra:start` and wait for healthy status |
+| Cassandra connection refused | Run `npm run infra:up` and wait for healthy status |
 | Schema errors on `db-init` | Ensure `demo-cassandra` container is healthy before running |
-| Seed shows "fetch failed" | Storefront not running — start `npm run start:all` first |
-| ES sync shows 0 records | Ensure `npm run seed` completed successfully |
-| No products in storefront | Check `npm run seed` output for errors; try `npm run seed` again |
+| Seed shows "fetch failed" | Storefront not running — start `npm run dev:up` first |
+| ES sync shows 0 records | Ensure `npm run dev:seed` completed successfully |
+| No products in storefront | Check `npm run dev:seed` output for errors; try `npm run dev:seed` again |
 
 ---
 
@@ -129,11 +122,11 @@ Open the storefront at `http://localhost:3000/shop` and confirm products are vis
 
 | Script | Description |
 | --- | --- |
-| `npm run init` | `infra:start` + `db:init` (infrastructure + schema) |
-| `npm run infra:start` | Start Docker infrastructure |
-| `npm run infra:stop` | Stop infrastructure containers |
+| `npm run dev:init` | Wipe, spin up, initialize Cassandra keyspace, start apps and seed |
+| `npm run infra:up` | Start Docker infrastructure |
+| `npm run infra:down` | Stop infrastructure containers |
 | `npm run infra:clean` | Stop + wipe Docker volumes (nuclear reset) |
 | `npm run db:init` | Apply Cassandra schema |
-| `npm run seed` | Run full API seed pipeline (requires app running) |
-| `npm run start:all` | Start storefront + workers |
-| `npm run stop:all` | Kill storefront and worker processes |
+| `npm run dev:seed` | Run full API seed pipeline (requires app running) |
+| `npm run dev:up` | Start storefront + workers |
+| `npm run dev:down` | Kill storefront, worker, and infra processes |

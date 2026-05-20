@@ -66,7 +66,6 @@ temporal-commerce-demo/
 │       ├── contracts/       # Shared type contracts
 │       └── worker.ts        # Unified worker launcher (all domains)
 ├── docker-compose.yml      # Local: Cassandra + Elasticsearch + Temporal
-├── Makefile                # Legacy dev operations (npm scripts preferred)
 ├── package.json            # Canonical entry point for all dev operations
 └── .env.example            # Environment variable template
 ```
@@ -78,17 +77,18 @@ temporal-commerce-demo/
 All canonical operations go through `npm run`.
 
 ```bash
-npm run up             # Start infrastructure + storefront + workers
-npm run shutdown        # Stop everything (app + infrastructure)
-npm run reset:seed     # Full reset: wipe → init → start → seed
-npm run init           # infra:start + db:init (schema creation) — first-time setup
-npm run start:all      # Start storefront (3000) + all workers together
-npm run temporal:worker # Start only Temporal workers
-npm run seed           # Seed catalog data (requires storefront + workers running)
-npm run infra:start    # Start infrastructure (Cassandra, Elasticsearch, Temporal)
-npm run infra:stop     # Stop infrastructure containers
-npm run infra:clean    # Stop + wipe all Docker data volumes
-npm run stop:all       # Kill storefront and worker processes
+npm run dev:up         # Start infrastructure + storefront + workers together
+npm run dev:down       # Stop storefront, workers, and infrastructure containers
+npm run dev:status     # Check status of all infrastructure and application services
+npm run dev:init       # Full reset: stop app -> wipe docker -> start infra -> apply schema -> start app -> seed data
+npm run dev:storefront # Start only the Next.js storefront (dev server)
+npm run dev:worker     # Start only Temporal workers
+npm run db:init        # Apply Cassandra schema (cassandra/schema.cql)
+npm run dev:seed        # Seed catalog data (requires storefront + workers running)
+npm run db:verify      # Verify Cassandra schema tables against code queries
+npm run infra:up       # Start Docker infrastructure (Cassandra, Elasticsearch, Temporal) and check health
+npm run infra:down     # Stop infrastructure containers
+npm run infra:clean    # Stop + wipe all Docker data volumes (nuclear reset)
 npm run infra:ps       # List running infrastructure containers
 ```
 
@@ -153,10 +153,10 @@ This demo differs from the full platform in several intentional ways:
 
 ## Gotchas
 
-1. **Workflow Code Changes**: Workers do NOT auto-reload. After changing any file in `src/temporal/`, restart `npm run temporal:worker` or `npm run start:all`.
+1. **Workflow Code Changes**: Workers do NOT auto-reload. After changing any file in `src/temporal/`, restart `npm run dev:worker` or `npm run dev:up`.
 2. **Temporal UI Port**: The demo uses port `8233` (not `8080` like the full platform) to avoid conflicts.
-3. **Docker Desktop Required**: `npm run infra:start` requires Docker Desktop running. It will auto-start Docker Desktop if not running.
-4. **Seeding Order**: `npm run seed` requires the Next.js app + workers to be running. Always start `npm run start:all` first.
+3. **Docker Desktop Required**: `npm run infra:up` requires Docker Desktop running. It will auto-start Docker Desktop if not running.
+4. **Seeding Order**: `npm run dev:seed` requires the Next.js app + workers to be running. Always start `npm run dev:up` first.
 5. **Inventory Seeding**: The seed pipeline uses `InventoryCommandRepository.setSupplierStock()` which flows through the inventory-service workflow (CQRS projections + ES sync). Workers must be running for this to work.
 
 ---

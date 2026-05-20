@@ -99,42 +99,47 @@ npm run seed
 
 ```bash
 # Start infrastructure + app in one command
-npm run up
+npm run dev:up
+
+# Check health and status of all services
+npm run dev:status
 
 # Or start them separately for independent debugging:
-npm run infra:start      # Start Docker infrastructure
-npm run dev              # Next.js storefront only
-npm run temporal:worker  # Temporal workers only (with pino-pretty)
+npm run infra:up        # Start Docker infrastructure only
+npm run dev:storefront  # Next.js storefront only
+npm run dev:worker      # Temporal workers only (with pino-pretty)
 ```
 
 ### Full Reset
 
 ```bash
-npm run reset:seed    # One command: wipe → init → start → seed
+npm run dev:init         # Nuclear reset: wipe databases, recreate schema, start app, and seed catalog
 
 # Or manually:
-npm run infra:clean   # Stop + wipe all Docker volumes
-npm run init          # Re-create schema
-npm run start:all     # Start app (in one terminal)
-npm run seed          # Re-populate data (in another terminal)
+npm run infra:clean      # Stop + wipe all Docker volumes
+npm run db:init          # Apply Cassandra schema
+npm run dev:up           # Start app & workers concurrently
+npm run dev:seed         # Re-populate catalog data
 ```
 
 ### NPM Scripts
 
-| Script | Description |
-| --- | --- |
-| `npm run up` | Start infrastructure + storefront + workers |
-| `npm run shutdown` | Stop everything (app + infrastructure) |
-| `npm run reset:seed` | Full reset: wipe → init → start → seed |
-| `npm run init` | Start infrastructure + apply Cassandra schema |
-| `npm run start:all` | Start storefront + Temporal workers |
-| `npm run stop:all` | Stop application processes |
-| `npm run temporal:worker` | Start Temporal workers only |
-| `npm run seed` | Populate demo catalog data |
-| `npm run infra:start` | Start Docker infrastructure only |
-| `npm run infra:stop` | Stop Docker containers |
-| `npm run infra:clean` | Stop + wipe all data volumes |
-| `npm run infra:ps` | List running containers |
+| Script | Category | Description |
+| --- | --- | --- |
+| `npm run dev:up` | Developer | Start infrastructure + storefront + workers together |
+| `npm run dev:status` | Developer | Check status of all infrastructure and application services |
+| `npm run dev:down` | Developer | Stop everything (app + infrastructure containers) |
+| `npm run dev:init` | Developer | Full reset: wipe -> recreate schema -> start app -> seed data |
+| `npm run dev:storefront` | Application | Start storefront only |
+| `npm run dev:worker` | Application | Start Temporal workers only |
+| `npm run dev:seed` | Database | Populate catalog and inventory data (requires app running) |
+| `npm run db:init` | Database | Create Cassandra keyspace and tables |
+| `npm run db:verify` | Database | Verify Cassandra schema tables against code queries |
+| `npm run infra:up` | Infrastructure | Start Docker infrastructure containers and verify health |
+| `npm run infra:down` | Infrastructure | Stop infrastructure containers |
+| `npm run infra:clean` | Infrastructure | Stop containers and wipe all persistent volumes |
+| `npm run infra:ps` | Infrastructure | List running infrastructure containers |
+| `npm run infra:ready` | Infrastructure | Ensure Docker Desktop is running (starts it if not) |
 
 ---
 
