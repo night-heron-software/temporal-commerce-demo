@@ -131,3 +131,10 @@ export interface ShipmentItemRef {
   sku: string;
   quantity: number;
 }
+
+export type FulfillmentStateName = 'received' | 'in_production';
+
+export type FulfillmentSignal =
+  | { kind: 'supplierStatus'; update: SupplierStatusUpdate }
+  | { kind: 'cancel' }
+  | { kind: 'childStatus'; update: FulfillmentSupplierOrderState };

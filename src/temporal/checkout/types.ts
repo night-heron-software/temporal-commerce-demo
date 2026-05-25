@@ -1,18 +1,14 @@
 import { Cart } from '../contracts';
+import { ReservationInfo } from './activities';
+
 export type CartItem = Cart.CartItem;
 export type Order = Cart.Order;
 export type PaymentMethod = Cart.PaymentMethod;
 export type ShippingAddress = Cart.ShippingAddress;
 
-export type CheckoutStep =
-  | 'validating'
-  | 'shipping'
-  | 'payment'
-  | 'review'
-  | 'processing'
-  | 'complete'
-  | 'failed'
-  | 'cancelled';
+export type CheckoutStateName = 'validating' | 'shipping' | 'payment' | 'review';
+
+export type CheckoutStep = CheckoutStateName | 'complete' | 'failed' | 'cancelled';
 
 export interface CheckoutState {
   step: CheckoutStep;
@@ -48,6 +44,7 @@ export interface CheckoutWorkflowResult {
   order?: Order;
   error?: string;
   finalState: CheckoutState;
+  finalStep: CheckoutStep;
   checkoutVersion: number;
 }
 
@@ -67,5 +64,29 @@ export interface RetargetParentSignal {
   newParentCartWorkflowId: string;
 }
 
-// Re-export types from cart that checkout needs
+export type CheckoutInput =
+  | { kind: 'setShipping'; shippingAddress: ShippingAddress }
+  | { kind: 'setPayment'; paymentMethod: PaymentMethod }
+  | { kind: 'submitOrder' }
+  | { kind: 'cancelCheckout' }
+  | { kind: 'acknowledgeCartChange'; cartVersion: number }
+  | { kind: 'retargetParent'; newParentCartWorkflowId: string }
+  | { kind: 'timeout' };
 
+export interface CheckoutContext {
+  readonly cartId: string;
+  readonly parentCartWorkflowId: string;
+  readonly items: CartItem[];
+  readonly subtotalPrice: number;
+  readonly totalDiscounts: number;
+  readonly currency: string;
+  readonly appliedCoupons: string[];
+  readonly isGuest: boolean;
+  readonly cartVersion: number;
+  readonly checkoutVersion: number;
+  readonly state: CheckoutState;
+  readonly reservations: ReservationInfo[];
+  readonly shippingCost: number;
+  readonly totalTax: number;
+  readonly totalPrice: number;
+}
