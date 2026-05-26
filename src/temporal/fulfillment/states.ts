@@ -88,7 +88,7 @@ export const FULFILLMENT_STATES: StateRegistry<
 > = {
   received: {
     fn: async (ctx: Readonly<FulfillmentWorkflowState>) => ({ context: ctx, next: 'in_production' as const }),
-    timeout: '1 second',
+    transitional: true,
   },
   in_production: { fn: inProductionState, timeout: '365 days' },
 };
