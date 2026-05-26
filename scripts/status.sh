@@ -44,6 +44,12 @@ check_port 7233 && temporal="✅ UP"
 temporal_ui="❌ DOWN"
 check_port 8233 && temporal_ui="✅ UP"
 
+postgres="❌ DOWN"
+check_port 5432 && postgres="✅ UP"
+
+es_temporal="❌ DOWN"
+check_port 9201 && es_temporal="✅ UP"
+
 # --- Application ---
 storefront="❌ DOWN"
 if check_port 3000; then
@@ -69,6 +75,8 @@ printf "  %-28s %s\n" "Cassandra (9042)" "$cass"
 printf "  %-28s %s\n" "Elasticsearch (9200)" "$es"
 printf "  %-28s %s\n" "Temporal Server (7233)" "$temporal"
 printf "  %-28s %s\n" "Temporal UI (8233)" "$temporal_ui"
+printf "  %-28s %s\n" "PostgreSQL (5432)" "$postgres"
+printf "  %-28s %s\n" "Temporal ES (9201)" "$es_temporal"
 echo ""
 echo "  Application"
 echo "  ──────────────────────────────────────────────────"
