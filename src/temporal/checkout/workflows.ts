@@ -1,31 +1,20 @@
 import {
-  allHandlersFinished,
-  CancelledFailure,
-  CancellationScope,
-  condition,
   getExternalWorkflowHandle,
   log,
-  setHandler
+  setHandler,
 } from '@temporalio/workflow';
-const getFeatureFlag = async (_flag: string) => false;
-import {
-  calculateShipping,
-  calculateTax,
-  processPayment,
-  createOrder,
-  createPaymentIntent,
-  sendConfirmationEmail,
-  startOrderManagementWorkflow,
-  renewReservationsForCheckout,
-  confirmReservations,
-  releaseReservations,
-  ReservationInfo
-} from './activities';
+import { releaseReservations } from './activities';
 import type {
   CheckoutState,
   CheckoutWorkflowInput,
   CheckoutWorkflowResult,
-  Order,
+  CheckoutContext,
+  CheckoutInput,
+  CheckoutStateName,
+  CheckoutStep,
+  SetShippingSignal,
+  SetPaymentSignal,
+  RetargetParentSignal,
 } from './types';
 
 import {
@@ -35,10 +24,13 @@ import {
   cancelCheckoutUpdate,
   acknowledgeCartChangeUpdate,
   retargetParentUpdate,
-  getCheckoutStateQuery
+  getCheckoutStateQuery,
 } from './definitions';
 
+import { runStateMachine, StateMachineConfig, MappedUpdateRegistration } from '../framework';
+import { CHECKOUT_STATES } from './states';
 import { Cart } from '../contracts';
+
 const checkoutCompletedSignal = Cart.checkoutCompletedSignal;
 
 // Re-export definitions for worker registration compatibility
@@ -49,304 +41,142 @@ export {
   cancelCheckoutUpdate,
   acknowledgeCartChangeUpdate,
   retargetParentUpdate,
-  getCheckoutStateQuery
+  getCheckoutStateQuery,
 };
 
-// ==================
-// Checkout Workflow
-// ==================
-
 export async function checkoutWorkflow(
-  input: CheckoutWorkflowInput
+  input: CheckoutWorkflowInput,
 ): Promise<CheckoutWorkflowResult> {
-  const state: CheckoutState = {
-    step: 'validating',
+  // ── Initialize context ──
+  let ctx: CheckoutContext = {
+    cartId: input.cartId,
+    parentCartWorkflowId: input.parentCartWorkflowId,
+    items: input.items,
+    subtotalPrice: input.subtotalPrice,
+    totalDiscounts: input.totalDiscounts,
+    currency: input.currency,
+    appliedCoupons: input.appliedCoupons,
     isGuest: input.isGuest,
+    cartVersion: input.cartVersion,
+    checkoutVersion: input.checkoutVersion || 0,
+    state: {
+      step: 'validating',
+      isGuest: input.isGuest,
+      shippingCost: 0,
+      tax: 0,
+      cartVersionAtStart: input.cartVersion,
+      cartVersionAcknowledged: input.cartVersion,
+    },
+    reservations: [],
     shippingCost: 0,
-    tax: 0,
-    cartVersionAtStart: input.cartVersion,
-    cartVersionAcknowledged: input.cartVersion
+    totalTax: 0,
+    totalPrice: input.subtotalPrice - input.totalDiscounts,
   };
 
-  const dataFlowEnabled = await getFeatureFlag('DATA_FLOW_LOGGING');
-  if (dataFlowEnabled) {
-    log.info('[DataFlow] T5: CartItem[] → Order — input.CheckoutWorkflowInput', {
-      dataFlow: true, stage: 'T5: CartItem[] → Order', label: 'input.CheckoutWorkflowInput',
-      data: JSON.stringify({ cartId: input.cartId, itemCount: input.items.length, items: input.items, subtotalPrice: input.subtotalPrice, totalDiscounts: input.totalDiscounts, currency: input.currency }, null, 2)
-    });
-  }
+  // ── Track current step (single source of truth: the driver's state) ──
+  let currentStep = 'validating' as CheckoutStep;
 
-  // Track cart totals for order creation
-  const subtotalPrice = input.subtotalPrice;
-  const totalDiscounts = input.totalDiscounts;
-  let totalTax = 0;
-  let shippingCost = 0;
-  let totalPrice = subtotalPrice - totalDiscounts;
+  // Query handler (read-only) — returns state with computed step
+  setHandler(getCheckoutStateQuery, () => ({ ...ctx.state, step: currentStep }));
 
-  let orderComplete = false;
-  let checkoutCancelled = false;
-  let reservations: ReservationInfo[] = [];
-  let parentCartWorkflowId = input.parentCartWorkflowId;
-  const checkoutVersion = input.checkoutVersion;
-
-  // Query for current checkout state
-  setHandler(getCheckoutStateQuery, () => state);
-
-  // Retarget parent cart (used when carts merge during sign-in)
-  setHandler(retargetParentUpdate, (signal) => {
-    log.info('Retargeting parent cart', { from: parentCartWorkflowId, to: signal.newParentCartWorkflowId });
-    parentCartWorkflowId = signal.newParentCartWorkflowId;
-  });
-
-  // Handle acknowledgement of cart changes during checkout
-  setHandler(acknowledgeCartChangeUpdate, (input) => {
-    state.cartVersionAcknowledged = input.cartVersion;
-    return state;
-  });
-
-  // Set shipping address and calculate costs
-  // Allow updates from shipping, payment, or review steps (for back navigation)
-  setHandler(setShippingUpdate, async (signalInput) => {
-    await condition(() => state.step !== 'validating');
-    const allowedSteps = ['shipping', 'payment', 'review'];
-    if (!allowedSteps.includes(state.step)) {
-      return { ...state, error: `Cannot set shipping from step: ${state.step}` };
-    }
-
-    state.shippingAddress = signalInput.shippingAddress;
-
-    // Calculate shipping cost
-    const calculatedShipping = await calculateShipping(
-      `${signalInput.shippingAddress.city}, ${signalInput.shippingAddress.state} ${signalInput.shippingAddress.postalCode}`
-    );
-    state.shippingCost = calculatedShipping;
-    shippingCost = calculatedShipping;
-
-    // Calculate tax based on shipping address
-    const calculatedTax = await calculateTax(
-      signalInput.shippingAddress.state,
-      subtotalPrice - totalDiscounts
-    );
-    state.tax = calculatedTax;
-    totalTax = calculatedTax;
-
-    // Update total price with shipping and tax
-    totalPrice = subtotalPrice - totalDiscounts + shippingCost + totalTax;
-
-    // Create PaymentIntent if using Stripe
-    try {
-      const { clientSecret } = await createPaymentIntent(totalPrice, input.currency);
-      state.clientSecret = clientSecret;
-    } catch (e) {
-      if (e instanceof CancelledFailure) throw e;
-      log.error('Failed to create payment intent', { error: String(e) });
-      // Return to shipping with error instead of advancing without a clientSecret
-      state.step = 'shipping';
-      state.error = 'Payment setup failed. Please try again.';
-      return state;
-    }
-
-    state.step = 'payment';
-    return state;
-  });
-
-  // Set payment method
-  setHandler(setPaymentUpdate, async (signalInput) => {
-    await condition(() => state.step !== 'validating');
-    const allowedSteps = ['payment', 'review'];
-    if (!allowedSteps.includes(state.step)) {
-      return { ...state, error: `Cannot set payment from step: ${state.step}` };
-    }
-    if (!state.shippingAddress) {
-      return { ...state, error: 'Shipping address required before payment' };
-    }
-
-    state.paymentMethod = signalInput.paymentMethod;
-    state.step = 'review';
-    return state;
-  });
-
-  // Submit order - process payment, create order, start OMS workflow
-  setHandler(submitOrderUpdate, async () => {
-    await condition(() => state.step !== 'validating');
-    if (state.step !== 'review') {
-      return { ...state, error: `Cannot submit order from step: ${state.step}` };
-    }
-    if (!state.shippingAddress || !state.paymentMethod) {
-      return { ...state, error: 'Shipping and payment required' };
-    }
-
-    state.step = 'processing';
-
-    try {
-      // Process payment
-      const paymentSuccess = await processPayment(
-        state.paymentMethod.token,
-        totalPrice,
-        input.currency,
-        input.cartId
-      );
-
-      if (!paymentSuccess) {
-        state.step = 'payment';
-        state.error = 'Payment failed. Please try again.';
-        return state;
+  // ── State machine run ──
+  const config: StateMachineConfig<CheckoutStateName, CheckoutInput, CheckoutContext, CheckoutState | void> = {
+    states: CHECKOUT_STATES,
+    initialState: 'validating',
+    onContextUpdate: (newCtx: CheckoutContext, state: CheckoutStateName | `__terminal:${string}`) => {
+      ctx = newCtx;
+      currentStep = (typeof state === 'string' && state.startsWith('__terminal:')
+        ? state.replace('__terminal:', '')
+        : state) as CheckoutStep;
+    },
+    onCancellation: async (cancelCtx: CheckoutContext, _currentState: CheckoutStateName | `__terminal:${string}`) => {
+      currentStep = 'cancelled';
+      if (cancelCtx.reservations.length > 0) {
+        await releaseReservations(cancelCtx.reservations);
       }
-
-      // Confirm inventory reservations after successful payment
-      await confirmReservations(reservations);
-
-      // Create order
-      const order: Order = await createOrder({
-        cartId: input.cartId,
-        items: input.items,
-        shippingAddress: state.shippingAddress,
-        paymentMethod: state.paymentMethod,
-        subtotal: subtotalPrice,
-        shippingCost: shippingCost,
-        tax: totalTax,
-        totalDiscounts: totalDiscounts,
-        total: totalPrice,
-        currency: input.currency
-      });
-
-      // Start the Order Management workflow — once this succeeds, checkout is done
-      await startOrderManagementWorkflow(order, state.shippingAddress.email);
-
-      // Mark complete immediately so the checkout workflow terminates
-      state.order = order;
-      state.step = 'complete';
-      orderComplete = true;
-
-      if (dataFlowEnabled) {
-        log.info('[DataFlow] T5: CartItem[] → Order — output.Order', {
-          dataFlow: true, stage: 'T5: CartItem[] → Order', label: 'output.Order',
-          data: JSON.stringify(order, null, 2)
-        });
+    },
+    onTerminal: async (finalCtx: CheckoutContext, terminalState: string) => {
+      if (terminalState !== '__terminal:complete' && finalCtx.reservations.length > 0) {
+        await releaseReservations(finalCtx.reservations);
       }
+    },
+  };
 
-      // Send confirmation email — non-critical, don't let failures block checkout completion
-      try {
-        await sendConfirmationEmail(state.shippingAddress.email, order.confirmationNumber, order);
-      } catch (emailErr) {
-        log.warn('Failed to send confirmation email, order still completed', { error: String(emailErr) });
-      }
+  const updateHandlers: MappedUpdateRegistration<
+    CheckoutInput,
+    CheckoutContext,
+    CheckoutState | void
+  >[] = [
+    {
+      definition: setShippingUpdate,
+      toEvent: (s: SetShippingSignal) => ({ kind: 'setShipping', shippingAddress: s.shippingAddress }),
+      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
+      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: currentStep } as any : undefined),
+    },
+    {
+      definition: setPaymentUpdate,
+      toEvent: (s: SetPaymentSignal) => ({ kind: 'setPayment', paymentMethod: s.paymentMethod }),
+      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
+      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: currentStep } as any : undefined),
+    },
+    {
+      definition: submitOrderUpdate,
+      toEvent: () => ({ kind: 'submitOrder' }),
+      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
+      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: currentStep } as any : undefined),
+    },
+    {
+      definition: cancelCheckoutUpdate,
+      toEvent: () => ({ kind: 'cancelCheckout' }),
+      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
+      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: currentStep } as any : undefined),
+    },
+    {
+      definition: acknowledgeCartChangeUpdate,
+      toEvent: (s: { cartVersion: number }) => ({ kind: 'acknowledgeCartChange', cartVersion: s.cartVersion }),
+      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
+      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: currentStep } as any : undefined),
+    },
+    {
+      definition: retargetParentUpdate,
+      toEvent: (s: RetargetParentSignal) => ({
+        kind: 'retargetParent',
+        newParentCartWorkflowId: s.newParentCartWorkflowId,
+      }),
+    },
+  ];
 
-      return state;
-    } catch {
-      state.step = 'payment';
-      state.error = 'An error occurred. Please try again.';
-      return state;
-    }
-  });
+  ctx = await runStateMachine<CheckoutStateName, CheckoutInput, CheckoutContext, CheckoutState | void>(config, ctx, updateHandlers);
 
-  // Cancel checkout - releases reservations and returns cart to active state
-  setHandler(cancelCheckoutUpdate, async () => {
-    await condition(() => state.step !== 'validating');
-    const allowedSteps = ['shipping', 'payment', 'review'];
-    if (!allowedSteps.includes(state.step)) {
-      return { ...state, error: `Cannot cancel checkout from step: ${state.step}` };
-    }
+  // ── Unified exit path ──
+  const result: CheckoutWorkflowResult = {
+    success: currentStep === 'complete',
+    cancelled: currentStep === 'cancelled',
+    timedOut: false,
+    order: ctx.state.order,
+    error: ctx.state.error,
+    finalState: { ...ctx.state, step: currentStep },
+    finalStep: currentStep,
+    checkoutVersion: ctx.checkoutVersion,
+  };
 
-    // Release all reservations
-    if (reservations.length > 0) {
-      await releaseReservations(reservations);
-      reservations = [];
-    }
+  await signalParent(ctx.parentCartWorkflowId, result);
 
-    state.step = 'cancelled';
-    checkoutCancelled = true;
-    return state;
-  });
+  log.info('checkoutWorkflow EXITING', { cartId: ctx.cartId, step: currentStep });
+  return result;
+}
 
-  // ==================
-  // Renew Inventory Reservations at Checkout Start
-  // ==================
-  const reserveResult = await renewReservationsForCheckout(input.cartId, input.items);
-
-  if (!reserveResult.success) {
-    log.warn('Reservation renewal failed, signalling parent with failure', {
-      error: reserveResult.error,
-    });
-    state.error = reserveResult.error || 'Some items may have limited stock';
-    state.step = 'failed';
-
-    const failResult: CheckoutWorkflowResult = {
-      success: false,
-      order: undefined,
-      error: state.error,
-      finalState: state,
-      checkoutVersion
-    };
-    try {
-      const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
-      await parentHandle.signal(checkoutCompletedSignal, failResult);
-    } catch (err) {
-      log.warn('Failed to signal parent cart with reservation failure', { parentCartWorkflowId, err });
-    }
-    return failResult;
-  } else {
-    reservations = reserveResult.reservations;
-  }
-
-  state.step = 'shipping';
-
-  // Wait for order completion or cancellation (1 hour timeout)
+async function signalParent(
+  parentCartWorkflowId: string,
+  result: CheckoutWorkflowResult,
+): Promise<void> {
   try {
-    const completedBeforeTimeout = await condition(() => orderComplete || checkoutCancelled, '1 hour');
-    await condition(allHandlersFinished);
-
-    // If checkout times out or is cancelled, release reservations
-    if (!orderComplete && reservations.length > 0) {
-      await releaseReservations(reservations);
-    }
-
-    const result: CheckoutWorkflowResult = {
-      success: orderComplete,
-      cancelled: checkoutCancelled,
-      timedOut: !completedBeforeTimeout && !orderComplete && !checkoutCancelled,
-      order: state.order,
-      error: state.error,
-      finalState: state,
-      checkoutVersion
-    };
-
-    // Signal the parent cart with the result
-    try {
-      const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
-      await parentHandle.signal(checkoutCompletedSignal, result);
-    } catch (err) {
-      log.warn('Failed to signal parent cart with checkout result', { parentCartWorkflowId, err });
-    }
-
-    return result;
+    const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
+    await parentHandle.signal(checkoutCompletedSignal, result);
   } catch (err) {
-    if (err instanceof CancelledFailure) {
-      log.warn('Checkout cancelled via CancelledFailure', { cartId: input.cartId });
-      state.step = 'cancelled';
-      const cancelResult: CheckoutWorkflowResult = {
-        success: false,
-        cancelled: true,
-        order: undefined,
-        error: 'Checkout was cancelled',
-        finalState: state,
-        checkoutVersion
-      };
-
-      await CancellationScope.nonCancellable(async () => {
-        if (reservations.length > 0) {
-          await releaseReservations(reservations);
-        }
-        try {
-          const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
-          await parentHandle.signal(checkoutCompletedSignal, cancelResult);
-        } catch {
-          log.warn('Failed to signal parent cart after cancellation', { parentCartWorkflowId });
-        }
-      });
-
-      return cancelResult;
-    }
-    throw err;
+    log.warn('Failed to signal parent cart with checkout result', {
+      parentCartWorkflowId,
+      error: String(err),
+    });
   }
 }

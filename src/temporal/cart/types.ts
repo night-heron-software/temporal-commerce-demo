@@ -12,3 +12,13 @@ export type {
   CheckoutWorkflowInput,
   CheckoutWorkflowResult
 } from '../contracts/cart';
+
+import type { CartDetails } from '../contracts/cart';
+
+export type CartStateName = 'active' | 'checkout';
+
+export interface CartWorkflowContext {
+  cart: CartDetails;
+  checkoutWorkflowId: string | null;
+  checkoutVersion: number;
+}

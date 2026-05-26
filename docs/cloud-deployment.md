@@ -210,13 +210,7 @@ APP_URL=$(gcloud run services describe temporal-commerce-app \
   --region us-central1 --format='value(status.url)')
 
 # Run seed script
-APP_URL=$APP_URL npm run dev:seed
-```
-
-Or run directly:
-
-```bash
-tsx scripts/seed.ts https://temporal-commerce-app-xxxxx-uc.a.run.app
+npx tsx scripts/seed.ts $APP_URL
 ```
 
 ---

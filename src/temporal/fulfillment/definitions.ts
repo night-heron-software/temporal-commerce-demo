@@ -8,7 +8,8 @@ import type {
   FulfillmentWorkflowState,
   FulfillmentOrderStatus,
   ShipmentInfo,
-  SupplierStatusUpdate
+  SupplierStatusUpdate,
+  FulfillmentSupplierOrderState
 } from './types';
 
 /** Query: get current workflow state */
@@ -16,6 +17,9 @@ export const getStatusQuery = wf.defineQuery<FulfillmentWorkflowState>('getStatu
 
 /** Signal: supplier status update (from webhook or polling) */
 export const supplierStatusSignal = wf.defineSignal<[SupplierStatusUpdate]>('supplierStatusUpdate');
+
+/** Signal: child workflow status update */
+export const childStatusSignal = wf.defineSignal<[FulfillmentSupplierOrderState]>('childStatusUpdate');
 
 /** Signal: cancel fulfillment */
 export const cancelSignal = wf.defineSignal('cancel');

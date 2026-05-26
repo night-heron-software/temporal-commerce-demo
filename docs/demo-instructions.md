@@ -6,15 +6,15 @@ Step-by-step instructions for running a 4–5 minute live demonstration of the T
 
 ## Pre-Demo Setup
 
-Allow **5–10 minutes** before the demo to start infrastructure and seed data.
+Allow **3–5 minutes** before the demo to start infrastructure, apply database schemas, and seed data.
 
-### 1. Start Infrastructure
+### 1. Initialize and Seed Everything
 
 ```bash
-npm run infra:up && npm run db:init
+npm run dev:init
 ```
 
-Wait for Docker containers (Cassandra, Elasticsearch, Temporal) to report healthy.
+This starts all Docker containers, initializes the database schemas, and seeds the initial catalog data.
 
 ### 2. Start the Application
 
@@ -22,19 +22,9 @@ Wait for Docker containers (Cassandra, Elasticsearch, Temporal) to report health
 npm run dev:up
 ```
 
-Wait for `▲ Next.js 16.x.x — Local: http://localhost:3000`.
+This starts the Next.js dev server and Temporal workers concurrently. Wait for `▲ Next.js 15.x.x — Local: http://localhost:3000`.
 
-### 3. Seed Demo Data
-
-In a **second terminal**:
-
-```bash
-npm run dev:seed
-```
-
-This populates the product catalog (266 products across 57 collections) by calling the running app's API endpoints. Wait for `✨ Seeding complete!`.
-
-### 4. Verify
+### 3. Verify
 
 | URL | What to Check |
 | --- | --- |
@@ -120,23 +110,15 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 
 ## Quick Reset Between Demos
 
-Using the single unified command (wipes data, starts infra, seeds, then stops background processes):
+To cleanly reset everything:
 
 ```bash
-npm run dev:init
+npm run dev:down      # Stop Next.js and worker processes
+npm run dev:init      # Nuclear reset: wipe databases, recreate schema, and seed catalog
+npm run dev:up        # Start Next.js and workers concurrently
 ```
 
-Or step-by-step:
-
-```bash
-npm run dev:down
-npm run infra:clean
-npm run infra:up && npm run db:init
-npm run dev:up        # Terminal 1
-npm run dev:seed      # Terminal 2
-```
-
-Takes about 2–3 minutes for a complete reset.
+Takes about 2 minutes for a complete reset.
 
 ---
 
