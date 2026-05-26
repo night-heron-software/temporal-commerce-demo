@@ -19,7 +19,8 @@ export type StateFunction<TState extends string, TEvent, TContext, TResponse, TS
 
 export interface StateConfig<TState extends string, TEvent, TContext, TResponse, TSignal = never> {
   fn: StateFunction<TState, TEvent, TContext, TResponse, TSignal>;
-  timeout: Duration;
+  timeout?: Duration;
+  transitional?: boolean;
 }
 
 export type StateRegistry<TState extends string, TEvent, TContext, TResponse, TSignal = never> = Record<

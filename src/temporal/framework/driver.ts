@@ -144,26 +144,31 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
       }
 
       // 3. Wait for input (update, signal, or timeout)
-      const woke = await condition(
-        () => updateQueue.length > 0 || signalQueue.length > 0,
-        stateConfig.timeout,
-      );
-
-      // 4. Consume next input
       let input: StateInput<TEvent, TSignal>;
       let activeExchange: UpdateExchange<TEvent, TResponse> | null = null;
       let inputEventDesc: TEvent | 'timeout' | 'signal';
 
-      if (!woke) {
+      if (stateConfig.transitional) {
         input = { kind: 'timeout' };
         inputEventDesc = 'timeout';
-      } else if (signalQueue.length > 0) {
-        input = { kind: 'signal', result: signalQueue.shift()! };
-        inputEventDesc = 'signal';
       } else {
-        activeExchange = updateQueue.shift()!;
-        input = { kind: 'event', event: activeExchange.event };
-        inputEventDesc = activeExchange.event;
+        const timeout = stateConfig.timeout ?? '1 millisecond';
+        const woke = await condition(
+          () => updateQueue.length > 0 || signalQueue.length > 0,
+          timeout,
+        );
+
+        if (!woke) {
+          input = { kind: 'timeout' };
+          inputEventDesc = 'timeout';
+        } else if (signalQueue.length > 0) {
+          input = { kind: 'signal', result: signalQueue.shift()! };
+          inputEventDesc = 'signal';
+        } else {
+          activeExchange = updateQueue.shift()!;
+          input = { kind: 'event', event: activeExchange.event };
+          inputEventDesc = activeExchange.event;
+        }
       }
 
       // 5. Dispatch to state function

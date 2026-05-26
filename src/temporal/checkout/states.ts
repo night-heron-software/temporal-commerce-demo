@@ -85,20 +85,29 @@ export async function validatingState(
   );
 
   if (!reserveResult.success) {
+    const state: CheckoutState = {
+      ...ctx.state,
+      step: 'failed',
+      error: reserveResult.error || 'Some items are no longer available',
+    };
     return {
       context: {
         ...ctx,
-        state: { ...ctx.state, error: reserveResult.error || 'Some items are no longer available' },
+        state,
       },
       next: '__terminal:failed',
-      response: ctx.state,
+      response: state,
     };
   }
 
+  const state: CheckoutState = {
+    ...ctx.state,
+    step: 'shipping',
+  };
   return {
-    context: { ...ctx, reservations: reserveResult.reservations },
+    context: { ...ctx, state, reservations: reserveResult.reservations },
     next: 'shipping',
-    response: ctx.state,
+    response: state,
   };
 }
 
@@ -163,6 +172,7 @@ export async function paymentState(
 
     const state: CheckoutState = {
       ...ctx.state,
+      step: 'review',
       paymentMethod: event.paymentMethod,
       error: undefined,
     };
@@ -202,6 +212,7 @@ export async function reviewState(
   if (event.kind === 'setPayment') {
     const state: CheckoutState = {
       ...ctx.state,
+      step: 'review',
       paymentMethod: event.paymentMethod,
       error: undefined,
     };
@@ -281,6 +292,7 @@ async function processShipping(
 
   const state: CheckoutState = {
     ...ctx.state,
+    step: 'payment',
     shippingAddress,
     shippingCost: calculatedShipping,
     tax: calculatedTax,
@@ -311,7 +323,7 @@ async function cancelCheckoutTransition(
     await releaseReservations(ctx.reservations);
   }
 
-  const state: CheckoutState = { ...ctx.state, error: undefined };
+  const state: CheckoutState = { ...ctx.state, step: 'cancelled', error: undefined };
   return {
     context: {
       ...ctx,
@@ -340,6 +352,7 @@ async function processOrder(
     if (!paymentSuccess) {
       const state: CheckoutState = {
         ...ctx.state,
+        step: 'payment',
         error: 'Payment failed. Please try again.',
       };
       return {
@@ -371,6 +384,7 @@ async function processOrder(
 
     const state: CheckoutState = {
       ...ctx.state,
+      step: 'complete',
       order,
     };
 
@@ -383,6 +397,7 @@ async function processOrder(
     log.error('Failed to process order', { error: String(err) });
     const state: CheckoutState = {
       ...ctx.state,
+      step: 'payment',
       error: 'An error occurred. Please try again.',
     };
     return {
@@ -400,7 +415,7 @@ export const CHECKOUT_STATES: StateRegistry<
   CheckoutContext,
   CheckoutState
 > = {
-  validating: { fn: validatingState, timeout: '1 millisecond' },
+  validating: { fn: validatingState, transitional: true },
   shipping: { fn: shippingState, timeout: '1 hour' },
   payment: { fn: paymentState, timeout: '1 hour' },
   review: { fn: reviewState, timeout: '1 hour' },
