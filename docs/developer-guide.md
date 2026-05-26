@@ -81,15 +81,12 @@ graph TB
 npm install
 
 # 2. Start infrastructure + initialize schema
-npm run infra:up && npm run db:init
+npm run dev:init
 
 # 3. Start the application (in one terminal)
 npm run dev:up
 
-# 4. Seed demo data (in another terminal)
-npm run dev:seed
-
-# 5. Browse
+# 4. Browse
 #    Storefront  → http://localhost:3000/shop
 #    Admin       → http://localhost:3000/admin
 #    Temporal UI → http://localhost:8233
@@ -99,42 +96,37 @@ npm run dev:seed
 
 ```bash
 # Start infrastructure + app in one command
-npm run dev:up
+npm run dev:start-all
 
 # Check health and status of all services
 npm run dev:status
 
 # Or start them separately for independent debugging:
 npm run infra:up        # Start Docker infrastructure only
-npm run dev:storefront  # Next.js storefront only
-npm run dev:worker      # Temporal workers only (with pino-pretty)
+npm run dev:up          # Start storefront + Temporal workers only
 ```
 
 ### Full Reset
 
 ```bash
 npm run dev:init         # Nuclear reset: wipe databases, recreate schema, start app, and seed catalog
-
-# Or manually:
-npm run infra:clean      # Stop + wipe all Docker volumes
-npm run db:init          # Apply Cassandra schema
-npm run dev:up           # Start app & workers concurrently
-npm run dev:seed         # Re-populate catalog data
 ```
 
 ### NPM Scripts
 
 | Script | Category | Description |
 | --- | --- | --- |
-| `npm run dev:up` | Developer | Start infrastructure + storefront + workers together |
-| `npm run dev:status` | Developer | Check status of all infrastructure and application services |
-| `npm run dev:down` | Developer | Stop everything (app + infrastructure containers) |
-| `npm run dev:init` | Developer | Full reset: wipe -> recreate schema -> start app -> seed data |
-| `npm run dev:storefront` | Application | Start storefront only |
+| `npm run dev:start-all` | Developer | Start infrastructure (Docker) + storefront + workers |
+| `npm run dev:stop-all` | Developer | Stop everything (storefront, workers + infrastructure) |
+| `npm run dev:up` | Developer | Start storefront app (Next.js) + Temporal workers |
+| `npm run dev:down` | Developer | Stop storefront app and Temporal worker processes |
+| `npm run dev:init` | Developer | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
+| `npm run dev:status` | Developer | Check status of all backend databases, services, and apps |
+| `npm run dev:storefront` | Application | Start storefront app only |
 | `npm run dev:worker` | Application | Start Temporal workers only |
-| `npm run dev:seed` | Database | Populate catalog and inventory data (requires app running) |
+| `npm run dev:seed` | Database | Populate catalog and inventory data manually |
 | `npm run db:init` | Database | Create Cassandra keyspace and tables |
-| `npm run db:verify` | Database | Verify Cassandra schema tables against code queries |
+| `npm run db:verify` | Database | Verify Cassandra schema consistency |
 | `npm run infra:up` | Infrastructure | Start Docker infrastructure containers and verify health |
 | `npm run infra:down` | Infrastructure | Stop infrastructure containers |
 | `npm run infra:clean` | Infrastructure | Stop containers and wipe all persistent volumes |
@@ -238,12 +230,13 @@ The application is organized into six Temporal workflow domains, each with its o
 **Workflow ID:** `cart-{cartId}`
 **Lifetime:** Long-running (up to 30 days, with idle timeout)
 
-The cart workflow manages shopping cart state as a durable entity. It is the **parent** of the checkout workflow.
+The cart workflow manages shopping shopping cart state as a durable entity using the declarative `runStateMachine` framework. It is the **parent** of the checkout workflow.
 
 **Key Patterns:**
 
+- **Declarative State Machine** — Managed via `runStateMachine` to process events like adding/removing items or updating quantities, maintaining strict consistency.
 - **`updateWithStart`** — Lazy cart creation. The first `addItemToCart` update creates the workflow if it doesn't exist, using `workflowIdConflictPolicy: 'USE_EXISTING'`.
-- **Query/Update Handlers** — Cart state is read via queries (`getCart`, `getCheckoutState`) and mutated via updates (`addItemToCartUpdate`, `updateQuantityUpdate`, `removeItemUpdate`).
+- **FIFO Update Queue** — Handled by the state machine driver to process cart updates sequentially, avoiding write race conditions.
 - **Parent-Child Checkout** — `beginCheckoutUpdate` starts a checkout child workflow with `ABANDON` parent close policy, so the checkout survives even if the cart is destroyed.
 - **`continueAsNew`** — After 100 updates, the cart workflow calls `continueAsNew` to prevent unbounded history growth, preserving full cart state across executions.
 - **Non-blocking Projection Sync** — A `projectionDirty` flag is set by mutation handlers. The main loop flushes projections to Elasticsearch between iterations.
@@ -268,13 +261,13 @@ stateDiagram-v2
 **Workflow ID:** `checkout-{uuid}` (not tied to cart ID — allows re-entry)
 **Lifetime:** Up to 1 hour, then auto-expires
 
-The checkout workflow orchestrates the multi-step checkout process as a child of the cart workflow.
+The checkout workflow orchestrates the multi-step checkout process as a child of the cart workflow, utilizing the declarative `runStateMachine` framework to manage transitions between steps.
 
 **Key Patterns:**
 
-- **Step-based State Machine** — `validating → shipping → payment → review → processing → complete`
+- **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → shipping → payment → review → processing → complete`).
 - **Inventory Reservation Renewal** — At checkout start, existing cart reservations are renewed with a fresh TTL.
-- **Update Handlers with Guards** — Each update validates the current step before proceeding (e.g., `setShippingUpdate` requires step ∈ `{shipping, payment, review}`).
+- **Update Handlers as Events** — Custom update handlers map incoming signals/arguments (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events which trigger deterministic transitions.
 - **Back Navigation** — Users can go back: setting shipping from the payment/review step is allowed, which recalculates costs.
 - **Parent Signaling** — On completion, the checkout workflow signals the parent cart workflow with a `CheckoutWorkflowResult` via `checkoutCompletedSignal`.
 - **Retarget Parent** — When carts merge during sign-in, the checkout's parent reference is updated via `retargetParentUpdate`.
@@ -318,11 +311,12 @@ stateDiagram-v2
 **Workflow ID:** `fulfillment-{orderId}`
 **Lifetime:** Until all supplier orders reach terminal state
 
-Manages the fulfillment lifecycle for all supplier orders in a single order.
+Manages the fulfillment lifecycle for all supplier orders in a single order using the declarative `runStateMachine` framework.
 
 **Key Patterns:**
 
-- **Multi-Supplier Strategy Routing** — Routes to `runSimulatedFulfillment` or `runDynamicFulfillment` based on `supplierType`.
+- **State Machine Orchestration** — Managed using the `runStateMachine` driver to transition orders through fulfillment stages (`processing`, `shipped`, `delivered`, etc.).
+- **Multi-Supplier Strategy Routing** — Routes to `runSimulatedFulfillment` or `runDynamicFulfillment` based on `supplierType` (both use separate state machine drivers).
 - **Simulated Fulfillment** — Timer-based simulation with configurable delays via workflow memo (`processingDelayMs`, `shippingDelayMs`, `deliveryDelayMs`). Defaults to 60 seconds per phase.
 - **Manual Fulfillment Mode** — When `MANUAL_FULFILLMENT` feature flag is enabled, the simulated strategy waits for explicit signals to advance through shipped → delivered.
 - **Inventory Lifecycle** — Transfers reservations to suppliers at start. Fulfills inventory on delivery, releases on rejection/cancellation.
@@ -570,6 +564,33 @@ if (updateCount >= CONTINUE_AS_NEW_THRESHOLD) {
     updateCount: 0  // Reset counter
   });
 }
+```
+
+### Declarative State Machine Pattern (`runStateMachine`)
+
+A core architectural pattern introduced in `temporal-commerce-demo` (covering Cart, Checkout, and Fulfillment domains) is the custom, generic state machine framework located at `src/temporal/framework/`.
+
+Instead of writing custom event loops, signal handlers, and nested `if/else` checks for state transitions, workflows declare:
+1. A **Context type** representing the workflow's state/data.
+2. A list of **States** and their transition behavior.
+3. A set of **Update/Signal definitions** mapped to internal transition events.
+
+The driver (`runStateMachine`) handles:
+- **FIFO Queueing**: Incoming updates and signals are queued and processed sequentially. This eliminates race conditions and ensures state transitions run in a strict, predictable order.
+- **Unified Query/Update handling**: Exposes consistent methods for storefront UI updates and API calls.
+- **Lifecycle hooks**: `onStart`, `onTransition`, `onCancellation`, and `onTerminal` to orchestrate side-effects like inventory reservation releases or analytics tracking.
+
+Example structure of a state configuration:
+```typescript
+export const CHECKOUT_STATES: Record<CheckoutStateName, StateConfig<CheckoutInput, CheckoutContext, CheckoutState | void>> = {
+  validating: {
+    fn: async (ctx, input) => {
+      // Validate inventory, run activities
+      return { next: 'shipping', context: updatedCtx };
+    }
+  },
+  // ...
+};
 ```
 
 ---

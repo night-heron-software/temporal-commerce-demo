@@ -170,21 +170,21 @@ await startChild('checkoutWorkflow', {
 
 > The checkout workflow receives a snapshot of the cart at checkout time. This is intentional — the cart items are frozen for the duration of checkout. If the user modifies their cart during checkout, we detect the version mismatch and prompt them.
 
-### Pattern 5: Step-Based State Machine with Update Guards
+### Pattern 5: Declarative State Machine with Update Event Mapping
 
-> The checkout workflow is a state machine: `shipping → payment → review → processing → complete`. Each step is advanced by a Temporal update, and each update validates the current step before proceeding.
+> The checkout workflow is a state machine: `shipping → payment → review → processing → complete`. States and transitions are managed declaratively using a custom state machine driver.
 
 ```typescript
-setHandler(setShippingUpdate, async (input) => {
-  await condition(() => state.step !== 'validating');   // ← wait for init
-  const allowedSteps = ['shipping', 'payment', 'review'];
-  if (!allowedSteps.includes(state.step)) {
-    return { ...state, error: `Cannot set shipping from step: ${state.step}` };
+// The state function for the shipping step
+export async function shippingState(ctx, input) {
+  if (input.kind === 'timeout') return cancelCheckoutTransition(ctx);
+  const event = input.event;
+
+  if (event.kind === 'setShipping') {
+    return processShipping(ctx, event.shippingAddress);
   }
-  // ... calculate shipping, tax, create payment intent
-  state.step = 'payment';
-  return state;
-});
+  return rejectInput(ctx, event, 'shipping');
+}
 ```
 
 > Notice the guard: shipping can be set from `shipping`, `payment`, or `review`. This enables back-navigation — the user can return to the shipping step from payment or review and the workflow recalculates costs correctly. Try implementing that with a saga.
@@ -477,9 +477,8 @@ try {
 ### Pre-Demo Setup
 
 ```bash
-npm run infra:up && npm run db:init  # Start infrastructure + schema
-npm run dev:up                       # Start Next.js + workers
-npm run dev:seed                     # Populate catalog
+npm run dev:init                     # Initialize infrastructure & seed catalog
+npm run dev:up                       # Start Next.js + Temporal workers
 ```
 
 ### Demo URLs

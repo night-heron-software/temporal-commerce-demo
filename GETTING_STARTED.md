@@ -109,19 +109,31 @@ If all three work, you're fully operational.
 
 ### Starting up (database already initialized)
 
+To start the database backend and boot storefront and workers concurrently:
+
+```bash
+npm run dev:start-all
+```
+
+To run only storefront and workers (assuming Docker containers are already running):
+
 ```bash
 npm run dev:up
 ```
 
-This starts Docker infrastructure (Cassandra, Elasticsearch, Temporal), waits for health checks, then launches the Next.js storefront and Temporal workers.
-
 ### Shutting down
+
+To cleanly stop Next.js storefront and worker processes:
 
 ```bash
 npm run dev:down
 ```
 
-This stops the application processes and all Docker containers. Data is preserved for next time.
+To stop all active storefront, worker, and database Docker containers:
+
+```bash
+npm run dev:stop-all
+```
 
 ### Full reset
 
@@ -129,7 +141,7 @@ This stops the application processes and all Docker containers. Data is preserve
 npm run dev:init
 ```
 
-Wipes all data, recreates the schema, and re-seeds the catalog from scratch.
+Wipes all data volumes, recreates the Cassandra schemas, and re-seeds the catalog and inventory data from scratch.
 
 ---
 
@@ -137,19 +149,21 @@ Wipes all data, recreates the schema, and re-seeds the catalog from scratch.
 
 | Script | Description |
 | --- | --- |
-| `npm run dev:up` | Start infrastructure + storefront + workers |
-| `npm run dev:down` | Stop everything (app + infrastructure) |
-| `npm run dev:init` | Full reset: wipe → init → start → seed → stop app |
-| `npm run dev:storefront` | Start storefront app (Next.js) only |
+| `npm run dev:start-all` | Start infrastructure (Docker) + storefront + workers |
+| `npm run dev:stop-all` | Stop everything (storefront, workers + infrastructure) |
+| `npm run dev:up` | Start storefront app (Next.js) + Temporal workers |
+| `npm run dev:down` | Stop storefront app and Temporal worker processes |
+| `npm run dev:init` | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
+| `npm run dev:status` | Check status of all backend databases, services, and apps |
+| `npm run dev:storefront` | Start storefront app only |
 | `npm run dev:worker` | Start Temporal workers only |
-| `npm run dev:seed` | Populate demo catalog data |
-| `npm run dev:status` | Check status of all services and processes |
+| `npm run dev:seed` | Populate catalog and inventory data manually |
 | `npm run db:init` | Apply Cassandra schema |
 | `npm run db:verify` | Verify Cassandra schema consistency |
-| `npm run infra:up` | Start Docker infrastructure only |
+| `npm run infra:up` | Start Docker database infrastructure only |
 | `npm run infra:down` | Stop Docker containers |
-| `npm run infra:clean` | Stop + wipe all data volumes |
-| `npm run infra:ps` | List running containers |
+| `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
+| `npm run infra:ps` | List running Docker containers |
 
 ---
 

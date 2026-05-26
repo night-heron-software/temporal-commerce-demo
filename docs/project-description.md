@@ -57,25 +57,27 @@ The Next.js server actions layer is the sole bridge between the browser and the 
 
 ## Workflow Domains
 
-### Cart — Durable Entity Pattern
+### Cart — Declarative State Machine (Durable Entity Pattern)
 
-The cart is a long-running Temporal workflow that acts as a live, queryable entity. There are no database reads for cart state — the workflow *is* the cart.
+The cart is a long-running Temporal workflow that acts as a live, queryable entity orchestrated by the declarative `runStateMachine` driver. There are no database reads for cart state — the workflow *is* the cart.
 
 | Pattern | Implementation |
 | --- | --- |
+| **State machine driver** | Managed via `runStateMachine` to handle all mutations sequentially via a FIFO update queue, preventing write race conditions |
 | **Lazy creation** | `updateWithStart` atomically creates-or-updates the cart workflow on the first "Add to Cart" click |
 | **Live state** | React UI reads cart state via Temporal queries; mutations are Temporal updates with synchronous return values |
 | **Infinite lifetime** | `continueAsNew` after 100 updates resets the event history while preserving full cart state |
 | **Graceful shutdown** | `await condition(allHandlersFinished)` ensures in-flight update handlers complete before `continueAsNew` |
 | **Child orchestration** | Checkout is started as a child workflow with `ABANDON` parent close policy |
 
-### Checkout — Multi-Step State Machine
+### Checkout — Declarative Step-based State Machine
 
-Checkout orchestrates the shipping → payment → review → processing → complete lifecycle. Each step is advanced by a Temporal update with guard validation.
+Checkout orchestrates the shipping → payment → review → processing → complete steps as a state machine managed by the `runStateMachine` driver.
 
 | Pattern | Implementation |
 | --- | --- |
-| **Step guards** | Each update validates the current step before proceeding — shipping can be set from `shipping`, `payment`, or `review` (enabling back-navigation) |
+| **State configuration** | Transitions and guards are defined declaratively in states config. Each step represents a distinct machine state |
+| **Update event mapping** | Custom update handlers map incoming signals/payloads (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events |
 | **Reservation management** | Inventory reservations are renewed at checkout start, released on timeout/cancellation, confirmed on success |
 | **Timeout** | `condition(() => complete, '1 hour')` auto-cancels stale checkouts and releases inventory |
 | **Cross-workflow signaling** | Checkout signals the parent cart workflow with the result via `getExternalWorkflowHandle` |
@@ -93,12 +95,13 @@ The OMS workflow manages an order from placement through delivery. It coordinate
 | **Status projections** | Every status change is indexed to Elasticsearch for real-time admin panel updates |
 | **Audit trail** | Every status transition is recorded in the `order_status_history` Cassandra table |
 
-### Fulfillment — Strategy-Based Execution
+### Fulfillment — Strategy-Based State Machine
 
-The fulfillment workflow receives pre-decided supplier orders and executes the appropriate fulfillment strategy for each.
+The fulfillment workflow receives pre-decided supplier orders and executes the appropriate fulfillment strategy for each, powered by the declarative `runStateMachine` driver.
 
 | Pattern | Implementation |
 | --- | --- |
+| **State orchestration** | Transitions simulated orders through states (`processing`, `shipped`, `delivered`, etc.) using the state machine loop |
 | **Automatic mode** | `wf.sleep()` timers simulate processing (15s) → shipping (15s) → delivery (15s) |
 | **Manual mode** | Feature flag `MANUAL_FULFILLMENT=true` pauses at each stage, waiting for Temporal signals to advance |
 | **Multi-supplier** | Strategy routing by `supplierType` — simulated, Printify dynamic, or custom |
@@ -224,7 +227,7 @@ Task queue isolation means a slow fulfillment activity cannot block cart operati
 | 2 | Query/Update handlers — workflow as live entity | Cart, Checkout, OMS |
 | 3 | `continueAsNew` — infinite entity lifetime | Cart, Inventory Service |
 | 4 | Parent-child with `ABANDON` policy | Cart → Checkout |
-| 5 | Step-based state machine with update guards | Checkout |
+| 5 | Declarative state machine (`runStateMachine`) | Cart, Checkout, Fulfillment |
 | 6 | `condition()` with timeout — reservation TTL | Checkout, Inventory |
 | 7 | Cross-workflow signaling via `getExternalWorkflowHandle` | Checkout → Cart, Fulfillment → OMS |
 | 8 | Activity-driven workflow spawning (not `startChild`) | OMS → Fulfillment, Checkout → OMS |
@@ -290,9 +293,8 @@ temporal-commerce-demo/
 
 ```bash
 npm install          # Install dependencies
-npm run infra:up && npm run db:init  # Start Docker infrastructure + Cassandra schema
-npm run dev:up        # Start Next.js + Temporal workers
-npm run dev:seed     # Populate 266 products across 57 collections
+npm run dev:init     # Wipe volumes, start Docker infrastructure, initialize Cassandra schema, seed catalog, and stop app
+npm run dev:up       # Start storefront app (Next.js) + Temporal workers concurrently
 ```
 
 | Resource | URL |

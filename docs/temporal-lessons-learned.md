@@ -205,11 +205,30 @@ if (getResult() !== null) {
 
 This is a TypeScript-specific gotcha that doesn't appear in Go or Java Temporal SDKs.
 
+### 10. The Declarative State Machine (`runStateMachine`) pattern simplifies state transitions and eliminates concurrency races
+
+**The problem:** In workflows representing entity state machines (like Cart, Checkout, or Fulfillment), writing custom loops with signal/update handlers, manual conditional yields (`condition()`), and complex nested transitions is error-prone. Concurrent updates can overwrite state mid-execution, causing race conditions and non-deterministic behavior.
+
+**The lesson:** Model entity workflows using a generic, declarative `runStateMachine` driver. Workflows specify a context, defined states, and transition handlers. The driver executes a single state-machine loop that:
+- Queues incoming updates/signals in a strict FIFO queue.
+- Dispatches inputs sequentially to state configuration functions.
+- Provides standard transition and cancellation hooks (e.g. `onTransition`, `onCancellation`, `onTerminal`).
+
+This dramatically simplifies complex domains:
+```typescript
+const config = {
+  states: CHECKOUT_STATES,
+  initialState: 'validating',
+  onContextUpdate: (newCtx, state) => { ... }
+};
+ctx = await runStateMachine(config, ctx, updateHandlers);
+```
+
 ---
 
 ## Cross-Workflow Communication
 
-### 10. Signals for fire-and-forget, updates for confirmed mutations
+### 11. Signals for fire-and-forget, updates for confirmed mutations
 
 **The lesson:** Temporal offers three communication primitives. Choosing the wrong one has real consequences:
 
@@ -223,7 +242,7 @@ This is a TypeScript-specific gotcha that doesn't appear in Go or Java Temporal 
 
 **Where signals are correct:** Fulfillment status flowing upward to the OMS. The fulfillment workflow doesn't need to wait for the OMS to acknowledge — it just signals the status change and continues. If the OMS workflow has completed, the signal is dropped silently, which is the correct behavior.
 
-### 11. `signalWithStart` for singleton services
+### 12. `signalWithStart` for singleton services
 
 **The problem:** The inventory service is a singleton workflow. Write-side code needs to signal it with changed SKUs, but the workflow might not be running yet (first mutation after a clean start).
 
@@ -253,7 +272,7 @@ export async function signalInventoryChanged(blankSkus: string[]) {
 
 ## Activity Design
 
-### 12. The Two-File Activity Pattern prevents sandbox contamination
+### 13. The Two-File Activity Pattern prevents sandbox contamination
 
 **The problem:** Workflows run in a deterministic sandbox. If a workflow file imports an activity that imports a database driver, the sandbox tries to bundle the database driver — and fails.
 
@@ -266,7 +285,7 @@ export async function signalInventoryChanged(blankSkus: string[]) {
 
 Workflows import from `activities.ts`, which contains only `proxyActivities` calls. Workers register from `activities-impl.ts`, which has the real database and API calls.
 
-### 13. Compensation must be explicit — Temporal doesn't auto-rollback
+### 14. Compensation must be explicit — Temporal doesn't auto-rollback
 
 **The problem:** The checkout flow reserves inventory, processes payment, and creates an order. If payment fails, the inventory reservations must be released. If the checkout times out, they must also be released.
 
@@ -290,7 +309,7 @@ if (!orderComplete && reservations.length > 0) {
 
 ## Worker Architecture
 
-### 14. Shared connection, isolated task queues
+### 15. Shared connection, isolated task queues
 
 **The lesson:** Running all six domain workers in a single Node.js process is efficient for development and small deployments. They share one gRPC connection to Temporal, but each domain has its own task queue.
 
@@ -310,7 +329,7 @@ await Promise.all([
 
 **Production consideration:** In production, these can be split into separate deployments for independent scaling. The fulfillment worker might need more resources than the identity worker. The code change is zero — just deploy each worker module separately with its own task queue.
 
-### 15. Worker restarts replay from checkpoint, not from scratch
+### 16. Worker restarts replay from checkpoint, not from scratch
 
 **The lesson we learned the hard way:** When a worker crashes and restarts, Temporal replays the workflow from the last checkpoint. This is the core durability guarantee, but it means:
 
@@ -324,7 +343,7 @@ The implication: workflow code must be deterministic. If you add a new `log.info
 
 ## CQRS and Projections
 
-### 16. The dirty-flag projection pattern prevents write amplification
+### 17. The dirty-flag projection pattern prevents write amplification
 
 **The problem:** Every cart mutation, order status change, and fulfillment update needs to be synced to Elasticsearch. If the sync happens inside every handler, five rapid-fire cart additions produce five Elasticsearch writes.
 
@@ -350,7 +369,7 @@ while (!isComplete) {
 
 Five rapid cart additions → one ES write. This is the Temporal equivalent of database write coalescing.
 
-### 17. The inventory service workflow replaces an entire infrastructure layer
+### 18. The inventory service workflow replaces an entire infrastructure layer
 
 **The lesson:** The traditional CQRS implementation requires: a message queue consumer (Kafka/RabbitMQ), a cron job for periodic sweeps, a dead-letter queue for failures, and a reconciliation script for drift. Temporal replaces all of this with a single `condition()` call:
 
@@ -360,7 +379,7 @@ await condition(() => dirtySkus.size > 0, '5m');
 
 This gives both event-driven behavior (wake up when signaled) and time-driven behavior (wake up every 5 minutes for consistency sweeps) in a single construct. The `continueAsNew` at 100 signals prevents unbounded history growth while preserving pending dirty SKUs.
 
-### 18. Every domain entity that changes must trigger its own ES projection
+### 19. Every domain entity that changes must trigger its own ES projection
 
 **The problem:** We initially only indexed products, collections, orders, and supplier orders. But the admin dashboard needed visibility into carts, fulfillment status, inventory levels, and customer records — and those entities were invisible to search.
 
@@ -377,7 +396,7 @@ This gives both event-driven behavior (wake up when signaled) and time-driven be
 
 **The Elasticsearch search page** (`/admin/search`) became the single pane of glass for debugging. Searching for an order ID returns results across orders, supplier_orders, fulfillments, customers, and inventory — showing the complete system state for that transaction.
 
-### 19. UUID search requires keyword-only matching
+### 20. UUID search requires keyword-only matching
 
 **The problem:** Searching for a UUID like `14fca5e0-5afb-47ef-b8cb-2080c737ba0f` in Elasticsearch returned hundreds of false-positive results. Products, orders, and carts that had nothing to do with that UUID were showing up.
 
@@ -405,7 +424,7 @@ const remainingText = query.replace(UUID_REGEX, '').trim();
 
 ## Error Handling
 
-### 20. Redemptive State Recovery — never lose the cart
+### 21. Redemptive State Recovery — never lose the cart
 
 **The principle:** When a workflow operation fails, return to the last known good state instead of crashing. The user's cart items must never be lost.
 
@@ -437,7 +456,7 @@ try {
 
 ## Entity Modeling Decisions
 
-### 21. Workflow-per-entity vs. singleton service — choose by cardinality
+### 22. Workflow-per-entity vs. singleton service — choose by cardinality
 
 **The lesson:** We initially considered workflow-per-entity for inventory (one workflow per SKU). With ~2,700 products and multiple variants each, this would have created thousands of concurrent workflows, overwhelming the Temporal UI and creating massive `continueAsNew` overhead.
 
@@ -449,7 +468,7 @@ try {
 
 The singleton inventory service workflow handles all SKUs. Write-side activities signal it with changed SKUs, and it batches projections. One workflow to monitor instead of thousands.
 
-### 22. Decouple fulfillment from OMS via activity-driven spawning
+### 23. Decouple fulfillment from OMS via activity-driven spawning
 
 **The architectural evolution:** The OMS initially started fulfillment as a child workflow. This created a lifecycle coupling — if the OMS needed `continueAsNew`, the child relationship complicated things.
 
@@ -467,7 +486,7 @@ This pattern means fulfillment can outlive any single OMS execution. It's the ri
 
 ## Operational Lessons
 
-### 23. The Wipe-before-Seed initialization sequence matters
+### 24. The Wipe-before-Seed initialization sequence matters
 
 **The problem:** Running a schema migration script against an existing database with `IF NOT EXISTS` silently skips changes. Developers add a column, re-run init, and get "Undefined column" errors because the table already existed.
 
@@ -481,7 +500,7 @@ This pattern means fulfillment can outlive any single OMS execution. It's the ri
 
 Using the API for seeding (`POST /api/seed-cassandra`) instead of direct database writes ensures all side effects fire — Temporal workflows start, ES projections run, and the system reaches a production-like state.
 
-### 24. Feature flags via activities, not environment variables
+### 25. Feature flags via activities, not environment variables
 
 **The problem:** The `MANUAL_FULFILLMENT` flag controls whether the simulated fulfillment workflow auto-advances or waits for manual signals. An environment variable requires a worker restart to take effect.
 
@@ -501,7 +520,7 @@ if (manualMode) {
 
 The flag check is recorded in Temporal history, so you can debug why a workflow took a specific branch. And updating the flag in the admin UI takes effect on the next activity execution — no worker restart needed.
 
-### 25. Elasticsearch mappings must be created before indexing
+### 26. Elasticsearch mappings must be created before indexing
 
 **The problem:** If auto-index creation is disabled (or if indices require specific mappings like `keyword` fields for UUID matching), workflow activities that index documents will fail silently or create indices with the wrong mappings.
 

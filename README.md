@@ -49,13 +49,13 @@ graph TB
 npm install
 ```
 
-### 2. Start infrastructure
+### 2. Initialize and Seed
 
 ```bash
-npm run infra:up && npm run db:init
+npm run dev:init
 ```
 
-This starts Cassandra, Elasticsearch, and Temporal via Docker Compose, then initializes the Cassandra schema.
+This starts all Docker containers, initializes the database schemas, and seeds the initial catalog data.
 
 ### 3. Start the application
 
@@ -65,15 +65,7 @@ npm run dev:up
 
 This starts the Next.js dev server and Temporal workers concurrently.
 
-### 4. Seed demo data
-
-In another terminal:
-
-```bash
-npm run dev:seed
-```
-
-### 5. Browse
+### 4. Browse
 
 - **Storefront** → [http://localhost:3000/shop](http://localhost:3000/shop)
 - **Temporal UI** → [http://localhost:8233](http://localhost:8233)
@@ -82,19 +74,21 @@ npm run dev:seed
 
 | Script | Description |
 | -------- | ------------- |
-| `npm run dev:up` | Start infrastructure + storefront + workers |
-| `npm run dev:down` | Stop everything (app + infrastructure) |
-| `npm run dev:init` | Full reset: wipe → init → start → seed → stop app |
-| `npm run dev:storefront` | Start storefront app (Next.js) only |
+| `npm run dev:start-all` | Start infrastructure (Docker) + storefront + workers |
+| `npm run dev:stop-all` | Stop everything (storefront, workers + infrastructure) |
+| `npm run dev:up` | Start storefront app (Next.js) + Temporal workers |
+| `npm run dev:down` | Stop storefront app and Temporal worker processes |
+| `npm run dev:init` | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
+| `npm run dev:status` | Check status of all backend databases, services, and apps |
+| `npm run dev:storefront` | Start storefront app only |
 | `npm run dev:worker` | Start Temporal workers only |
-| `npm run dev:seed` | Populate demo catalog data |
-| `npm run dev:status` | Check status of all services and processes |
+| `npm run dev:seed` | Populate catalog and inventory data manually |
 | `npm run db:init` | Apply Cassandra schema |
 | `npm run db:verify` | Verify Cassandra schema consistency |
-| `npm run infra:up` | Start Docker infrastructure only |
+| `npm run infra:up` | Start Docker database infrastructure only |
 | `npm run infra:down` | Stop Docker containers |
-| `npm run infra:clean` | Stop + wipe all data volumes |
-| `npm run infra:ps` | List running containers |
+| `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
+| `npm run infra:ps` | List running Docker containers |
 
 See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 
