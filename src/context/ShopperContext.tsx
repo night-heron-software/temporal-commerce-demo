@@ -65,9 +65,9 @@ export function ShopperProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshAddress = useCallback(async () => {
-    if (!shopper) return;
     try {
       const res = await fetch('/api/auth/shopper/address', { cache: 'no-store' });
+      if (!res.ok) return;
       const data = await res.json();
       const addresses = data.addresses || [];
       const defaultAddr = addresses.find((a: Identity.SavedAddress) => a.isDefault) || addresses[0] || null;
@@ -75,17 +75,19 @@ export function ShopperProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-  }, [shopper]);
+  }, []);
 
   const saveAddress = useCallback(async (address: Partial<Identity.SavedAddress>) => {
-    if (!shopper) return;
-    await fetch('/api/auth/shopper/address', {
+    const res = await fetch('/api/auth/shopper/address', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(address),
     });
-    await refreshAddress();
-  }, [shopper, refreshAddress]);
+    if (res.ok) {
+      const data = await res.json();
+      setSavedAddress(data.address || null);
+    }
+  }, []);
 
   return (
     <ShopperContext.Provider

@@ -101,16 +101,27 @@ export default function ShippingPage() {
     }
   }, [shopper, savedAddress, cart?.checkout?.shippingAddress, initialized]);
 
-  const handleAutofill = () => {
+  const handleAutofill = async () => {
     const testAddr = generateTestAddress();
+    let email = testAddr.email;
     if (shopper) {
-      // Signed in → fill everything EXCEPT email
-      setFormData((prev) => ({
-        ...testAddr,
-        email: prev.email,
-      }));
-    } else {
-      setFormData(testAddr);
+      // Signed in → keep current email
+      email = shopper.email;
+    }
+    const finalAddr = {
+      ...testAddr,
+      email,
+    };
+
+    setFormData(finalAddr);
+
+    try {
+      if (!shopper) {
+        await signIn(email);
+      }
+      await saveAddress(finalAddr);
+    } catch (e) {
+      console.error('Failed to save autofill test data address:', e);
     }
   };
 
