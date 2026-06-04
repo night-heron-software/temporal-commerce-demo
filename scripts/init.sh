@@ -35,12 +35,17 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Step 4: Wait for app to be healthy ---
-echo "⏳ Waiting for storefront to be ready at http://localhost:3000..."
-until curl -sf http://localhost:3000/shop > /dev/null 2>&1; do
+echo "⏳ Waiting for storefront to be ready at http://localhost:3000/api/health..."
+until curl -sf http://localhost:3000/api/health > /dev/null 2>&1; do
   sleep 2
   echo "  Storefront starting..."
 done
 echo "✓ Storefront ready"
+
+# --- Step 5: Wait for workers to register pollers ---
+echo "⏳ Waiting for Temporal workers to register..."
+npm run workers-wait
+echo "✓ All workers ready"
 
 # --- Step 5: Seed ---
 echo ""

@@ -1,4 +1,4 @@
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
 import { createLogger } from '../../lib';
 import { INVENTORY_TASK_QUEUE } from '../contracts';
 
@@ -6,13 +6,17 @@ import * as activities from './activities-impl';
 
 const logger = createLogger('inventory:worker');
 
-export default async function inventoryWorker(connection: NativeConnection): Promise<void> {
+export default async function inventoryWorker(
+  connection: NativeConnection,
+  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+): Promise<void> {
   const worker = await Worker.create({
     connection,
     namespace: 'default',
     taskQueue: INVENTORY_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
     activities,
+    ...otelConfig,
   });
 
   logger.info({ taskQueue: INVENTORY_TASK_QUEUE }, 'Inventory worker started');

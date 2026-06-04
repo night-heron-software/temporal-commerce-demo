@@ -9,8 +9,13 @@
  *   # or: npx tsx --env-file=.env.local ./src/temporal/worker.ts
  */
 
+import { initTracing, shutdownTracing } from '../lib/tracing';
+// Initialize OTel BEFORE other imports so auto-instrumentations hook into modules
+initTracing('demo-workers');
+
 import { NativeConnection, Runtime } from '@temporalio/worker';
 import { createLogger } from '../lib/logger';
+import { getWorkerOtelConfig } from '../lib/worker-otel';
 
 import cartWorker from './cart/worker';
 import checkoutWorker from './checkout/worker';
@@ -50,6 +55,9 @@ async function run() {
     }
   } : undefined;
 
+  // Get OTel worker config (interceptors/sinks) — no-op when OTEL_ENABLED !== 'true'
+  const otelConfig = await getWorkerOtelConfig();
+
   const connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS, tls });
   log.info({ address: TEMPORAL_ADDRESS, namespace: TEMPORAL_NAMESPACE, tls: !!tls }, 'Connected to Temporal — starting all domain workers');
 
@@ -61,16 +69,17 @@ async function run() {
 
   try {
     await Promise.all([
-      cartWorker(connection),
-      checkoutWorker(connection),
-      fulfillmentWorker(connection),
-      identityWorker(connection),
-      inventoryWorker(connection),
-      omsWorker(connection),
+      cartWorker(connection, otelConfig),
+      checkoutWorker(connection, otelConfig),
+      fulfillmentWorker(connection, otelConfig),
+      identityWorker(connection, otelConfig),
+      inventoryWorker(connection, otelConfig),
+      omsWorker(connection, otelConfig),
     ]);
     log.info('All workers have cleanly shut down.');
   } finally {
     connection.close();
+    await shutdownTracing();
     log.info('Temporal NativeConnection closed.');
   }
 }

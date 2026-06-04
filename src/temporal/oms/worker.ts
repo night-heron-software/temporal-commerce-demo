@@ -1,14 +1,18 @@
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
 import { logger } from '../../lib';
 import { createOmsActivities } from './activities-impl';
 import { OMS_TASK_QUEUE } from '../contracts';
 
-async function start(connection: NativeConnection): Promise<void> {
+async function start(
+  connection: NativeConnection,
+  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+): Promise<void> {
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
     activities: createOmsActivities(),
-    taskQueue: OMS_TASK_QUEUE
+    taskQueue: OMS_TASK_QUEUE,
+    ...otelConfig,
   });
   logger.info({ taskQueue: OMS_TASK_QUEUE }, 'OMS worker started');
   return worker.run();

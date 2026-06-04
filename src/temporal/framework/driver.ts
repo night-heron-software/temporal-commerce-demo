@@ -149,7 +149,7 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
       let inputEventDesc: TEvent | 'timeout' | 'signal';
 
       if (stateConfig.transitional) {
-        input = { kind: 'timeout' };
+        input = { kind: 'timeout', timestamp: new Date().toISOString() };
         inputEventDesc = 'timeout';
       } else {
         const timeout = stateConfig.timeout ?? '1 millisecond';
@@ -159,14 +159,22 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
         );
 
         if (!woke) {
-          input = { kind: 'timeout' };
+          input = { kind: 'timeout', timestamp: new Date().toISOString() };
           inputEventDesc = 'timeout';
         } else if (signalQueue.length > 0) {
-          input = { kind: 'signal', result: signalQueue.shift()! };
+          input = {
+            kind: 'signal',
+            result: signalQueue.shift()!,
+            timestamp: new Date().toISOString(),
+          };
           inputEventDesc = 'signal';
         } else {
           activeExchange = updateQueue.shift()!;
-          input = { kind: 'event', event: activeExchange.event };
+          input = {
+            kind: 'event',
+            event: activeExchange.event,
+            timestamp: new Date().toISOString(),
+          };
           inputEventDesc = activeExchange.event;
         }
       }
