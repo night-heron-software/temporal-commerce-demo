@@ -24,6 +24,8 @@ After making changes to any of these files, suggest restarting workers:
 
 ## How to Restart Workers
 
+// turbo
+
 ```bash
 # If running `npm run dev:up`, press Ctrl+C and restart:
 npm run dev:up
@@ -59,6 +61,8 @@ After restarting, **start a new workflow** to test changes. Existing in-flight w
 ## Type Checking
 
 Verify all domains compile cleanly:
+
+// turbo
 
 ```bash
 npx tsc --noEmit

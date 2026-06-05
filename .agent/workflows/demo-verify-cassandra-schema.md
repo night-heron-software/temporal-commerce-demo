@@ -49,6 +49,8 @@ grep -rhoE "(INSERT INTO|UPDATE) [a-z_]+" src/ --include='*.ts' | sed 's/INSERT 
 
 Compare tables defined in DDL with tables referenced in code:
 
+// turbo
+
 ```bash
 # Tables in schema
 schema_tables=$(grep -E "^CREATE TABLE" cassandra/schema.cql | sed 's/CREATE TABLE IF NOT EXISTS catalog\.//' | sed 's/ (.*//' | sort)
@@ -66,6 +68,8 @@ comm -13 <(echo "$code_tables") <(echo "$schema_tables")
 ```
 
 ## Step 4: Verify via CQL Shell
+
+// turbo
 
 ```bash
 docker exec -it demo-cassandra cqlsh -e "DESCRIBE KEYSPACE catalog;"

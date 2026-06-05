@@ -15,6 +15,8 @@ Stop all infrastructure and application processes in reverse order.
 
 If running `npm run dev:up`, press **Ctrl+C** in that terminal. Otherwise:
 
+// turbo
+
 ```bash
 npm run dev:down
 ```
@@ -28,6 +30,8 @@ npm run infra:down
 ```
 
 ### 3. Verify
+
+// turbo
 
 ```bash
 docker ps --filter "name=demo-" --format "table {{.Names}}\t{{.Status}}"

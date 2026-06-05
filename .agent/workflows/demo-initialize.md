@@ -47,15 +47,21 @@ fi
 
 ### Run Full Reset
 
+// turbo
+
 ```bash
 npm run infra:ready
 ```
+
+// turbo
 
 ```bash
 npm run infra:clean
 ```
 
 Then:
+
+// turbo
 
 ```bash
 npm run dev:init
@@ -74,11 +80,15 @@ This will:
 
 Start the app in one terminal:
 
+// turbo
+
 ```bash
 npm run dev:up
 ```
 
 Then seed in another terminal (if not doing a full `dev:init`):
+
+// turbo
 
 ```bash
 npm run dev:seed
@@ -100,17 +110,23 @@ If you need to run steps individually:
 
 ### 1. Start Infrastructure
 
+// turbo
+
 ```bash
 npm run infra:up
 ```
 
 ### 2. Initialize Cassandra Schema
 
+// turbo
+
 ```bash
 npm run db:init
 ```
 
 This runs:
+
+// turbo
 
 ```bash
 docker exec -i demo-cassandra cqlsh < cassandra/schema.cql
@@ -120,11 +136,15 @@ docker exec -i demo-cassandra cqlsh < cassandra/schema.cql
 
 All seed steps call app API routes. Workers must be running for Temporal operations:
 
+// turbo
+
 ```bash
 npm run dev:up
 ```
 
 ### 4. Seed Data
+
+// turbo
 
 ```bash
 npm run dev:seed
