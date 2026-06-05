@@ -64,6 +64,8 @@ Services available after startup:
 
 **WAIT**: Do NOT automatically run `npm run dev:up`. Ask the user if they want you to run it, or if they prefer to start services separately.
 
+// turbo
+
 ```bash
 npm run dev:up
 ```
@@ -72,8 +74,15 @@ This starts the Next.js dev server and all 6 Temporal domain workers concurrentl
 
 **Or launch them separately:**
 
+// turbo
+
 ```bash
 npm run dev:storefront   # Next.js storefront only (or npm run dev)
+```
+
+// turbo
+
+```bash
 npm run dev:worker       # Temporal workers only
 ```
 
