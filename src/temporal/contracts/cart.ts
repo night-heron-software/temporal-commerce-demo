@@ -95,12 +95,7 @@ export type CartEvent =
   | { type: 'updateQuantity'; lineItemId: string; quantity: number }
   | { type: 'removeItem';     lineItemId: string }
   | { type: 'applyCoupon';    code: string }
-  | { type: 'linkUser';       userId: string }
-  | { type: 'mergeCarts';     sourceCartId: string; sourceItems: CartItem[]; checkoutWorkflowId?: string }
-  | { type: 'adoptCheckout';  checkoutWorkflowId: string }
-  | { type: 'disownCheckout' }
-  | { type: 'beginCheckout' }
-  | { type: 'destroyCart' };
+  | { type: 'beginCheckout' };
 
 // Update response: either the updated cart state or void for terminal operations
 export type CartUpdateResponse = CartDetails | void;

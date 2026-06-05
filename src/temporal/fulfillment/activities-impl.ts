@@ -3,6 +3,7 @@ import { logger, getElasticsearchClient } from '../../lib';
 import type { Suppliers, Elasticsearch } from '../contracts';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import { getFlag } from '../../lib/feature-flags';
+import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
 
 export async function getFeatureFlag(name: string): Promise<boolean> {
   return getFlag(name);
@@ -80,23 +81,70 @@ export async function sendDeliveredEmail(
 
 export async function transferInventoryReservations(
   cartId: string,
-  items: any[],
+  items: Array<{ variantId: string; supplierId: string; quantity: number }>,
 ): Promise<void> {
-  logger.info({ cartId }, "transferInventoryReservations (stub)");
+  logger.info({ cartId, itemCount: items.length }, 'Transferring inventory reservations to suppliers');
+
+  for (const item of items) {
+    const reservationId = `${cartId}-${item.variantId}`;
+    await InventoryCommandRepository.transferToSupplier(
+      reservationId,
+      item.supplierId,
+      item.quantity,
+    );
+  }
+
+  logger.info({ cartId }, 'Inventory reservations transferred');
 }
 
 export async function fulfillInventoryReservations(
   cartId: string,
-  items: any[],
+  items: Array<{ variantId: string }>,
 ): Promise<void> {
-  logger.info({ cartId }, "fulfillInventoryReservations (stub)");
+  logger.info({ cartId, itemCount: items.length }, 'Fulfilling inventory reservations');
+  const esClient = getElasticsearchClient();
+
+  for (const item of items) {
+    const reservationId = `${cartId}-${item.variantId}`;
+    await InventoryCommandRepository.fulfill(reservationId);
+
+    // Remove reservation doc from ES
+    await esClient.delete({
+      index: ES_INDICES.reservations,
+      id: reservationId,
+    }).catch(() => { /* ignore if not found */ });
+  }
+
+  logger.info({ cartId }, 'Inventory reservations fulfilled');
 }
 
 export async function releaseInventoryReservations(
   cartId: string,
-  items: any[],
+  items: Array<{ variantId: string }>,
 ): Promise<void> {
-  logger.info({ cartId }, "releaseInventoryReservations (stub)");
+  logger.info({ cartId, itemCount: items.length }, 'Releasing inventory reservations');
+  const esClient = getElasticsearchClient();
+
+  for (const item of items) {
+    const reservationId = `${cartId}-${item.variantId}`;
+    // cancel() handles CONFIRMED reservations, release() handles TEMPORARY
+    const reservation = await InventoryCommandRepository.getReservation(reservationId);
+    if (!reservation) continue;
+
+    if (reservation.status === 'CONFIRMED') {
+      await InventoryCommandRepository.cancel(reservationId);
+    } else if (reservation.status === 'TEMPORARY') {
+      await InventoryCommandRepository.release(reservationId);
+    }
+
+    // Remove reservation doc from ES
+    await esClient.delete({
+      index: ES_INDICES.reservations,
+      id: reservationId,
+    }).catch(() => { /* ignore if not found */ });
+  }
+
+  logger.info({ cartId }, 'Inventory reservations released');
 }
 
 export function createFulfillmentActivities() {

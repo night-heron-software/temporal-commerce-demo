@@ -5,7 +5,7 @@
  * Handles: users, shoppers, API tokens, feature flags, and audit logging.
  */
 
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
 import { createLogger } from '../../lib';
 import { IDENTITY_TASK_QUEUE } from '../contracts';
 
@@ -13,13 +13,17 @@ import * as activities from './activities-impl';
 
 const logger = createLogger('identity:worker');
 
-export default async function identityWorker(connection: NativeConnection): Promise<void> {
+export default async function identityWorker(
+  connection: NativeConnection,
+  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+): Promise<void> {
   const worker = await Worker.create({
     connection,
     namespace: 'default',
     taskQueue: IDENTITY_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
     activities,
+    ...otelConfig,
   });
 
   logger.info({ taskQueue: IDENTITY_TASK_QUEUE }, 'Identity worker started');

@@ -108,6 +108,7 @@ export interface FulfillmentSupplierOrderState {
 export interface FulfillmentLineItemState {
   sku: string;
   productId: string;
+  variantId: string;
   quantity: number;
   status: FulfillmentLineItemStatus;
   supplierLineItemId?: string;

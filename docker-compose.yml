@@ -48,8 +48,10 @@ services:
     depends_on:
       - temporal-postgresql
       - temporal-elasticsearch
+      - jaeger
     ports:
       - "7233:7233"
+      - "9464:9464"      # Prometheus metrics endpoint
     environment:
       - DB=postgres12
       - DB_PORT=5432
@@ -62,6 +64,11 @@ services:
       - SKIP_DEFAULT_NAMESPACE_CREATION=false
       - DEFAULT_NAMESPACE=default
       - TEMPORAL_CLI_ADDRESS=temporal:7233
+      # OpenTelemetry — export traces to Jaeger
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://demo-jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=temporal-server
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
@@ -115,12 +122,68 @@ services:
       - temporal-es-data:/usr/share/elasticsearch/data
     networks:
       - demo-net
+  # ── Observability ─────────────────────────────────────────────────────
+  jaeger:
+    image: jaegertracing/jaeger:2.18.0
+    container_name: demo-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC (Temporal server → Jaeger)
+      - "4318:4318"     # OTLP HTTP (Node.js SDK → Jaeger)
+    networks:
+      - demo-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:16686/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    container_name: demo-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - demo-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9090/-/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: demo-grafana
+    ports:
+      - "3200:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - demo-net
 
 volumes:
   cassandra-data:
   es-data:
   temporal-postgres-data:
   temporal-es-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   demo-net:

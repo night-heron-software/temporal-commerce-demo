@@ -69,7 +69,7 @@ export class AddressRepository {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         userId,
-        address.addressId,
+        types.Uuid.fromString(address.addressId),
         address.label,
         address.firstName,
         address.lastName,
@@ -93,7 +93,7 @@ export class AddressRepository {
 
     await executeCql(
       `DELETE FROM shopper_shipping_addresses WHERE user_id = ? AND address_id = ?`,
-      [userId, addressId]
+      [userId, types.Uuid.fromString(addressId)]
     );
   }
 
@@ -107,7 +107,7 @@ export class AddressRepository {
     await executeCql(
       `UPDATE shopper_shipping_addresses SET is_default = true, updated_at = ?
        WHERE user_id = ? AND address_id = ?`,
-      [new Date(), userId, addressId]
+      [new Date(), userId, types.Uuid.fromString(addressId)]
     );
   }
 
@@ -120,7 +120,7 @@ export class AddressRepository {
         executeCql(
           `UPDATE shopper_shipping_addresses SET is_default = false, updated_at = ?
            WHERE user_id = ? AND address_id = ?`,
-          [new Date(), userId, addr.addressId]
+          [new Date(), userId, types.Uuid.fromString(addr.addressId)]
         )
       )
     );

@@ -9,8 +9,13 @@
  *   # or: npx tsx --env-file=.env.local ./src/temporal/worker.ts
  */
 
+import { initTracing, shutdownTracing } from '../lib/tracing';
+// Initialize OTel BEFORE other imports so auto-instrumentations hook into modules
+initTracing('demo-workers');
+
 import { NativeConnection, Runtime } from '@temporalio/worker';
 import { createLogger } from '../lib/logger';
+import { getWorkerOtelConfig } from '../lib/worker-otel';
 
 import cartWorker from './cart/worker';
 import checkoutWorker from './checkout/worker';
@@ -50,7 +55,29 @@ async function run() {
     }
   } : undefined;
 
-  const connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS, tls });
+  // Get OTel worker config (interceptors/sinks) — no-op when OTEL_ENABLED !== 'true'
+  const otelConfig = await getWorkerOtelConfig();
+
+  // Connect with retry — Temporal's Docker health check passes before gRPC
+  // is fully ready for external connections, causing TransportErrors on cold start.
+  const MAX_RETRIES = 10;
+  let connection: NativeConnection | undefined;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS, tls });
+      break;
+    } catch (err) {
+      if (attempt === MAX_RETRIES) {
+        throw new Error(`Failed to connect to Temporal at ${TEMPORAL_ADDRESS} after ${MAX_RETRIES} attempts: ${err}`);
+      }
+      const delay = Math.min(attempt * 3, 15);
+      log.warn({ attempt, maxRetries: MAX_RETRIES, delaySec: delay }, `Temporal connection failed, retrying in ${delay}s...`);
+      await new Promise(resolve => setTimeout(resolve, delay * 1000));
+    }
+  }
+  if (!connection) {
+    throw new Error(`Failed to establish Temporal connection after ${MAX_RETRIES} attempts`);
+  }
   log.info({ address: TEMPORAL_ADDRESS, namespace: TEMPORAL_NAMESPACE, tls: !!tls }, 'Connected to Temporal — starting all domain workers');
 
   const onShutdown = () => {
@@ -61,16 +88,17 @@ async function run() {
 
   try {
     await Promise.all([
-      cartWorker(connection),
-      checkoutWorker(connection),
-      fulfillmentWorker(connection),
-      identityWorker(connection),
-      inventoryWorker(connection),
-      omsWorker(connection),
+      cartWorker(connection, otelConfig),
+      checkoutWorker(connection, otelConfig),
+      fulfillmentWorker(connection, otelConfig),
+      identityWorker(connection, otelConfig),
+      inventoryWorker(connection, otelConfig),
+      omsWorker(connection, otelConfig),
     ]);
     log.info('All workers have cleanly shut down.');
   } finally {
     connection.close();
+    await shutdownTracing();
     log.info('Temporal NativeConnection closed.');
   }
 }

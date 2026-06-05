@@ -19,30 +19,55 @@ echo ""
 echo "🏗️  Starting infrastructure + applying schema..."
 npm run infra:up && npm run db:init
 
-# --- Step 3: Start app in background ---
+# --- Step 3: Start storefront and workers separately ---
+# Using separate background processes avoids concurrently's --kill-others-on-fail
+# which terminates the storefront if the worker crashes on first connect attempt.
 echo ""
-echo "🚀 Starting storefront + workers in background..."
-npm run dev:up &
-APP_PID=$!
+echo "🚀 Starting storefront in background..."
+npm run dev:storefront &
+STOREFRONT_PID=$!
 
 # Ensure background processes are cleaned up on exit
 cleanup() {
   echo ""
-  echo "🛑 Stopping background app (PID $APP_PID)..."
-  kill $APP_PID 2>/dev/null || true
-  wait $APP_PID 2>/dev/null || true
+  echo "🛑 Stopping background processes..."
+  kill $STOREFRONT_PID 2>/dev/null || true
+  kill $WORKER_PID 2>/dev/null || true
+  wait $STOREFRONT_PID 2>/dev/null || true
+  wait $WORKER_PID 2>/dev/null || true
 }
+WORKER_PID=""
 trap cleanup EXIT
 
-# --- Step 4: Wait for app to be healthy ---
+# --- Step 4: Wait for storefront to be ready ---
+# Use the root URL for initial readiness (faster, no DB dependency)
 echo "⏳ Waiting for storefront to be ready at http://localhost:3000..."
-until curl -sf http://localhost:3000/shop > /dev/null 2>&1; do
+until curl -sf http://localhost:3000 > /dev/null 2>&1; do
   sleep 2
   echo "  Storefront starting..."
 done
 echo "✓ Storefront ready"
 
-# --- Step 5: Seed ---
+# --- Step 5: Start workers (after storefront is up) ---
+echo ""
+echo "🚀 Starting workers in background..."
+npm run dev:worker &
+WORKER_PID=$!
+
+# --- Step 6: Wait for workers to register pollers ---
+echo "⏳ Waiting for Temporal workers to register..."
+npm run workers-wait
+echo "✓ All workers ready"
+
+# --- Step 7: Verify deep health ---
+echo "⏳ Verifying deep health..."
+until curl -sf http://localhost:3000/api/health > /dev/null 2>&1; do
+  sleep 2
+  echo "  Waiting for health check..."
+done
+echo "✓ All services healthy"
+
+# --- Step 8: Seed ---
 echo ""
 echo "🌱 Seeding demo data..."
 npm run dev:seed

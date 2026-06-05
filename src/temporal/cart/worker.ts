@@ -1,4 +1,4 @@
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
 import path from 'path';
 
 import * as activities from './activities-impl';
@@ -7,12 +7,16 @@ import { CART_TASK_QUEUE } from '../contracts';
 
 
 
-async function start(connection: NativeConnection): Promise<void> {
+async function start(
+  connection: NativeConnection,
+  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+): Promise<void> {
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
     activities,
-    taskQueue: CART_TASK_QUEUE
+    taskQueue: CART_TASK_QUEUE,
+    ...otelConfig,
   });
   return worker.run();
 }

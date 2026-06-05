@@ -17,6 +17,36 @@ Set up Cassandra, Elasticsearch, Temporal, and seed all catalog data on a fresh 
 > [!TIP]
 > **Shortcut**: `npm run dev:init` automates the entire sequence below (clean → init → start → seed → shutdown) in a single command.
 
+### 0. Kill Stale Workers (Precheck)
+
+Orphaned worker processes from previous sessions cause duplicate Temporal polling and swap thrashing. Always clean up before starting.
+
+// turbo
+
+```bash
+stale_pids=$(pgrep -f "tsx.*worker" 2>/dev/null | tr '\n' ' ')
+if [ -n "$stale_pids" ]; then
+  echo "⚠️  Killing stale worker processes: $stale_pids"
+  kill $stale_pids 2>/dev/null
+  for i in 1 2 3 4 5; do
+    remaining=$(pgrep -f "tsx.*worker" 2>/dev/null | tr '\n' ' ')
+    [ -z "$remaining" ] && break
+    sleep 1
+  done
+  remaining=$(pgrep -f "tsx.*worker" 2>/dev/null | tr '\n' ' ')
+  if [ -n "$remaining" ]; then
+    echo "⚠️  Force-killing stubborn processes: $remaining"
+    kill -9 $remaining 2>/dev/null
+    sleep 1
+  fi
+  echo "✓ Stale workers cleaned up"
+else
+  echo "✓ No stale workers found"
+fi
+```
+
+### Run Full Reset
+
 ```bash
 npm run infra:ready
 ```

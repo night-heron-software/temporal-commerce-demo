@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
+
+# Change to repo root so script works from any directory
+cd "$(dirname "$0")/.."
 
 echo "════════════════════════════════════════════════════════"
 echo "  Cassandra Schema Verification Tool"

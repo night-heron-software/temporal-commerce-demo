@@ -20,6 +20,14 @@ const eslintConfig = defineConfig([
         varsIgnorePattern: "^_"
       }]
     }
+  },
+  {
+    // Temporal workflow and activity code must use the structured pino logger.
+    // console.log bypasses structured logging and pollutes worker output.
+    files: ["src/temporal/**/*.ts"],
+    rules: {
+      "no-console": "warn"
+    }
   }
 ]);
 

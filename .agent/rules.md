@@ -102,6 +102,9 @@ npm run infra:ps       # List running infrastructure containers
 | Elasticsearch | 9200 | `demo-elasticsearch` |
 | Temporal Server | 7233 | `demo-temporal` |
 | Temporal UI | 8233 | `demo-temporal-ui` |
+| Jaeger UI | 16686 | `demo-jaeger` |
+| Prometheus | 9090 | `demo-prometheus` |
+| Grafana | 3200 | `demo-grafana` |
 | Next.js Storefront | 3000 | (host process) |
 | Temporal Workers | — | (host process) |
 
@@ -135,6 +138,8 @@ See `.env.example` for all variables. The demo uses hardcoded defaults for local
 | `CASSANDRA_CONTACT_POINTS` | `localhost:9042` | Cassandra contact points |
 | `CASSANDRA_KEYSPACE` | `catalog` | Cassandra keyspace |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch URL |
+| `OTEL_ENABLED` | `true` | Enable distributed tracing via OTel |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint (Jaeger) |
 
 ---
 
