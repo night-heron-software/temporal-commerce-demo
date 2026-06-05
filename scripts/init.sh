@@ -31,10 +31,8 @@ STOREFRONT_PID=$!
 cleanup() {
   echo ""
   echo "🛑 Stopping background processes..."
-  kill $STOREFRONT_PID 2>/dev/null || true
-  kill $WORKER_PID 2>/dev/null || true
-  wait $STOREFRONT_PID 2>/dev/null || true
-  wait $WORKER_PID 2>/dev/null || true
+  kill $STOREFRONT_PID $WORKER_PID 2>/dev/null || true
+  npm run dev:down > /dev/null 2>&1 || true
 }
 WORKER_PID=""
 trap cleanup EXIT
