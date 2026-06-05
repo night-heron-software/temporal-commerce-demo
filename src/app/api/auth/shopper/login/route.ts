@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   // Cart-User Linking: Recover active cart or link current guest cart
   try {
     const { getElasticsearchClient } = await import('@/lib/es-client');
-    const { ES_INDICES } = await import('@/temporal/contracts');
+    const { ES_INDICES } = await import('@/temporal/contracts/elasticsearch');
     const esClient = getElasticsearchClient();
 
     // Query ES for an active cart belonging to this email
