@@ -6,10 +6,13 @@ cd "$(dirname "$0")/.."
 
 echo "🛑 Stopping Temporal Commerce Demo Infrastructure..."
 
-if [ -f "docker-compose.yml" ]; then
-    docker-compose stop
+# Stop all containers whose name starts with "demo-" regardless of which
+# compose files (base or observability override) were used to start them.
+running=$(docker ps -q --filter "name=demo-")
+if [ -n "$running" ]; then
+    # shellcheck disable=SC2086
+    docker stop $running
     echo "✓ Infrastructure stopped successfully."
 else
-    echo "⚠️  docker-compose.yml not found. Are you in the right directory?"
-    exit 1
+    echo "✓ No demo containers were running."
 fi
