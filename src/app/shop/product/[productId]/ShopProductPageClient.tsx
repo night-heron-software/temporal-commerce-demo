@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import ProductImageGallery from './ProductImageGallery';
 import ShopVariantSelector from './ShopVariantSelector';
 import { useCart } from '@/context/CartContext';
@@ -42,6 +41,7 @@ interface ProductDetailResponse {
 
 interface ShopProductPageClientProps {
   productId: string;
+  initialVariantId?: string;
 }
 
 async function getProductDetail(productId: string): Promise<ProductDetailResponse | null> {
@@ -55,7 +55,7 @@ async function getProductDetail(productId: string): Promise<ProductDetailRespons
   }
 }
 
-export default function ShopProductPageClient({ productId }: ShopProductPageClientProps) {
+export default function ShopProductPageClient({ productId, initialVariantId }: ShopProductPageClientProps) {
   const [data, setData] = useState<ProductDetailResponse | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<VariantWithImages | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -66,23 +66,19 @@ export default function ShopProductPageClient({ productId }: ShopProductPageClie
     await addItem(selectedVariant.id, 1, selectedVariant.price.amount);
   };
 
-  const searchParams = useSearchParams();
-  const requestedVariantId = searchParams.get('variantId');
-
   useEffect(() => {
     getProductDetail(productId).then((result) => {
       setData(result);
       if (result) {
-        // If a specific variant was requested (e.g. from shop page color filter),
-        // select it instead of the default
-        const targetVariant = requestedVariantId
-          ? result.variants.find((v) => v.id === requestedVariantId)
-          : null;
-        setSelectedVariant(targetVariant || result.defaultVariant);
+        // Prefer the variant from the URL, fall back to API's default
+        const initial = initialVariantId
+          ? result.variants.find((v) => v.id === initialVariantId)
+          : undefined;
+        setSelectedVariant(initial || result.defaultVariant || null);
       }
       setIsLoading(false);
     });
-  }, [productId, requestedVariantId]);
+  }, [productId, initialVariantId]);
 
   if (isLoading) {
     return (
@@ -198,14 +194,16 @@ export default function ShopProductPageClient({ productId }: ShopProductPageClie
               </div>
             </div>
 
-            {/* Variant Selector */}
-            <ShopVariantSelector
-              currentVariantId={selectedVariant.id}
-              currentOptions={selectedVariant.options ?? []}
-              relatedVariants={variants}
-              productId={productId}
-              onVariantChange={(v) => setSelectedVariant(v as VariantWithImages)}
-            />
+            {/* Variant Selector — only if some variants have options */}
+            {variants.length > 1 && variants.some((v) => v.options && v.options.length > 0) && (
+              <ShopVariantSelector
+                currentVariantId={selectedVariant.id}
+                currentOptions={selectedVariant.options ?? []}
+                relatedVariants={variants}
+                productId={productId}
+                onVariantChange={(v) => setSelectedVariant(v as VariantWithImages)}
+              />
+            )}
 
             {/* Add to Cart Button */}
             <button

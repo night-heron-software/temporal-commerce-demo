@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 
 interface CassandraOption {
   option_type?: string;
@@ -83,7 +83,6 @@ interface OptionValue {
   label: string;
   hex?: string;
   available: boolean;
-  matchingVariantId?: string;
 }
 
 // Represents an option type with all its possible values
@@ -138,37 +137,60 @@ export default function ShopVariantSelector({
   relatedVariants,
   onVariantChange
 }: VariantSelectorProps) {
-  // All variants including current one
+  // All variants with options — only those with options can participate in selection
   const allVariants = useMemo(() => {
     const currentVariant: RelatedVariant = {
       id: currentVariantId,
-      blankSku: '', // Not needed for selection logic
+      blankSku: '',
       price: { amount: 0, currency: 'USD' },
       available: true,
       options: currentOptions
     };
-    // Add current variant if not already in related
     const hasCurrentInRelated = relatedVariants.some((v) => v.id === currentVariantId);
-    return hasCurrentInRelated ? relatedVariants : [currentVariant, ...relatedVariants];
+    const combined = hasCurrentInRelated ? relatedVariants : [currentVariant, ...relatedVariants];
+    return combined.filter((v) => v.options && v.options.length > 0);
   }, [currentVariantId, currentOptions, relatedVariants]);
 
-  // Get current option selections as a map
-  const currentSelections = useMemo(() => {
+  // ── Decoupled selection state ──
+  // Selections are tracked independently from the current variant.
+  // Changing size never auto-changes color, and vice versa.
+  const [selections, setSelections] = useState<Map<string, string>>(() => {
     const map = new Map<string, string>();
     currentOptions.forEach((opt) => {
       map.set(getOptionType(opt), getOptionLabel(opt));
     });
     return map;
-  }, [currentOptions]);
+  });
 
-  // Extract all option groups with availability
+  // Sync selections when parent changes the variant externally (e.g., initial load).
+  // Use a flag to distinguish external changes from our own onVariantChange calls.
+  const prevVariantId = useRef(currentVariantId);
+  const isInternalChange = useRef(false);
+  useEffect(() => {
+    if (currentVariantId !== prevVariantId.current) {
+      prevVariantId.current = currentVariantId;
+      // Only sync if this was an external change (not from our own selection)
+      if (!isInternalChange.current) {
+        const map = new Map<string, string>();
+        currentOptions.forEach((opt) => {
+          map.set(getOptionType(opt), getOptionLabel(opt));
+        });
+        setSelections(map);
+      }
+      isInternalChange.current = false;
+    }
+  }, [currentVariantId, currentOptions]);
+
+  // Collect all option groups — availability is contextual to current selections.
+  // When Size=L is selected, only colors that have a variant with Size=L show as available.
+  // When nothing is selected, all globally-available values show as available.
   const optionGroups = useMemo(() => {
     const groups = new Map<
       string,
-      Map<string, { hex?: string; variantIds: Array<{ id: string; available: boolean }> }>
+      Map<string, { hex?: string }>
     >();
 
-    // Collect all option values from all variants
+    // First pass: collect all option values and their hex codes
     allVariants.forEach((variant) => {
       variant.options?.forEach((opt) => {
         const type = getOptionType(opt);
@@ -181,54 +203,40 @@ export default function ShopVariantSelector({
 
         const typeGroup = groups.get(type)!;
         if (!typeGroup.has(label)) {
-          typeGroup.set(label, { hex: hex || undefined, variantIds: [] });
+          typeGroup.set(label, { hex: hex || undefined });
         }
-
-        typeGroup.get(label)!.variantIds.push({
-          id: variant.id,
-          available: variant.available
-        });
       });
     });
 
-    // Helper function to find matching variant (defined locally to avoid hook order issues)
-    const findMatchingVariant = (
-      changeType: string,
-      changeValue: string
-    ): RelatedVariant | undefined => {
-      const newSelections = new Map(currentSelections);
-      newSelections.set(changeType, changeValue);
-
-      return allVariants.find((variant) => {
-        const variantOptions = new Map<string, string>();
-        variant.options?.forEach((opt) => {
-          variantOptions.set(getOptionType(opt), getOptionLabel(opt));
-        });
-
-        for (const [type, label] of newSelections) {
-          if (variantOptions.get(type) !== label) {
-            return false;
-          }
-        }
-        return true;
-      });
-    };
-
-    // Convert to array format
+    // Second pass: compute contextual availability
+    // For each option value, check if any available variant has it AND matches
+    // all OTHER currently-selected options.
     const result: OptionGroup[] = [];
     groups.forEach((values, type) => {
       const optionValues: OptionValue[] = [];
       values.forEach((info, label) => {
-        // An option value is available if ANY variant with that option is available
-        // AND matches current selections for OTHER option types
-        const matchingVariant = findMatchingVariant(type, label);
-        const available = matchingVariant ? matchingVariant.available : false;
+        const available = allVariants.some((variant) => {
+          if (!variant.available) return false;
+          // Must have this option value
+          const hasValue = variant.options?.some(
+            (opt) => getOptionType(opt) === type && getOptionLabel(opt) === label
+          );
+          if (!hasValue) return false;
+          // Must also match all OTHER selected options
+          for (const [selType, selLabel] of selections) {
+            if (selType === type) continue; // skip the option type we're checking
+            const variantHasOther = variant.options?.some(
+              (opt) => getOptionType(opt) === selType && getOptionLabel(opt) === selLabel
+            );
+            if (!variantHasOther) return false;
+          }
+          return true;
+        });
 
         optionValues.push({
           label,
           hex: info.hex,
-          available,
-          matchingVariantId: matchingVariant?.id
+          available
         });
       });
 
@@ -251,62 +259,79 @@ export default function ShopVariantSelector({
     result.sort((a, b) => getGroupSortOrder(a.type) - getGroupSortOrder(b.type));
 
     return result;
-  }, [allVariants, currentSelections]);
+  }, [allVariants, selections]);
 
-  // Find a variant that matches current selections except for one option type
-  const findMatchingVariantForOption = useCallback(
-    (changeType: string, changeValue: string): RelatedVariant | undefined => {
-      // Create new selections with the changed value
-      const newSelections = new Map(currentSelections);
-      newSelections.set(changeType, changeValue);
-
-      // Find a variant that matches all selections
-      return allVariants.find((variant) => {
-        const variantOptions = new Map<string, string>();
+  // Find the best matching variant for current selections
+  const findBestVariant = useCallback(
+    (targetSelections: Map<string, string>): RelatedVariant | undefined => {
+      // 1. Try exact match first
+      const exact = allVariants.find((variant) => {
+        const variantOpts = new Map<string, string>();
         variant.options?.forEach((opt) => {
-          variantOptions.set(getOptionType(opt), getOptionLabel(opt));
+          variantOpts.set(getOptionType(opt), getOptionLabel(opt));
         });
-
-        // Check if all selections match
-        for (const [type, label] of newSelections) {
-          if (variantOptions.get(type) !== label) {
-            return false;
-          }
+        for (const [type, label] of targetSelections) {
+          if (variantOpts.get(type) !== label) return false;
         }
         return true;
       });
+      if (exact) return exact;
+
+      // 2. No exact match — find variant with highest overlap score
+      let bestVariant: RelatedVariant | undefined;
+      let bestScore = -1;
+
+      for (const variant of allVariants) {
+        if (!variant.available) continue;
+        const variantOpts = new Map<string, string>();
+        variant.options?.forEach((opt) => {
+          variantOpts.set(getOptionType(opt), getOptionLabel(opt));
+        });
+
+        let score = 0;
+        for (const [type, label] of targetSelections) {
+          if (variantOpts.get(type) === label) score++;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestVariant = variant;
+        }
+      }
+
+      return bestVariant;
     },
-    [allVariants, currentSelections]
+    [allVariants]
   );
 
-  // Handle option selection - call onVariantChange callback
+  // Handle option click — toggle: re-clicking a selected option deselects it
   const handleOptionSelect = useCallback(
     (type: string, label: string) => {
-      const matchingVariant = findMatchingVariantForOption(type, label);
-      if (matchingVariant && matchingVariant.id !== currentVariantId) {
-        if (onVariantChange) {
-          onVariantChange(matchingVariant);
+      setSelections((prev) => {
+        const next = new Map(prev);
+        if (prev.get(type) === label) {
+          // Toggle off — deselect this option
+          next.delete(type);
+        } else {
+          next.set(type, label);
         }
-      }
+        return next;
+      });
     },
-    [findMatchingVariantForOption, currentVariantId, onVariantChange]
+    []
   );
 
-  // Auto-select single available options
+  // When selections change, find and report the best matching variant.
+  // Only update the parent when all option types are selected (partial = browsing).
+  const optionTypeCount = optionGroups.length;
   useEffect(() => {
-    optionGroups.forEach((group) => {
-      const availableValues = group.values.filter((v) => v.available);
-      if (availableValues.length === 1) {
-        const singleValue = availableValues[0];
-        const currentSelection = currentSelections.get(group.type);
-
-        // Only select if not already selected
-        if (currentSelection !== singleValue.label) {
-          handleOptionSelect(group.type, singleValue.label);
-        }
-      }
-    });
-  }, [optionGroups, currentSelections, handleOptionSelect]);
+    if (selections.size < optionTypeCount) return; // partial selection = browsing
+    const bestVariant = findBestVariant(selections);
+    if (bestVariant && bestVariant.id !== currentVariantId && onVariantChange) {
+      isInternalChange.current = true;
+      onVariantChange(bestVariant);
+    }
+  }, [selections, optionTypeCount, findBestVariant, currentVariantId, onVariantChange]);
 
   // ─── Determine display mode ───────────────────────────────────────────────
   // No option groups at all → render nothing
@@ -351,7 +376,7 @@ export default function ShopVariantSelector({
             <label className="block text-sm font-medium text-zinc-500 mb-3">{group.displayLabel}</label>
             <div className="flex flex-wrap gap-2">
               {group.values.map((value) => {
-                const isSelected = currentSelections.get(group.type) === value.label;
+                const isSelected = selections.get(group.type) === value.label;
                 const showSwatch = group.isColor && value.hex;
 
                 return (
@@ -366,11 +391,11 @@ export default function ShopVariantSelector({
                           ? 'bg-purple-600 text-white ring-2 ring-purple-600 ring-offset-2 dark:ring-offset-zinc-950'
                           : value.available
                             ? 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100'
-                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 cursor-not-allowed line-through'
+                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600 opacity-40 cursor-not-allowed line-through'
                       }
                       ${showSwatch ? 'pl-9' : ''}
                     `}
-                    title={!value.available ? 'Unavailable' : value.label}
+                    title={!value.available ? 'Not available with current selection' : value.label}
                   >
                     {showSwatch && value.hex && (
                       <span
@@ -381,7 +406,7 @@ export default function ShopVariantSelector({
                       />
                     )}
                     {value.label}
-                    {!value.available && <span className="sr-only">(Unavailable)</span>}
+                    {!value.available && <span className="sr-only">(Unavailable with current selection)</span>}
                   </button>
                 );
               })}

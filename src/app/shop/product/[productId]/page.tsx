@@ -1,20 +1,13 @@
-import { Suspense } from 'react';
 import ShopProductPageClient from './ShopProductPageClient';
 
 interface PageProps {
   params: Promise<{ productId: string }>;
+  searchParams: Promise<{ variant?: string }>;
 }
 
-export default async function ShopProductPage({ params }: PageProps) {
+export default async function ShopProductPage({ params, searchParams }: PageProps) {
   const { productId } = await params;
+  const { variant: initialVariantId } = await searchParams;
 
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 dark:bg-zinc-900 flex items-center justify-center">
-        <div className="animate-pulse text-lg text-zinc-500">Loading...</div>
-      </div>
-    }>
-      <ShopProductPageClient productId={productId} />
-    </Suspense>
-  );
+  return <ShopProductPageClient productId={productId} initialVariantId={initialVariantId} />;
 }

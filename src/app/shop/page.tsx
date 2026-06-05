@@ -446,7 +446,7 @@ function ShopPageContent() {
                   {products.map((product) => (
                     <Link
                       key={product.id}
-                      href={`/shop/product/${product.id}${product.displayVariantId ? `?variantId=${product.displayVariantId}` : product.defaultVariantId ? `?variantId=${product.defaultVariantId}` : ''}`}
+                      href={`/shop/product/${product.id}${product.displayVariantId ? `?variant=${product.displayVariantId}` : product.defaultVariantId ? `?variant=${product.defaultVariantId}` : ''}`}
                       className="group block bg-white dark:bg-[var(--heron-forest)] rounded-lg border border-[var(--heron-cream-dark)] dark:border-[var(--heron-slate-dark)] shadow-sm hover:border-[var(--heron-slate)] dark:hover:border-[var(--heron-slate-light)] hover:shadow-lg transition-all duration-300 overflow-hidden"
                     >
                       <div className="aspect-square relative bg-[var(--heron-cream)] dark:bg-[var(--heron-slate-dark)] overflow-hidden">
