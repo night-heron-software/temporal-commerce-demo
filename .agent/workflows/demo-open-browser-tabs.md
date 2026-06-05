@@ -16,9 +16,12 @@ Open all relevant URLs for the temporal-commerce-demo local development environm
 open http://localhost:3000/shop
 open http://localhost:3000/admin
 open http://localhost:8233
-open http://localhost:16686
-open http://localhost:9090
-open http://localhost:3200
+
+if grep -q "^OTEL_ENABLED=true" .env.local 2>/dev/null; then
+  open http://localhost:16686
+  open http://localhost:9090
+  open http://localhost:3200
+fi
 ```
 
 ## URL Reference

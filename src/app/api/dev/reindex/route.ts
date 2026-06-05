@@ -144,6 +144,11 @@ async function reindexProducts(esClient: EsClient, errors: string[]): Promise<nu
         optionType: o.option_type,
         value: { label: o.label, hex: o.attributes?.hex }
       })),
+      frontImageUrl:
+        (v.images as Record<string, string> | null)?.['front'] ??
+        (v.images as Record<string, string> | null)?.['back'] ??
+        Object.values((v.images as Record<string, string> | null) ?? {})[0] ??
+        null,
       images: v.images ?? {},
     };
     if (!variantsByProduct.has(pid)) variantsByProduct.set(pid, []);
