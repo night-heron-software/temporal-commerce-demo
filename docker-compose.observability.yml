@@ -1,0 +1,97 @@
+# Observability override — Jaeger, Prometheus, Grafana
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+#
+# Or via npm:
+#   npm run infra:up:obs
+#
+# This file extends the base docker-compose.yml by:
+#   1. Adding Jaeger (distributed tracing UI + OTLP collector)
+#   2. Adding Prometheus (metrics scraping)
+#   3. Adding Grafana (metrics dashboards)
+#   4. Overriding the temporal service to add OTEL export env vars
+#      and a depends_on for jaeger
+
+services:
+  jaeger:
+    image: jaegertracing/jaeger:2.18.0
+    container_name: demo-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC (Temporal server → Jaeger)
+      - "4318:4318"     # OTLP HTTP (Node.js SDK → Jaeger)
+    networks:
+      - demo-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:16686/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    container_name: demo-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - demo-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9090/-/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: demo-grafana
+    ports:
+      - "3200:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - demo-net
+
+  # Override the base temporal service to add OTEL tracing to Jaeger
+  temporal:
+    depends_on:
+      - temporal-postgresql
+      - temporal-elasticsearch
+      - jaeger
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgresql
+      - ENABLE_ES=true
+      - ES_SEEDS=temporal-elasticsearch
+      - ES_VERSION=v7
+      - SKIP_DEFAULT_NAMESPACE_CREATION=false
+      - DEFAULT_NAMESPACE=default
+      - TEMPORAL_CLI_ADDRESS=temporal:7233
+      # OpenTelemetry — export traces to Jaeger
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://demo-jaeger:4317
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=temporal-server
+
+volumes:
+  prometheus-data:
+  grafana-data:

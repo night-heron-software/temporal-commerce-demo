@@ -23,6 +23,7 @@
     "db:verify": "bash scripts/verify-schema.sh",
     "workers-wait": "tsx --env-file=.env.local scripts/wait-for-workers.ts",
     "infra:up": "bash scripts/infra-start.sh",
+    "infra:up:obs": "docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d",
     "infra:down": "bash scripts/local-shutdown.sh",
     "infra:clean": "npm run infra:down && docker-compose down -v && echo '✓ All data wiped'",
     "infra:ps": "docker-compose ps",
