@@ -70,6 +70,7 @@ export interface CheckoutState {
 
 export interface CartDetails {
   cartId: string;
+  email?: string;
   userId?: string; // Linked user ID if authenticated
   items: CartItem[];
   subtotalPrice: number;
@@ -95,6 +96,7 @@ export type CartEvent =
   | { type: 'updateQuantity'; lineItemId: string; quantity: number }
   | { type: 'removeItem';     lineItemId: string }
   | { type: 'applyCoupon';    code: string }
+  | { type: 'linkUser';       email: string; userId: string }
   | { type: 'beginCheckout' };
 
 // Update response: either the updated cart state or void for terminal operations

@@ -270,6 +270,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
   carts: {
     properties: {
       cartId: { type: 'keyword' },
+      email: { type: 'keyword' },
+      userId: { type: 'keyword' },
       items: {
         type: 'nested',
         properties: {

@@ -16,6 +16,8 @@ type CartDocument = Elasticsearch.CartDocument;
 export function buildCartDocument(cart: CartDetails, createdAt?: string): CartDocument {
   return {
     cartId: cart.cartId,
+    email: cart.email,
+    userId: cart.userId,
     items: cart.items.map((item) => ({
       lineItemId: item.lineItemId,
       variantId: item.variantId,

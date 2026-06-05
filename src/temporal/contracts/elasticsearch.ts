@@ -261,6 +261,8 @@ export interface CartItemDocument {
 
 export interface CartDocument {
   cartId: string;
+  email?: string;
+  userId?: string;
   items: CartItemDocument[];
   itemCount: number;
   subtotalPrice: number;

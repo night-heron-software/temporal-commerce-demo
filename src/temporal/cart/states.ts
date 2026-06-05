@@ -160,6 +160,13 @@ export async function activeState(
       return { context: nextCtx, next: nextState, response: draft };
     }
 
+    case 'linkUser': {
+      draft.email = event.email;
+      draft.userId = event.userId;
+      const nextCtx = { ...ctx, cart: draft };
+      return { context: nextCtx, next: 'active', response: draft };
+    }
+
     case 'applyCoupon': {
       if (!draft.appliedCoupons.includes(event.code)) {
         draft.appliedCoupons.push(event.code);

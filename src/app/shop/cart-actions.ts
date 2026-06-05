@@ -49,7 +49,7 @@ export async function getCartId(): Promise<string | null> {
  * Unified wrapper for Temporal cart updates with error handling.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any -- Temporal SDK executeUpdate overloads require any */
-async function executeCartUpdate<TReturn, TArgs extends any[]>(
+export async function executeCartUpdate<TReturn, TArgs extends any[]>(
   cartId: string,
   updateDef: any,
   args: TArgs,
