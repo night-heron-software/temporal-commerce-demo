@@ -23,7 +23,7 @@ Verify: `node --version` should show v20 or higher.
 
 ### 2. Docker Desktop
 
-Download and install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/). The app requires ~4 GB of RAM for the six Docker containers (Cassandra, Elasticsearch ×2, Temporal Server, Temporal UI, PostgreSQL).
+Download and install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/). The app requires ~2.5 GB of RAM for the six core Docker containers (Cassandra, Elasticsearch ×2, Temporal Server, Temporal UI, PostgreSQL). Add ~1 GB if you enable the optional observability stack (Jaeger, Prometheus, Grafana).
 
 After installation, open Docker Desktop at least once to complete setup. The project scripts will auto-start Docker Desktop if it's installed but not running.
 
@@ -95,6 +95,36 @@ npm run dev:seed
 
 ---
 
+## Observability (Optional)
+
+The observability stack (Jaeger, Prometheus, Grafana) is **not started by default** to save memory and speed up startup. To enable it:
+
+### Option A: Persistent (recommended)
+
+Add to your `.env.local`:
+
+```
+OTEL_ENABLED=true
+```
+
+Then `npm run infra:up` will automatically include the observability containers.
+
+### Option B: One-off
+
+```bash
+npm run infra:up:obs
+```
+
+### Observability URLs
+
+| Resource | URL |
+| --- | --- |
+| Jaeger UI | [http://localhost:16686](http://localhost:16686) |
+| Prometheus | [http://localhost:9090](http://localhost:9090) |
+| Grafana | [http://localhost:3200](http://localhost:3200) (admin/admin) |
+
+---
+
 ## Verify It's Working
 
 1. **Browse the catalog** — [http://localhost:3000/shop](http://localhost:3000/shop) should show a product grid with images and prices
@@ -161,6 +191,7 @@ Wipes all data volumes, recreates the Cassandra schemas, and re-seeds the catalo
 | `npm run db:init` | Apply Cassandra schema |
 | `npm run db:verify` | Verify Cassandra schema consistency |
 | `npm run infra:up` | Start Docker database infrastructure only |
+| `npm run infra:up:obs` | Start infrastructure + observability (Jaeger, Prometheus, Grafana) |
 | `npm run infra:down` | Stop Docker containers |
 | `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
 | `npm run infra:ps` | List running Docker containers |
@@ -169,7 +200,7 @@ Wipes all data volumes, recreates the Cassandra schemas, and re-seeds the catalo
 
 ## Infrastructure Services
 
-The project runs six Docker containers via `docker-compose.yml`:
+The project runs six core Docker containers via `docker-compose.yml`:
 
 | Service | Port | Container | Purpose |
 | --- | --- | --- | --- |
@@ -179,6 +210,14 @@ The project runs six Docker containers via `docker-compose.yml`:
 | Temporal UI | 8233 | `demo-temporal-ui` | Workflow visualization and debugging |
 | Temporal PostgreSQL | 5432 | `demo-temporal-postgresql` | Temporal's internal persistence |
 | Temporal Elasticsearch | 9201 | `demo-temporal-elasticsearch` | Temporal's internal visibility store |
+
+Three additional containers are available via `docker-compose.observability.yml` (opt-in):
+
+| Service | Port | Container | Purpose |
+| --- | --- | --- | --- |
+| Jaeger | 16686 | `demo-jaeger` | Distributed tracing UI + OTLP collector |
+| Prometheus | 9090 | `demo-prometheus` | Metrics scraping |
+| Grafana | 3200 | `demo-grafana` | Metrics dashboards (admin/admin) |
 
 ---
 
@@ -217,6 +256,9 @@ npm install
 | 9042 | Cassandra | `lsof -i :9042` |
 | 9200 | Elasticsearch | `lsof -i :9200` |
 | 5432 | PostgreSQL | `lsof -i :5432` |
+| 16686 | Jaeger (observability) | `lsof -i :16686` |
+| 9090 | Prometheus (observability) | `lsof -i :9090` |
+| 3200 | Grafana (observability) | `lsof -i :3200` |
 
 Kill the conflicting process or stop the other service before starting the demo.
 

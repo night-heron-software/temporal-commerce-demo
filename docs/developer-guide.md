@@ -55,6 +55,14 @@ graph TB
 | **Temporal PostgreSQL** | 5432 | Temporal's internal persistence |
 | **Temporal Elasticsearch** | 9201 | Temporal's internal visibility (separate from app ES) |
 
+**Observability (opt-in — set `OTEL_ENABLED=true` or run `npm run infra:up:obs`):**
+
+| Service | Port | Purpose |
+| --- | --- | --- |
+| **Jaeger** | 16686 | Distributed tracing UI + OTLP collector |
+| **Prometheus** | 9090 | Metrics scraping |
+| **Grafana** | 3200 | Metrics dashboards (admin/admin) |
+
 ### Request Flow
 
 1. **Storefront** → User browses products (Elasticsearch), adds to cart (Temporal)
@@ -128,6 +136,7 @@ npm run dev:init         # Nuclear reset: wipe databases, recreate schema, start
 | `npm run db:init` | Database | Create Cassandra keyspace and tables |
 | `npm run db:verify` | Database | Verify Cassandra schema consistency |
 | `npm run infra:up` | Infrastructure | Start Docker infrastructure containers and verify health |
+| `npm run infra:up:obs` | Infrastructure | Start infrastructure + observability (Jaeger, Prometheus, Grafana) |
 | `npm run infra:down` | Infrastructure | Stop infrastructure containers |
 | `npm run infra:clean` | Infrastructure | Stop containers and wipe all persistent volumes |
 | `npm run infra:ps` | Infrastructure | List running infrastructure containers |
@@ -214,7 +223,8 @@ temporal-commerce-demo/
 │       ├── inventory/         # CQRS inventory
 │       ├── identity/          # Users, shoppers, API tokens, feature flags
 │       └── worker.ts          # Unified worker launcher
-├── docker-compose.yml         # Local infrastructure (6 containers)
+├── docker-compose.yml         # Core infrastructure (6 containers)
+├── docker-compose.observability.yml  # Opt-in: Jaeger, Prometheus, Grafana
 └── .env.example               # Environment variable template
 ```
 
@@ -714,9 +724,11 @@ Key log namespaces:
 ### Docker Container Logs
 
 ```bash
-docker-compose logs -f cassandra
-docker-compose logs -f temporal
-docker-compose logs -f elasticsearch
+docker compose logs -f cassandra
+docker compose logs -f temporal
+docker compose logs -f elasticsearch
+# Observability (only when OTEL_ENABLED=true):
+docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f jaeger
 ```
 
 ### Common Debugging Scenarios
@@ -740,6 +752,9 @@ docker-compose logs -f elasticsearch
 | 9042 | Cassandra | `lsof -i :9042` |
 | 9200 | Elasticsearch | `lsof -i :9200` |
 | 5432 | Temporal PostgreSQL | `docker ps` |
+| 16686 | Jaeger (observability) | `docker ps` |
+| 9090 | Prometheus (observability) | `docker ps` |
+| 3200 | Grafana (observability) | `docker ps` |
 
 ---
 
@@ -776,5 +791,7 @@ The unified worker process runs all six domain workers in a single container, sh
 | `ELASTICSEARCH_URL` | Yes | `http://localhost:9200` | Elasticsearch endpoint |
 | `ELASTICSEARCH_API_KEY` | Cloud only | — | Elasticsearch API key |
 | `NEXT_PUBLIC_APP_URL` | Yes | `http://localhost:3000` | Public application URL |
+| `OTEL_ENABLED` | No | `false` | Enable OpenTelemetry tracing (requires observability stack) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OTLP HTTP endpoint for trace export |
 
 Copy `.env.example` to `.env.local` for local development. Default values are configured for the Docker Compose environment.

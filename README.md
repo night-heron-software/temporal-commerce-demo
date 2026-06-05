@@ -86,6 +86,7 @@ This starts the Next.js dev server and Temporal workers concurrently.
 | `npm run db:init` | Apply Cassandra schema |
 | `npm run db:verify` | Verify Cassandra schema consistency |
 | `npm run infra:up` | Start Docker database infrastructure only |
+| `npm run infra:up:obs` | Start infrastructure + observability (Jaeger, Prometheus, Grafana) |
 | `npm run infra:down` | Stop Docker containers |
 | `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
 | `npm run infra:ps` | List running Docker containers |
@@ -121,8 +122,28 @@ temporal-commerce-demo/
 │       ├── inventory/      # CQRS inventory workflow
 │       ├── identity/       # Shopper auth, users, API tokens, feature flags
 │       └── worker.ts       # Unified Temporal worker
-└── docker-compose.yml      # Local infrastructure
+└── docker-compose.yml      # Core infrastructure (6 containers)
+└── docker-compose.observability.yml  # Opt-in: Jaeger, Prometheus, Grafana
 ```
+
+## Observability (Optional)
+
+The observability stack (Jaeger, Prometheus, Grafana) is opt-in. To enable:
+
+```bash
+# Persistent — add to .env.local:
+OTEL_ENABLED=true
+
+# Then npm run infra:up includes observability automatically.
+# Or one-off:
+npm run infra:up:obs
+```
+
+| Service | URL |
+| --- | --- |
+| Jaeger | [http://localhost:16686](http://localhost:16686) |
+| Prometheus | [http://localhost:9090](http://localhost:9090) |
+| Grafana | [http://localhost:3200](http://localhost:3200) (admin/admin) |
 
 ## Technology Stack
 
