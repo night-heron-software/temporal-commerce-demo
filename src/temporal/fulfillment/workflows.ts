@@ -20,6 +20,7 @@ import {
 } from './definitions';
 import {
   transferInventoryReservations,
+  fulfillInventoryReservations,
   releaseInventoryReservations,
   indexFulfillment,
 } from './activities';
@@ -128,6 +129,7 @@ export async function fulfillmentWorkflow(
           (item): FulfillmentLineItemState => ({
             sku: item.sku,
             productId: item.productId,
+            variantId: item.variantId,
             quantity: item.quantity,
             status: 'pending',
           }),
@@ -281,6 +283,22 @@ export async function fulfillmentWorkflow(
           }
         }
       }
+
+      // Fulfill inventory reservations on delivery — transitions CONFIRMED→FULFILLED,
+      // decrementing both total_stock and reserved_stock in the inventory system.
+      if (finalState === '__terminal:delivered') {
+        const allItems = finalCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
+          so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
+        );
+        try {
+          await fulfillInventoryReservations(finalCtx.cartId, allItems);
+        } catch (fulfillErr) {
+          wf.log.error('Failed to fulfill inventory reservations on delivery', {
+            error: String(fulfillErr),
+          });
+        }
+      }
+
       await syncProjections(finalCtx);
     },
   };

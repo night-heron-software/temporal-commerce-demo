@@ -76,7 +76,24 @@ async function waitForWorkers() {
   console.log('⏳ Waiting for Temporal workers to register...');
   console.log(`   Queues: ${REQUIRED_QUEUES.join(', ')}\n`);
 
-  const client = await getTemporalClient();
+  // Connect with retry — Temporal gRPC may not be ready immediately after
+  // Docker health check passes (especially during init cold-start).
+  let client: Awaited<ReturnType<typeof getTemporalClient>>;
+  const MAX_CONNECT_RETRIES = 10;
+  for (let attempt = 1; attempt <= MAX_CONNECT_RETRIES; attempt++) {
+    try {
+      client = await getTemporalClient();
+      break;
+    } catch (err) {
+      if (attempt === MAX_CONNECT_RETRIES) {
+        throw new Error(`Failed to connect to Temporal after ${MAX_CONNECT_RETRIES} attempts: ${err}`);
+      }
+      const delay = Math.min(attempt * 3, 15);
+      console.log(`   ⚠️ Temporal connection attempt ${attempt}/${MAX_CONNECT_RETRIES} failed, retrying in ${delay}s...`);
+      await new Promise(resolve => setTimeout(resolve, delay * 1000));
+    }
+  }
+  const verifiedClient = client!;
   const startTime = Date.now();
   const deadline = startTime + TIMEOUT_MS;
   const ready = new Set<string>();
@@ -87,7 +104,7 @@ async function waitForWorkers() {
   while (Date.now() < deadline) {
     for (const queue of REQUIRED_QUEUES) {
       if (ready.has(queue)) continue;
-      if (await hasActivePollers(client, queue)) {
+      if (await hasActivePollers(verifiedClient, queue)) {
         ready.add(queue);
         console.log(`   ✓ ${queue}`);
       }

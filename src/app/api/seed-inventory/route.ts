@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { executeCql } from '@/lib';
+import { executeCql, executeCqlAll } from '@/lib';
 import { InventoryCommandRepository } from '@/temporal/inventory/db/inventory-command-repository';
 
 const DEFAULT_STOCK = 100;
@@ -20,8 +20,9 @@ interface VariantSkuRow {
 
 export async function POST() {
   try {
-    // Get all unique blank_skus from variants
-    const variants = await executeCql<VariantSkuRow>(
+    // Get all unique blank_skus from variants — must use executeCqlAll
+    // because the catalog can exceed the default 5000-row page size.
+    const variants = await executeCqlAll<VariantSkuRow>(
       `SELECT blank_sku FROM variants`
     );
 

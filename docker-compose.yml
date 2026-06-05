@@ -120,6 +120,8 @@ services:
       - xpack.security.enabled=false
     volumes:
       - temporal-es-data:/usr/share/elasticsearch/data
+    networks:
+      - demo-net
   # ── Observability ─────────────────────────────────────────────────────
   jaeger:
     image: jaegertracing/jaeger:2.18.0

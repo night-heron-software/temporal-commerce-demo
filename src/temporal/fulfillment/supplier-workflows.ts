@@ -478,7 +478,7 @@ export async function supplierOrderWorkflow(
       try {
         await releaseInventoryReservations(
           cancelCtx.cartId,
-          cancelCtx.so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.sku })),
+          cancelCtx.so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
         );
       } catch (e) {
         wf.log.error('Failed to release inventory on cancel', { error: String(e) });
@@ -490,7 +490,7 @@ export async function supplierOrderWorkflow(
         try {
           await fulfillInventoryReservations(
             finalCtx.cartId,
-            finalCtx.so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.sku })),
+            finalCtx.so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
           );
         } catch (e) {
           wf.log.error('Failed to fulfill inventory on delivery', { error: String(e) });
@@ -499,7 +499,7 @@ export async function supplierOrderWorkflow(
         try {
           await releaseInventoryReservations(
             finalCtx.cartId,
-            finalCtx.so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.sku })),
+            finalCtx.so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
           );
         } catch (e) {
           wf.log.error('Failed to release inventory on terminal', { error: String(e) });
