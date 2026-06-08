@@ -195,7 +195,7 @@ export async function fulfillmentWorkflow(
       });
       const transferItems = startCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
         so.items.map((item: FulfillmentLineItemState) => ({
-          variantId: item.sku,
+          variantId: item.variantId,
           supplierId: so.supplierId,
           quantity: item.quantity,
         })),
@@ -262,7 +262,7 @@ export async function fulfillmentWorkflow(
       }
 
       const allItems = cancelCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
-        so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.sku })),
+        so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
       );
       try {
         await releaseInventoryReservations(cancelCtx.cartId, allItems);

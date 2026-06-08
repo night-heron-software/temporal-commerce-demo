@@ -174,7 +174,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     });
   }
 
-  const simulatedCount = state.assignments.filter(a => a.supplierId === 'simulated').length;
+  const simulatedCount = state.assignments.filter(a => a.supplierId === 'default-supplier' || a.supplierId === 'simulated').length;
   log.info('[OMS] Auto-assignment complete', {
     totalAssignments: state.assignments.length,
     simulated: simulatedCount
@@ -496,7 +496,7 @@ async function triggerFulfillment(
 
   for (const [supplierId, assignments] of Object.entries(bySupplier)) {
     const supplierOrderId = `so-${uuid4().slice(0, 8)}`;
-    const isSimulated = supplierId === 'simulated';
+    const isSimulated = supplierId === 'default-supplier' || supplierId === 'simulated';
     log.info('[OMS] Creating supplier order', { supplierOrderId, supplierId, itemCount: assignments.length, isSimulated });
 
     // Build OMS SupplierOrder (stays in OMS state)

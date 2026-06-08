@@ -408,6 +408,8 @@ export const InventoryCommandRepository = {
          WHERE blank_sku = ? AND supplier_id = ?`,
         [newReserved, reservation.blank_sku, supplier.supplier_id]
       );
+    } else {
+      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} on release`);
     }
 
     // Update reservation status and remove from cart lookup
@@ -486,22 +488,26 @@ export const InventoryCommandRepository = {
 
     // Decrement reserved_stock from the assigned supplier
     const supplierId = reservation.supplier_id;
-    if (supplierId) {
-      const stockRows = await executeCql<StockRow>(
-        `SELECT reserved_stock FROM inventory_stock_w
-         WHERE blank_sku = ? AND supplier_id = ?`,
-        [reservation.blank_sku, supplierId]
-      );
+    if (!supplierId) {
+      throw new Error(`Reservation ${reservationId} has no assigned supplier ID on cancel`);
+    }
 
-      if (stockRows.length > 0) {
-        const newReserved = Math.max(0, stockRows[0].reserved_stock - reservation.quantity);
-        await executeCql(
-          `UPDATE inventory_stock_w
-           SET reserved_stock = ?, updated_at = toTimestamp(now())
-           WHERE blank_sku = ? AND supplier_id = ?`,
-          [newReserved, reservation.blank_sku, supplierId]
-        );
-      }
+    const stockRows = await executeCql<StockRow>(
+      `SELECT reserved_stock FROM inventory_stock_w
+       WHERE blank_sku = ? AND supplier_id = ?`,
+      [reservation.blank_sku, supplierId]
+    );
+
+    if (stockRows.length > 0) {
+      const newReserved = Math.max(0, stockRows[0].reserved_stock - reservation.quantity);
+      await executeCql(
+        `UPDATE inventory_stock_w
+         SET reserved_stock = ?, updated_at = toTimestamp(now())
+         WHERE blank_sku = ? AND supplier_id = ?`,
+        [newReserved, reservation.blank_sku, supplierId]
+      );
+    } else {
+      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and supplier: ${supplierId} on cancel`);
     }
 
     // Update reservation status and remove from cart lookup
@@ -572,33 +578,41 @@ export const InventoryCommandRepository = {
     }
 
     const reservation = rows[0];
+    if (reservation.status === 'FULFILLED' || reservation.status === 'RELEASED' || reservation.status === 'CANCELLED') {
+      logger.warn({ reservationId, status: reservation.status }, 'Reservation already terminal');
+      return;
+    }
     const supplierId = reservation.supplier_id;
 
-    if (supplierId) {
-      // Decrement both total_stock and reserved_stock from the assigned supplier
-      const stockRows = await executeCql<StockRow>(
-        `SELECT total_stock, reserved_stock FROM inventory_stock_w
-         WHERE blank_sku = ? AND supplier_id = ?`,
-        [reservation.blank_sku, supplierId]
-      );
+    if (!supplierId) {
+      throw new Error(`Reservation ${reservationId} has no assigned supplier ID on fulfill`);
+    }
 
-      if (stockRows.length > 0) {
-        const stock = stockRows[0];
-        const newTotal = isUnlimited(stock.total_stock)
-          ? UNLIMITED_STOCK
-          : stock.total_stock - reservation.quantity;
-        await executeCql(
-          `UPDATE inventory_stock_w
-           SET total_stock = ?, reserved_stock = ?, updated_at = toTimestamp(now())
-           WHERE blank_sku = ? AND supplier_id = ?`,
-          [
-            newTotal,
-            stock.reserved_stock - reservation.quantity,
-            reservation.blank_sku,
-            supplierId,
-          ]
-        );
-      }
+    // Decrement both total_stock and reserved_stock from the assigned supplier
+    const stockRows = await executeCql<StockRow>(
+      `SELECT total_stock, reserved_stock FROM inventory_stock_w
+       WHERE blank_sku = ? AND supplier_id = ?`,
+      [reservation.blank_sku, supplierId]
+    );
+
+    if (stockRows.length > 0) {
+      const stock = stockRows[0];
+      const newTotal = isUnlimited(stock.total_stock)
+        ? UNLIMITED_STOCK
+        : stock.total_stock - reservation.quantity;
+      await executeCql(
+        `UPDATE inventory_stock_w
+         SET total_stock = ?, reserved_stock = ?, updated_at = toTimestamp(now())
+         WHERE blank_sku = ? AND supplier_id = ?`,
+        [
+          newTotal,
+          stock.reserved_stock - reservation.quantity,
+          reservation.blank_sku,
+          supplierId,
+        ]
+      );
+    } else {
+      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and supplier: ${supplierId} on fulfill`);
     }
 
     await executeBatch([

@@ -238,7 +238,7 @@ export async function sendFeedbackThankYouEmail(email: string, _orderId: string)
 }
 
 /**
- * Resolve supplier assignments — always assigns to 'simulated' supplier
+ * Resolve supplier assignments — always assigns to 'default-supplier' supplier
  * (In full platform, this routes through plugin registry)
  */
 export async function resolveSupplierAssignments(
@@ -247,9 +247,9 @@ export async function resolveSupplierAssignments(
 ): Promise<SupplierAssignment[]> {
   log.info(`[Activity] Resolving supplier assignments for ${items.length} items`);
   return items.map(() => ({
-    supplierId: 'simulated',
+    supplierId: 'default-supplier',
     supplierType: 'simulated',
-    supplierName: 'Simulated Fulfillment',
+    supplierName: 'Default Supplier',
   }));
 }
 

@@ -1,22 +1,12 @@
-# Antigravity Ignore Rules for temporal-commerce-demo
-
-# Dependencies
 node_modules/
-
-# Next.js and build output
 .next/
+dist/
 out/
 *.tsbuildinfo
-
-# Database and infrastructure
-.data/
-logs/
 *.log
-
-# Generated assets
-**/public/images/
-
-# IDE Caches
+logs/
+.turbo/
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
