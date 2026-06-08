@@ -164,7 +164,7 @@ export interface ProductTypePlugin {
 
   /**
    * Build the inventory workflow ID for a given variant.
-   * POD uses composite IDs like `inventory-printify-GILDAN64000-navy-L`.
+   * POD uses composite IDs like `inventory-supplier-GILDAN64000-navy-L`.
    * Physical warehouse uses `inventory-warehouse-{warehouseId}-{sku}`.
    */
   buildInventoryWorkflowId(
@@ -236,7 +236,7 @@ export interface ProductTypePlugin {
 
   /**
    * If this product type supports background catalog synchronization
-   * from an external source (e.g., Printify catalog import),
+   * from an external source (e.g., supplier catalog import),
    * return the workflow type and task queue for the sync process.
    */
   readonly catalogSyncWorkflow?: {

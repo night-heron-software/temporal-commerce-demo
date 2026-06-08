@@ -147,12 +147,12 @@ npm run infra:up:obs
 
 ## Technology Stack
 
-- **Frontend**: Next.js 15 (App Router), React, Tailwind CSS
+- **Frontend**: Next.js 16 (App Router), React, Tailwind CSS
 - **Backend**: Next.js Server Actions + API Routes
 - **Orchestration**: Temporal TypeScript SDK
 - **Database**: Apache Cassandra (catalog, orders, inventory)
 - **Search**: Elasticsearch (product search with faceted filtering)
-- **Infrastructure**: Docker Compose (local), compatible with Temporal Cloud + AWS EKS
+- **Infrastructure**: Docker Compose (local), compatible with Temporal Cloud + Google Cloud Run
 
 ## License
 

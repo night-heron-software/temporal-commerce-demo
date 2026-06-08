@@ -2,8 +2,8 @@
 
 A full-stack e-commerce application built entirely on [Temporal](https://temporal.io) durable execution. Every state transition — from adding an item to a cart through order fulfillment and delivery — is a Temporal workflow. No message queues, no cron jobs, no saga orchestrators. The business logic *is* the infrastructure.
 
-**Stack:** Next.js 15 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
-**Scale:** 123 source files · ~19,000 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
+**Stack:** Next.js 16 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
+**Scale:** 127 source files · ~19,000 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
 
 ---
 
@@ -72,7 +72,7 @@ The cart is a long-running Temporal workflow that acts as a live, queryable enti
 
 ### Checkout — Declarative Step-based State Machine
 
-Checkout orchestrates the shipping → payment → review → processing → complete steps as a state machine managed by the `runStateMachine` driver.
+Checkout orchestrates the shipping → payment → review → complete steps as a state machine managed by the `runStateMachine` driver. Order processing runs inline within the `review` state.
 
 | Pattern | Implementation |
 | --- | --- |
@@ -104,7 +104,7 @@ The fulfillment workflow receives pre-decided supplier orders and executes the a
 | **State orchestration** | Transitions simulated orders through states (`processing`, `shipped`, `delivered`, etc.) using the state machine loop |
 | **Automatic mode** | `wf.sleep()` timers simulate processing (15s) → shipping (15s) → delivery (15s) |
 | **Manual mode** | Feature flag `MANUAL_FULFILLMENT=true` pauses at each stage, waiting for Temporal signals to advance |
-| **Multi-supplier** | Strategy routing by `supplierType` — simulated, Printify dynamic, or custom |
+| **Simulated strategy** | Simulated fulfillment strategy (multi-supplier routing available in the full platform) |
 | **Inventory lifecycle** | Reservations are transferred to supplier on start, fulfilled on delivery, released on rejection |
 | **Email notifications** | Shipped and delivered emails are sent via activity stubs |
 
@@ -145,7 +145,7 @@ Cassandra serves as the durable write store with partition-key isolation:
 | `products`, `variants`, `collections` | Product catalog |
 | `orders`, `orders_by_customer`, `orders_by_confirmation` | Order persistence (3 denormalized views) |
 | `order_status_history` | Audit trail (TimeUUID clustering) |
-| `inventory_stock`, `inventory_reservations_w` | Inventory state |
+| `inventory_stock_w`, `inventory_reservations_w` | Inventory state |
 | `shoppers` | Shopper accounts (email-keyed, no password) |
 | `shopper_shipping_addresses` | Saved shipping addresses (user_id partition) |
 
@@ -309,7 +309,7 @@ npm run dev:up       # Start storefront app (Next.js) + Temporal workers concurr
 
 | Layer | Technology | Purpose |
 | --- | --- | --- |
-| Frontend | Next.js 15 (App Router), React | Server-rendered storefront and admin panel |
+| Frontend | Next.js 16 (App Router), React | Server-rendered storefront and admin panel |
 | Server | Next.js Server Actions + API Routes | Bridge between browser and Temporal cluster |
 | Orchestration | Temporal TypeScript SDK | Durable workflow execution for all state transitions |
 | Write Store | Apache Cassandra | Partition-key-isolated persistence for catalog, orders, inventory |

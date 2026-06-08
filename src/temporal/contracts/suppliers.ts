@@ -2,7 +2,7 @@
  * Supplier Contracts
  *
  * Supplier-agnostic types for managing catalogs, designs, orders, inventory,
- * and webhooks across any supplier (SwiftPod, Printify, etc.).
+ * and webhooks across any supplier.
  *
  * NOTE: POD-specific adapter interfaces (PODSupplierAdapter) have been removed
  * from contracts. Only the generic SupplierAdapter interface is defined here.

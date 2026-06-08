@@ -60,7 +60,7 @@ temporal cloud cert generate \
   --output-dir ./certs
 ```
 
-1. Base64-encode the certificates for env vars:
+4. Base64-encode the certificates for env vars:
 
 ```bash
 export TEMPORAL_TLS_CERT=$(base64 < ./certs/client.pem)
@@ -84,7 +84,7 @@ cqlsh --secure-connect-bundle=./secure-connect-bundle.zip \
   -f cassandra/schema.cql
 ```
 
-1. Set env vars:
+5. Set env vars:
 
 ```bash
 export CASSANDRA_CONTACT_POINTS=xxx.astra.datastax.com:29042
@@ -172,8 +172,11 @@ ELASTICSEARCH_API_KEY=elasticsearch-api-key:latest"
 ```bash
 # Build the Next.js standalone image
 gcloud builds submit \
-  --tag us-docker.pkg.dev/$GCP_PROJECT/temporal-commerce/app:latest .
+  --tag us-docker.pkg.dev/$GCP_PROJECT/temporal-commerce/app:latest \
+  -f deploy/app.Dockerfile .
 ```
+
+> **Note:** You must create `deploy/app.Dockerfile` for the Next.js standalone build before running this command. The worker Dockerfile (`deploy/worker.Dockerfile`) is already provided.
 
 ### Deploy App Service
 

@@ -94,7 +94,7 @@ export interface FulfillmentSupplierOrderState {
   items: FulfillmentLineItemState[];
   status: FulfillmentOrderStatus;
   omsStatus?: SupplierOrderStatus; // Mapped status for OMS signaling
-  supplierExternalId?: string; // External supplier's order ID (e.g., Printify or SIM-xxx)
+  supplierExternalId?: string; // External supplier's order ID (e.g., SIM-xxx)
   shipments?: ShipmentInfo[];
   carrier?: string;
   trackingNumber?: string;

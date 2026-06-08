@@ -262,7 +262,7 @@ setHandler(fulfillmentStatusSignal, async (update) => {
 
 > Why not use a child workflow? Because the fulfillment workflow may outlive the current OMS execution if the OMS needs to `continueAsNew`. With activity-based spawning, the fulfillment workflow is truly independent — it runs on its own task queue, has its own lifecycle, and communicates only via signals.
 
-### Pattern 9: Multi-Supplier Strategy Routing
+### Pattern 9: Supplier Strategy Routing
 
 > The fulfillment workflow receives pre-decided supplier orders and routes each one to the appropriate strategy based on `supplierType`.
 
@@ -270,13 +270,12 @@ setHandler(fulfillmentStatusSignal, async (update) => {
 for (const supplierOrder of state.supplierOrders) {
   if (supplierOrder.supplierType === 'simulated') {
     await runSimulatedFulfillment(state, supplierOrder, request, syncProjections);
-  } else if (supplierOrder.supplierType === 'printify-dynamic') {
-    await runDynamicFulfillment(state, supplierOrder, request, syncProjections);
   }
+  // Additional supplier types can be added here
 }
 ```
 
-> The simulated strategy uses `wf.sleep()` timers to simulate processing, shipping, and delivery delays. The dynamic strategy submits to a real supplier API and uses a polling + signal hybrid to track status. Same workflow, different execution strategies.
+> The simulated strategy uses `wf.sleep()` timers to simulate processing, shipping, and delivery delays. The architecture supports adding real supplier integrations — same workflow, different execution strategies.
 
 ### Pattern 10: Signal-Driven Status Propagation
 

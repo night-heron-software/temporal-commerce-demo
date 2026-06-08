@@ -22,7 +22,7 @@ This starts all Docker containers, initializes the database schemas, and seeds t
 npm run dev:up
 ```
 
-This starts the Next.js dev server and Temporal workers concurrently. Wait for `▲ Next.js 15.x.x — Local: http://localhost:3000`.
+This starts the Next.js dev server and Temporal workers concurrently. Wait for `▲ Next.js 16.x.x — Local: http://localhost:3000`.
 
 ### 3. Verify
 
@@ -33,7 +33,7 @@ This starts the Next.js dev server and Temporal workers concurrently. Wait for `
 | `http://localhost:3000/admin/search` | Elasticsearch Explorer shows doc counts across all 11 indices |
 | `http://localhost:8233` | Temporal UI — Workflows page, no errors |
 
-### 5. Set Fulfillment Mode
+### 4. Set Fulfillment Mode
 
 Go to `http://localhost:3000/admin/orders` and confirm the **Fulfillment Mode** toggle is set to **Automatic**. This lets the fulfillment workflow auto-advance through `in_production → shipped → delivered` with ~60-second delays, so the audience sees the full lifecycle during the demo without manual intervention.
 

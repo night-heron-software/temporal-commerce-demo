@@ -151,7 +151,7 @@ temporal-commerce-demo/
 ├── cassandra/                  # CQL schema definitions
 │   └── schema.cql             # All keyspace, UDTs, and tables
 ├── sample-data/
-│   └── catalog.json           # Printify-imported product catalog (~8.2 MB)
+│   └── catalog.json           # Product catalog data (~8.2 MB)
 ├── scripts/
 │   └── seed.ts                # API-driven seed orchestrator
 ├── src/
@@ -275,7 +275,7 @@ The checkout workflow orchestrates the multi-step checkout process as a child of
 
 **Key Patterns:**
 
-- **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → shipping → payment → review → processing → complete`).
+- **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → shipping → payment → review → complete`). Order processing runs inline within the `review` state.
 - **Inventory Reservation Renewal** — At checkout start, existing cart reservations are renewed with a fresh TTL.
 - **Update Handlers as Events** — Custom update handlers map incoming signals/arguments (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events which trigger deterministic transitions.
 - **Back Navigation** — Users can go back: setting shipping from the payment/review step is allowed, which recalculates costs.
@@ -292,7 +292,7 @@ The OMS workflow manages the complete order lifecycle from placement through del
 
 **Key Patterns:**
 
-- **Auto-Assignment** — Resolves supplier assignments via a plugin registry (`resolveSupplierAssignments`). Currently supports `simulated` and `printify-dynamic` suppliers.
+- **Auto-Assignment** — Resolves supplier assignments via a plugin registry (`resolveSupplierAssignments`). Currently all items are assigned to the `simulated` supplier.
 - **Activity-Driven Fulfillment** — Starts fulfillment as a standalone workflow via an activity (`startFulfillmentWorkflow`), rather than as a child workflow. This decouples the OMS from fulfillment execution.
 - **Signal-Driven Status Updates** — The fulfillment workflow signals the OMS with `fulfillmentStatusSignal` as supplier orders progress through shipped → delivered.
 - **Status Aggregation** — Order-level status is derived from the aggregate of all supplier order statuses.
@@ -326,12 +326,11 @@ Manages the fulfillment lifecycle for all supplier orders in a single order usin
 **Key Patterns:**
 
 - **State Machine Orchestration** — Managed using the `runStateMachine` driver to transition orders through fulfillment stages (`processing`, `shipped`, `delivered`, etc.).
-- **Multi-Supplier Strategy Routing** — Routes to `runSimulatedFulfillment` or `runDynamicFulfillment` based on `supplierType` (both use separate state machine drivers).
+- **Simulated Strategy** — Executes the simulated fulfillment strategy for each supplier order using the state machine driver.
 - **Simulated Fulfillment** — Timer-based simulation with configurable delays via workflow memo (`processingDelayMs`, `shippingDelayMs`, `deliveryDelayMs`). Defaults to 60 seconds per phase.
 - **Manual Fulfillment Mode** — When `MANUAL_FULFILLMENT` feature flag is enabled, the simulated strategy waits for explicit signals to advance through shipped → delivered.
 - **Inventory Lifecycle** — Transfers reservations to suppliers at start. Fulfills inventory on delivery, releases on rejection/cancellation.
 - **OMS Signaling** — Signals the parent OMS workflow with `FulfillmentStatusUpdate` on each status transition.
-- **Polling + Signal Hybrid** — For dynamic suppliers (Printify), uses periodic polling combined with inbound signals to track order status.
 
 ### Inventory Service Workflow
 
@@ -692,7 +691,7 @@ npx tsx scripts/seed.ts https://app.example.com  # Target a remote deployment
 
 ### Catalog Source
 
-The `sample-data/catalog.json` file is exported from the Night Heron Platform via its Printify Catalog Sync and export tooling. It contains 266 products, 10,600 variants, and 57 collections with product images hosted on Google Cloud Storage.
+The `sample-data/catalog.json` file is exported from the Night Heron Platform via its catalog export tooling. It contains 266 products, 10,600 variants, and 57 collections with product images hosted on Google Cloud Storage.
 
 ---
 

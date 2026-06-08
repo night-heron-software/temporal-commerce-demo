@@ -298936,7 +298936,7 @@
   "option_types": [],
   "option_values": [],
   "_metadata": {
-    "source": "api/admin/printify/export-catalog",
+    "source": "api/admin/catalog/export",
     "generated": "2026-06-08T00:23:48.176Z",
     "stats": {
       "collections": 52,
