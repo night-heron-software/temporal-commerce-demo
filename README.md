@@ -158,6 +158,27 @@ npm run infra:up:obs
 - **Search**: Elasticsearch (product search with faceted filtering)
 - **Infrastructure**: Docker Compose (local), compatible with Temporal Cloud + Google Cloud Run
 
+## AI Agent Tooling & Configuration
+
+This repository includes metadata, configuration, and workflow automation guides optimized for AI coding assistants (such as Antigravity, Claude, and Gemini). These files help AI agents understand the codebase architecture, follow developer preferences, and automate repository tasks:
+
+### Configuration Files
+- **[AGENTS.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/AGENTS.md) / [CLAUDE.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/CLAUDE.md)**: Workspace-level agent rules and framework-specific guidelines (e.g. Next.js App Router rules).
+- **[.antigravityignore](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.antigravityignore)**: Instructs AI agents to ignore build output (`.next/`, `dist/`), dependencies (`node_modules/`), and temporary OS/IDE files to maintain a clean context window.
+- **[.agent/rules.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/rules.md)**: Project-specific design standards, architecture constraints (e.g. Temporal determinism rules), and gotchas.
+
+### Skills & Workflows
+- **[.agent/skills/](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/skills/)**: Custom domain-specific knowledge folders (e.g. [nextjs.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/skills/nextjs.md), [typescript-temporal.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/skills/typescript-temporal.md)) containing guidelines to assist agents in writing correct, idiomatic code.
+- **[.agent/workflows/](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/)**: Executable/runnable step-by-step guides that AI agents use to automate repository maintenance, testing, and debugging workflows:
+  - **[demo-start-local-dev.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-start-local-dev.md)**: Start database containers, storefront, and workers.
+  - **[demo-initialize.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-initialize.md)**: Wipe, re-initialize database container schemas, and seed data.
+  - **[demo-status.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-status.md)**: Check platform and infrastructure health.
+  - **[demo-verify.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-verify.md)** / **[demo-e2e-test.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-e2e-test.md)**: Automated end-to-end checks, Cassandra schema consistency validation, and checkout flows.
+  - **[demo-temporal-worker-changes.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-temporal-worker-changes.md)**: Safe deployment guidelines for worker and workflow changes.
+  - **[demo-project-hygiene.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-project-hygiene.md)**: Check for git hygiene, secrets protection, and metadata cleanup.
+  - **[demo-shutdown.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-shutdown.md)**: Gracefully stop all background services.
+
 ## License
 
 MIT
+
