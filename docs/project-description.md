@@ -5,6 +5,14 @@ A full-stack e-commerce application built entirely on [Temporal](https://tempora
 **Stack:** Next.js 16 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
 **Scale:** 127 source files · ~19,000 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
 
+### Disclaimers
+
+This project is derived from a much more comprehensive e-commerce platform currently under active development. It is a standalone extraction designed to showcase Temporal durable execution patterns without the full platform's multi-tenant, multi-supplier, and plugin architecture.
+
+AI tooling was used extensively for code generation and documentation throughout this project. Not all output has been thoroughly reviewed yet — some comments, type definitions, and documentation may contain inaccuracies or artifacts from the generation process.
+
+The product catalog — including images, descriptions, and metadata — was generated using AI and [Printify](https://printify.com/). All 266 products were first created as real products in a Printify store; the data and mockup images were then exported and adapted to fit this demo.
+
 ---
 
 ## Why This Exists

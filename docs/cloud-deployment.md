@@ -2,6 +2,8 @@
 
 Deploy the Temporal Commerce Demo to Temporal Cloud + Google Cloud for live presentation.
 
+> *This document was generated with the assistance of AI and may not have been thoroughly reviewed.*
+
 ## Architecture
 
 ```mermaid

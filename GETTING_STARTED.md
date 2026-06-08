@@ -2,6 +2,8 @@
 
 Get the Temporal Commerce Demo running on your Mac from a fresh clone.
 
+> *This document was generated with the assistance of AI and may not have been thoroughly reviewed.*
+
 ---
 
 ## Prerequisites

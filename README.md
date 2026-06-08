@@ -4,6 +4,10 @@ A full-stack e-commerce application demonstrating [Temporal](https://temporal.io
 
 Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasticsearch**.
 
+> **Note:** This demo is derived from a much more comprehensive e-commerce platform currently under active development. It is a standalone extraction designed to showcase Temporal patterns without the full platform's multi-tenant, multi-supplier, and plugin architecture.
+
+> **AI Disclosure:** AI tooling was used extensively for code generation and documentation. Not all output has been thoroughly reviewed yet. The product catalog — including images, descriptions, and metadata — was created using [Printify](https://printify.com/). All products were first created as real products in a Printify store; the data and mockup images were then exported and adapted for this demo.
+
 ## Architecture
 
 ```mermaid

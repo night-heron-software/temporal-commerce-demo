@@ -2,6 +2,8 @@
 
 A comprehensive guide for developers working on the Temporal Commerce Demo — an end-to-end e-commerce application that demonstrates Temporal durable execution patterns across six domain workflows.
 
+> *This document was generated with the assistance of AI and may not have been thoroughly reviewed.*
+
 ---
 
 ## Table of Contents

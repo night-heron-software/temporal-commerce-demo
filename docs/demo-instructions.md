@@ -2,6 +2,8 @@
 
 Step-by-step instructions for running a 4–5 minute live demonstration of the Temporal Commerce Demo. Covers local setup, screen layout, and a streamlined walkthrough.
 
+> *This document was generated with the assistance of AI and may not have been thoroughly reviewed.*
+
 ---
 
 ## Pre-Demo Setup
