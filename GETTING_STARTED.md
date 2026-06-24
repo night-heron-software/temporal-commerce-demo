@@ -248,6 +248,35 @@ npm install
 
 - First startup can take 60–90 seconds while Cassandra initializes. The `npm run infra:up` script waits for the health check automatically — don't interrupt it.
 
+### Elasticsearch containers crash on Apple Silicon (SIGILL / `Exited (134)`)
+
+**Symptoms:** On a fresh `npm run dev:init`, the script appears to hang forever (often at "Waiting for storefront..." or with no visible progress). `docker ps -a` shows the Elasticsearch containers as `Exited (134)`:
+
+```
+demo-elasticsearch            Exited (134)
+demo-temporal-elasticsearch   Exited (134)
+```
+
+`docker logs demo-elasticsearch` shows a fatal JVM error:
+
+```
+# A fatal error has been detected by the Java Runtime Environment:
+#  SIGILL (0x4) ... linux-aarch64
+# Problematic frame: j java.lang.System.registerNatives()
+```
+
+**Cause:** This is a CPU/JDK incompatibility, **not** a config error in this project. Newer Apple Silicon (**M4 / M5**) expose newer Arm vector features (SVE2 / SME) through Docker Desktop's Apple Virtualization framework. JDKs older than the fixed releases (24, 23.0.2, 21.0.6, 17.0.14) mishandle those instructions and abort with `SIGILL` the moment the JVM starts. Elasticsearch images bundle their own JDK, so older Elasticsearch tags (e.g. `8.15.x`, `7.17.x`) crash on these chips while everything else in the stack — Cassandra (JDK 11), PostgreSQL, the Temporal server — runs fine.
+
+**This repo already works around it** by pinning Elasticsearch to **`8.19.4`** (a build whose bundled JDK disables SVE on macOS) for both the application search store and Temporal's visibility store. You should not hit this unless you change those image tags.
+
+**If you do hit it** (e.g. after editing `docker-compose.yml`):
+
+- Use an Elasticsearch image that bundles a fixed JDK — `8.19.x` or newer is known good.
+- Temporal's visibility store has no fixed `7.17` image available, so it is run on Elasticsearch 8 as well, matched by `ES_VERSION=v8` on the `temporal` service in `docker-compose.yml`.
+- General rule for **any** Dockerized Java service that `SIGILL`s on startup on an M-series Mac: bump to an image whose JDK is ≥ 24 / 23.0.2 / 21.0.6 / 17.0.14 rather than chasing Docker Desktop VM settings.
+
+**Things that do _not_ fix it** (verified): toggling Docker Desktop's "Use Rosetta" option, passing `-XX:UseSVE=0` via `ES_JAVA_OPTS`, or switching the Virtual Machine Manager (recent Docker Desktop on current macOS forces the Apple Virtualization framework — QEMU is not selectable).
+
 ### Port conflicts
 
 | Port | Service | Check with |

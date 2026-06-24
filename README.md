@@ -47,6 +47,11 @@ graph TB
 - **Node.js** ≥ 20
 - **Docker** (for Cassandra, Elasticsearch, Temporal)
 
+> **Apple Silicon (M4 / M5) note:** the Elasticsearch images are pinned to a tag whose bundled JDK
+> starts cleanly on newer Apple Silicon. If you swap in older Elasticsearch tags and the containers
+> exit immediately with `Exited (134)` / `SIGILL`, see
+> [Getting Started → Troubleshooting](GETTING_STARTED.md#elasticsearch-containers-crash-on-apple-silicon-sigill--exited-134).
+
 ### 1. Install dependencies
 
 ```bash
