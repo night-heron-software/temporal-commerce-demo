@@ -4,7 +4,7 @@
  * unit-testable as plain functions). Line-item ids are generated in the shell
  * (`states.ts` prepare) and injected via the decider command.
  */
-import type { CartDetails, CartItem, CheckoutWorkflowInput } from './types';
+import type { CartDetails, CartItem, CheckoutWorkflowInput } from '../contracts/cart';
 
 /** Recalculate subtotal / discounts / tax / total from the cart's items and coupons. */
 export function recalculateTotals(cart: CartDetails): void {
@@ -40,7 +40,10 @@ export function copyCart(cart: CartDetails): CartDetails {
   };
 }
 
-/** Build the checkout child workflow's input from the current cart. */
+/**
+ * Build the checkout child workflow's input from the current cart. No item/price
+ * snapshot — the checkout pulls cart contents live via queryCart at `validating`.
+ */
 export function buildCheckoutInput(
   cart: CartDetails,
   parentCartWorkflowId: string,
@@ -48,11 +51,7 @@ export function buildCheckoutInput(
   return {
     cartId: cart.cartId,
     parentCartWorkflowId,
-    items: cart.items,
-    subtotalPrice: cart.subtotalPrice,
-    totalDiscounts: cart.totalDiscounts,
     currency: cart.currency,
-    appliedCoupons: cart.appliedCoupons,
     isGuest: !cart.userId,
     cartVersion: cart.cartVersion,
   };

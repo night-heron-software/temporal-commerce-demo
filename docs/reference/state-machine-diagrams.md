@@ -19,6 +19,7 @@ flowchart LR
   checkout[checkout]
   fulfillment[fulfillment]
   oms[oms]
+  cart -.->|signal: recompute| checkout
   cart -->|child: checkoutWorkflow| checkout
   checkout -.->|signal: checkoutCompleted| cart
   checkout -->|start: orderWorkflow| oms
@@ -41,9 +42,10 @@ stateDiagram-v2
   active --> active: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / signal
   active --> [*]: updateQuantity / removeItem / timeout → abandoned
   active --> checkout: beginCheckout
-  checkout --> checkout: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / signal
-  checkout --> active: timeout / signal
-  checkout --> [*]: signal → completed
+  checkout --> checkout: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / submitStarted / submitAborted
+  checkout --> [*]: updateQuantity / removeItem → abandoned
+  checkout --> active: timeout / submitStarted / submitAborted
+  checkout --> [*]: submitStarted / submitAborted → completed
   note right of active: timeout 30 days
   note right of checkout: timeout 1 hour
 ```
@@ -52,12 +54,12 @@ stateDiagram-v2
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: addItem` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `prepared.reserveError` |
-| `update: updateQuantity` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `context.cart.items.length === 0` |
-| `update: removeItem` | `active` | prepare: `releaseCartItem` · if: `context.cart.items.length === 0` |
-| `update: applyCoupon` | `active` |  |
+| `update: addItem` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError` |
+| `update: updateQuantity` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: removeItem` | `active` | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: applyCoupon` | `active` | if: `ctx.submitting` |
 | `update: linkUser` | `active` |  |
 | `update: beginCheckout` | `active` | prepare: `startChild` · if: `prepared.empty` |
 | `update: beginCheckout` | `checkout` | prepare: `startChild` · if: `prepared.empty` |
@@ -70,16 +72,18 @@ stateDiagram-v2
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: addItem` | `checkout` |  |
-| `update: updateQuantity` | `checkout` |  |
-| `update: removeItem` | `checkout` |  |
-| `update: applyCoupon` | `checkout` |  |
+| `update: addItem` | `checkout` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError` |
+| `update: updateQuantity` | `checkout` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: removeItem` | `checkout` | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: applyCoupon` | `checkout` | if: `ctx.submitting` |
 | `update: linkUser` | `checkout` |  |
 | `update: beginCheckout` | `checkout` |  |
 | `timeout` | `active` |  |
-| `signal` | `checkout` | if: `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` |
-| `signal` | ⇒ completed | if: `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` |
-| `signal` | `active` | if: `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` |
+| `signal` | `checkout` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `signal` | ⇒ completed | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `signal` | `active` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
 
 **Timeout:** 1 hour
 
@@ -98,18 +102,18 @@ stateDiagram-v2
   [*] --> validating
   validating --> shipping
   validating --> [*]: failed
-  shipping --> shipping: setShipping / acknowledgeCartChange / retargetParent
-  shipping --> payment: setShipping
-  shipping --> [*]: cancelCheckout / timeout → cancelled
-  payment --> shipping: setShipping
-  payment --> payment: setShipping / setPayment / acknowledgeCartChange / retargetParent
+  shipping --> shipping: setShipping / acknowledgeCartChange / retargetParent / signal
+  shipping --> payment: setShipping / signal
+  shipping --> [*]: cancelCheckout → cancelled
+  payment --> shipping: setShipping / signal
+  payment --> payment: setShipping / setPayment / acknowledgeCartChange / retargetParent / signal
   payment --> review: setPayment
-  payment --> [*]: cancelCheckout / timeout → cancelled
-  review --> shipping: setShipping
-  review --> payment: setShipping / submitOrder
+  payment --> [*]: cancelCheckout → cancelled
+  review --> shipping: setShipping / signal
+  review --> payment: setShipping / submitOrder / signal
   review --> review: setPayment / submitOrder / acknowledgeCartChange / retargetParent
   review --> [*]: submitOrder → complete
-  review --> [*]: cancelCheckout / timeout → cancelled
+  review --> [*]: cancelCheckout → cancelled
   note right of shipping: timeout 1 hour
   note right of payment: timeout 1 hour
   note right of review: timeout 1 hour
@@ -131,7 +135,8 @@ stateDiagram-v2
 | `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
 | `update: acknowledgeCartChange` | `shipping` |  |
 | `update: retargetParent` | `shipping` |  |
-| `timeout` | ⇒ cancelled | finalize: `releaseReservations` |
+| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
+| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
 
 **Timeout:** 1 hour
 
@@ -146,7 +151,8 @@ stateDiagram-v2
 | `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
 | `update: acknowledgeCartChange` | `payment` |  |
 | `update: retargetParent` | `payment` |  |
-| `timeout` | ⇒ cancelled | finalize: `releaseReservations` |
+| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
+| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
 
 **Timeout:** 1 hour
 
@@ -157,13 +163,14 @@ stateDiagram-v2
 | `update: setShipping` | `shipping` | if: `prepared.paymentIntentError` |
 | `update: setShipping` | `payment` | if: `prepared.paymentIntentError` |
 | `update: setPayment` | `review` |  |
-| `update: submitOrder` | `review` | if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
-| `update: submitOrder` | `payment` | if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
-| `update: submitOrder` | ⇒ complete | if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
+| `update: submitOrder` | `review` | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
+| `update: submitOrder` | `payment` | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
+| `update: submitOrder` | ⇒ complete | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
 | `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
 | `update: acknowledgeCartChange` | `review` |  |
 | `update: retargetParent` | `review` |  |
-| `timeout` | ⇒ cancelled | finalize: `releaseReservations` |
+| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
+| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
 
 **Timeout:** 1 hour
 

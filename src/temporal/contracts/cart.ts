@@ -106,14 +106,15 @@ export type CartUpdateResponse = CartDetails | void;
 // Checkout Workflow Input/Output
 // ==================
 
+/**
+ * Checkout child input. Cart contents are NOT snapshotted here — the checkout
+ * pulls them live via the queryCart activity at `validating` (and again on each
+ * recompute nudge), so a mid-checkout cart edit can never leave a stale snapshot.
+ */
 export interface CheckoutWorkflowInput {
   cartId: string;
   parentCartWorkflowId: string;
-  items: CartItem[];
-  subtotalPrice: number;
-  totalDiscounts: number;
   currency: string;
-  appliedCoupons: string[];
   isGuest: boolean;
   cartVersion: number;
   checkoutVersion: number;
@@ -144,5 +145,15 @@ export const getCheckoutStateQuery = defineQuery<CheckoutState | null>('getCheck
 export const getCheckoutWorkflowIdQuery = defineQuery<string | null>('getCheckoutWorkflowId');
 export const getUserIdQuery = defineQuery<string | undefined>('getUserId');
 
+/**
+ * Combined inbound signal from the checkout child to the cart parent (wire name
+ * 'checkoutCompleted'): the completion result, plus the submit-freeze phases that
+ * lock cart edits while the checkout child is placing the order.
+ */
+export type CartInboundSignal =
+  | { kind: 'completed'; result: CheckoutWorkflowResult }
+  | { kind: 'submitStarted' }
+  | { kind: 'submitAborted' };
+
 // Signals (from checkout child → cart parent)
-export const checkoutCompletedSignal = defineSignal<[CheckoutWorkflowResult]>('checkoutCompleted');
+export const checkoutCompletedSignal = defineSignal<[CartInboundSignal]>('checkoutCompleted');

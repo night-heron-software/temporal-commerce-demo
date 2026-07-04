@@ -209,6 +209,30 @@ export async function startOrderManagementWorkflow(
  * Releases any existing cart reservations and re-reserves all items
  * with fresh TTLs via the real InventoryCommandRepository.
  */
+/**
+ * Live view of the parent cart's contents via the Temporal client (a workflow can't
+ * query a peer directly, so this activity bridges). Used at `validating` and on each
+ * recompute nudge so checkout never prices against a stale item snapshot.
+ */
+export async function queryCart(parentCartWorkflowId: string): Promise<{
+  items: CartItem[];
+  subtotalPrice: number;
+  totalDiscounts: number;
+  appliedCoupons: string[];
+  cartVersion: number;
+}> {
+  const { getTemporalClient } = await import('../../lib/temporal-client');
+  const client = await getTemporalClient();
+  const cart = await client.workflow.getHandle(parentCartWorkflowId).query(Cart.getCartQuery);
+  return {
+    items: cart.items,
+    subtotalPrice: cart.subtotalPrice,
+    totalDiscounts: cart.totalDiscounts,
+    appliedCoupons: cart.appliedCoupons,
+    cartVersion: cart.cartVersion,
+  };
+}
+
 export async function renewReservationsForCheckout(
   cartId: string,
   items: CartItem[]

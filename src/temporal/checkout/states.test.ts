@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // exercised as pure functions. `prepare` activities return controlled values.
 vi.mock('@temporalio/workflow', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  defineSignal: vi.fn((name: string) => ({ type: 'signal', name })),
   getExternalWorkflowHandle: vi.fn(() => ({ signal: vi.fn(), cancel: vi.fn() })),
   proxyActivities: vi.fn(() => ({ persistWorkflowTransitions: vi.fn(async () => undefined) })),
   workflowInfo: vi.fn(() => ({ workflowId: 'demo.checkout.c-1', runId: 'run-1', searchAttributes: {}, workflowType: 'checkoutWorkflow' })),
@@ -12,6 +13,13 @@ vi.mock('@temporalio/workflow', () => ({
 }));
 
 vi.mock('./activities', () => ({
+  queryCart: vi.fn(async () => ({
+    items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
+    subtotalPrice: 10,
+    totalDiscounts: 0,
+    appliedCoupons: [],
+    cartVersion: 1,
+  })),
   calculateShipping: vi.fn(async () => 5),
   calculateTax: vi.fn(async () => 0.8),
   processPayment: vi.fn(async () => true),
@@ -29,10 +37,12 @@ vi.mock('./activities', () => ({
 
 import {
   processPayment,
+  queryCart,
   releaseReservations,
   renewReservationsForCheckout,
   startOrderManagementWorkflow,
 } from './activities';
+import { getExternalWorkflowHandle } from '@temporalio/workflow';
 import { CHECKOUT_STATES } from './states';
 import { terminal } from '../framework';
 import type { CheckoutContext, CheckoutInput } from './types';
@@ -87,6 +97,8 @@ const readyCtx = () =>
 
 const ev = (event: CheckoutInput) => ({ kind: 'event' as const, event, timestamp: 't' });
 const timeout = { kind: 'timeout' as const, timestamp: 't' };
+// The recompute nudge from the parent cart (items changed mid-checkout).
+const recompute = { kind: 'signal' as const, result: { cartVersion: 2 }, timestamp: 't' };
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -188,5 +200,72 @@ describe('review — submitOrder', () => {
     expect(out.next).toBe(terminal('cancelled'));
     expect(releaseReservations).toHaveBeenCalled();
     expect(out.context.reservations).toEqual([]);
+  });
+
+  it('submitOrder freezes the cart, re-pulls contents, and prices the fresh totals', async () => {
+    const signal = vi.fn();
+    vi.mocked(getExternalWorkflowHandle).mockReturnValue({ signal, cancel: vi.fn() } as never);
+    vi.mocked(queryCart).mockResolvedValueOnce({
+      items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 10 }],
+      subtotalPrice: 20,
+      totalDiscounts: 0,
+      appliedCoupons: [],
+      cartVersion: 3,
+    } as never);
+
+    const out = await CHECKOUT_STATES.review.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    expect(out.next).toBe(terminal('complete'));
+    // Freeze phase announced to the parent; no abort on success.
+    expect(signal).toHaveBeenCalledTimes(1);
+    expect(signal).toHaveBeenCalledWith(expect.anything(), { kind: 'submitStarted' });
+    // Pipeline priced against the re-pulled cart (20 + 5 shipping + 0.8 tax).
+    expect(vi.mocked(processPayment).mock.calls[0][1]).toBeCloseTo(25.8);
+  });
+
+  it('submitOrder failure sends submitAborted so the cart thaws', async () => {
+    const signal = vi.fn();
+    vi.mocked(getExternalWorkflowHandle).mockReturnValue({ signal, cancel: vi.fn() } as never);
+    vi.mocked(processPayment).mockResolvedValueOnce(false as never);
+
+    const out = await CHECKOUT_STATES.review.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    expect(out.next).toBe('payment');
+    expect(signal).toHaveBeenCalledWith(expect.anything(), { kind: 'submitStarted' });
+    expect(signal).toHaveBeenLastCalledWith(expect.anything(), { kind: 'submitAborted' });
+  });
+});
+
+describe('recompute nudge (inbound signal from the cart)', () => {
+  it('in shipping (no address yet) folds contents and stays in shipping', async () => {
+    const shippingCtx = makeCtx({ state: { step: 'shipping', isGuest: true, shippingCost: 0, tax: 0 } });
+    vi.mocked(queryCart).mockResolvedValueOnce({
+      items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 3, price: 10 }],
+      subtotalPrice: 30,
+      totalDiscounts: 0,
+      appliedCoupons: [],
+      cartVersion: 2,
+    } as never);
+
+    const out = await CHECKOUT_STATES.shipping.fn(shippingCtx, recompute);
+    expect(out.next).toBe('shipping');
+    expect(out.context.subtotalPrice).toBe(30);
+    expect(out.context.cartVersion).toBe(2);
+    expect(out.context.totalPrice).toBe(30);
+  });
+
+  it('in review (address + payment set) re-prices and drops back to payment', async () => {
+    vi.mocked(queryCart).mockResolvedValueOnce({
+      items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 10 }],
+      subtotalPrice: 20,
+      totalDiscounts: 0,
+      appliedCoupons: [],
+      cartVersion: 2,
+    } as never);
+
+    const out = await CHECKOUT_STATES.review.fn(readyCtx(), recompute);
+    expect(out.next).toBe('payment');
+    expect(out.context.subtotalPrice).toBe(20);
+    // Re-priced against the fresh subtotal; payment method un-checked.
+    expect(out.context.totalPrice).toBeCloseTo(25.8);
+    expect(out.context.state.paymentMethod).toBeUndefined();
   });
 });

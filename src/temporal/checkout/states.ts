@@ -7,7 +7,8 @@
  * from the pre-refactor demo: validating → shipping → payment → review, with terminal
  * complete / failed / cancelled.
  */
-import { log } from '@temporalio/workflow';
+import { defineSignal, getExternalWorkflowHandle, log } from '@temporalio/workflow';
+import type { Cart } from '../contracts';
 import {
   calculateShipping,
   calculateTax,
@@ -19,6 +20,7 @@ import {
   releaseReservations,
   confirmReservations,
   renewReservationsForCheckout,
+  queryCart,
 } from './activities';
 import type {
   CheckoutState,
@@ -27,6 +29,7 @@ import type {
   CheckoutInput,
   CheckoutContext,
   CheckoutStateName,
+  RecomputeSignal,
 } from './types';
 import { decide as checkoutDecide, evolve } from './checkout-decider';
 import type {
@@ -34,15 +37,28 @@ import type {
   ValidatingPrepared,
   ShippingPrepared,
   SubmitOrderPrepared,
+  RecomputePrepared,
 } from './checkout-decider';
 import { defineDomain, terminal, SELF } from '../framework';
 import type { StateRegistry, TransitionMap } from '../framework';
+
+/**
+ * Combined signal sent to the parent cart (wire name 'checkoutCompleted'): the
+ * completion result + the submit-freeze phases.
+ */
+export const cartInboundSignal = defineSignal<[Cart.CartInboundSignal]>('checkoutCompleted');
 
 // ==================
 // Domain factory — binds the shared type params once
 // ==================
 
-const checkout = defineDomain<CheckoutStateName, CheckoutInput, CheckoutContext, CheckoutState>();
+const checkout = defineDomain<
+  CheckoutStateName,
+  CheckoutInput,
+  CheckoutContext,
+  CheckoutState,
+  RecomputeSignal
+>();
 
 type CheckoutTransitions = TransitionMap<
   CheckoutStateName,
@@ -241,12 +257,45 @@ async function prepareSubmitOrder(ctx: Readonly<CheckoutContext>): Promise<Submi
 }
 
 // ==================
+// Recompute (inbound signal from the parent cart) — shared by all waiting states.
+// Re-pull the cart live, re-price shipping/tax when an address is set, and un-check the
+// payment method so the shopper re-confirms against the new total. All I/O in prepare.
+// ==================
+
+const recomputeEntry = {
+  async prepare(ctx: Readonly<CheckoutContext>, _signal: RecomputeSignal): Promise<RecomputePrepared> {
+    const cart = await queryCart(ctx.parentCartWorkflowId);
+    if (!ctx.state.shippingAddress) {
+      return { cart };
+    }
+    const addr = ctx.state.shippingAddress;
+    const shippingCost = await calculateShipping(`${addr.city}, ${addr.state} ${addr.postalCode}`);
+    const tax = await calculateTax(addr.state, cart.subtotalPrice - cart.totalDiscounts);
+    return { cart, shippingCost, tax };
+  },
+  decide(
+    ctx: Readonly<CheckoutContext>,
+    _signal: RecomputeSignal,
+    _meta: unknown,
+    prepared: RecomputePrepared,
+  ) {
+    const context = apply(ctx, { type: 'recompute', prepared });
+    // Payment is un-checked by the fold; land wherever the prerequisites now point.
+    const next = context.state.shippingAddress ? ('payment' as const) : ('shipping' as const);
+    return { context, next, response: context.state };
+  },
+};
+
+// ==================
 // State: validating (escape hatch — transitional, prepare-only)
 // ==================
 
 const validating = checkout.state('validating', {
   async prepare(ctx): Promise<ValidatingPrepared> {
-    return renewReservationsForCheckout(ctx.cartId, ctx.items);
+    // Pull authoritative cart contents live (no snapshot), then reserve against them.
+    const cart = await queryCart(ctx.parentCartWorkflowId);
+    const res = await renewReservationsForCheckout(ctx.cartId, cart.items);
+    return { ...res, cart };
   },
   decide(ctx, _input, prepared: ValidatingPrepared) {
     const context = apply(ctx, { type: 'validated', prepared });
@@ -272,7 +321,7 @@ const shipping = checkout.transitions(
     setPayment: rejectEntry<'setPayment'>('shipping'),
     submitOrder: rejectEntry<'submitOrder'>('shipping'),
   },
-  timeoutCancels,
+  { ...timeoutCancels, onSignal: recomputeEntry },
 );
 
 // ==================
@@ -303,7 +352,7 @@ const payment = checkout.transitions(
     retargetParent: retargetParentEntry,
     submitOrder: rejectEntry<'submitOrder'>('payment'),
   },
-  timeoutCancels,
+  { ...timeoutCancels, onSignal: recomputeEntry },
 );
 
 // ==================
@@ -320,12 +369,50 @@ const review = checkout.transitions(
         return { context, next: 'review' as const, response: context.state };
       },
     },
+    /**
+     * submitOrder — non-mutating saga. The payment/order pipeline + cart freeze/abort
+     * orchestration run in prepare; decide is pure: terminal('complete') on success,
+     * else back to payment with the error.
+     */
     submitOrder: {
       async prepare(ctx): Promise<SubmitOrderPrepared> {
         if (!ctx.state.shippingAddress || !ctx.state.paymentMethod) {
           return { success: false, error: 'Shipping and payment required' };
         }
-        return prepareSubmitOrder(ctx);
+        // Freeze the cart for the duration of the saga: edits are rejected while the
+        // order is being placed, so pricing can't drift mid-pipeline. Best-effort — a
+        // missing parent (already closed) must not block the submit itself.
+        const freeze = async (kind: 'submitStarted' | 'submitAborted') => {
+          try {
+            await getExternalWorkflowHandle(ctx.parentCartWorkflowId).signal(cartInboundSignal, {
+              kind,
+            });
+          } catch (err) {
+            log.warn('Failed to signal cart submit-freeze phase', {
+              parentCartWorkflowId: ctx.parentCartWorkflowId,
+              kind,
+              error: String(err),
+            });
+          }
+        };
+        await freeze('submitStarted');
+
+        // Re-pull the live cart so the pipeline prices against current contents.
+        const cart = await queryCart(ctx.parentCartWorkflowId);
+        const totalPrice =
+          cart.subtotalPrice - cart.totalDiscounts + ctx.shippingCost + ctx.totalTax;
+        const result = await prepareSubmitOrder({
+          ...ctx,
+          items: cart.items,
+          subtotalPrice: cart.subtotalPrice,
+          totalDiscounts: cart.totalDiscounts,
+          cartVersion: cart.cartVersion,
+          totalPrice,
+        });
+        if (!result.success) {
+          await freeze('submitAborted');
+        }
+        return result;
       },
       decide(ctx, _event, _meta, prepared: SubmitOrderPrepared) {
         if (!prepared.success && prepared.error === 'Shipping and payment required') {
@@ -338,7 +425,7 @@ const review = checkout.transitions(
         }
         const context = apply(ctx, { type: 'submitOrder', prepared });
         if (!prepared.success) {
-          // Pipeline failed — back to payment with the error (pre-refactor behavior).
+          // Pipeline failed — back to payment with the error.
           return { context, next: 'payment' as const, response: context.state, error: prepared.error };
         }
         return { context, next: terminal('complete'), response: context.state };
@@ -348,7 +435,7 @@ const review = checkout.transitions(
     acknowledgeCartChange: acknowledgeCartChangeEntry,
     retargetParent: retargetParentEntry,
   },
-  timeoutCancels,
+  { ...timeoutCancels, onSignal: recomputeEntry },
 );
 
 // ==================
@@ -359,7 +446,8 @@ export const CHECKOUT_STATES: StateRegistry<
   CheckoutStateName,
   CheckoutInput,
   CheckoutContext,
-  CheckoutState
+  CheckoutState,
+  RecomputeSignal
 > = {
   validating: { ...validating, transitional: true },
   shipping: { ...shipping, timeout: '1 hour' },

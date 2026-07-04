@@ -1,4 +1,5 @@
 import {
+  defineSignal,
   getExternalWorkflowHandle,
   log,
   setHandler,
@@ -12,6 +13,7 @@ import type {
   CheckoutInput,
   CheckoutStateName,
   CheckoutStep,
+  RecomputeSignal,
   SetShippingSignal,
   SetPaymentSignal,
   RetargetParentSignal,
@@ -34,10 +36,13 @@ import {
   deriveDisplayStatus,
   isTerminal,
 } from '../framework';
-import { CHECKOUT_STATES } from './states';
-import { Cart } from '../contracts';
+import { CHECKOUT_STATES, cartInboundSignal } from './states';
 
-const checkoutCompletedSignal = Cart.checkoutCompletedSignal;
+/**
+ * Inbound nudge from the parent cart: items changed mid-checkout, re-pull and re-price.
+ * Local definition (wire name 'recompute') — the cart sends it by name, no import cycle.
+ */
+const recomputeSignal = defineSignal<[RecomputeSignal]>('recompute');
 
 // Re-export definitions for worker registration compatibility
 export {
@@ -54,14 +59,16 @@ export async function checkoutWorkflow(
   input: CheckoutWorkflowInput,
 ): Promise<CheckoutWorkflowResult> {
   // ── Initialize context ──
+  // No cart-content snapshot in the input: items/pricing are seeded empty and folded in
+  // at `validating`, where the live cart is pulled via the queryCart activity.
   let ctx: CheckoutContext = {
     cartId: input.cartId,
     parentCartWorkflowId: input.parentCartWorkflowId,
-    items: input.items,
-    subtotalPrice: input.subtotalPrice,
-    totalDiscounts: input.totalDiscounts,
+    items: [],
+    subtotalPrice: 0,
+    totalDiscounts: 0,
     currency: input.currency,
-    appliedCoupons: input.appliedCoupons,
+    appliedCoupons: [],
     isGuest: input.isGuest,
     cartVersion: input.cartVersion,
     checkoutVersion: input.checkoutVersion || 0,
@@ -76,7 +83,7 @@ export async function checkoutWorkflow(
     reservations: [],
     shippingCost: 0,
     totalTax: 0,
-    totalPrice: input.subtotalPrice - input.totalDiscounts,
+    totalPrice: 0,
   };
 
   // ── Track current step (single source of truth: the driver's state) ──
@@ -86,7 +93,13 @@ export async function checkoutWorkflow(
   setHandler(getCheckoutStateQuery, () => ({ ...ctx.state, step: currentStep }));
 
   // ── State machine run ──
-  const config: StateMachineConfig<CheckoutStateName, CheckoutInput, CheckoutContext, CheckoutState | void> = {
+  const config: StateMachineConfig<
+    CheckoutStateName,
+    CheckoutInput,
+    CheckoutContext,
+    CheckoutState | void,
+    RecomputeSignal
+  > = {
     states: CHECKOUT_STATES,
     initialState: 'validating',
     onContextUpdate: (newCtx: CheckoutContext, state: CheckoutStateName | `__terminal:${string}`) => {
@@ -157,7 +170,13 @@ export async function checkoutWorkflow(
     },
   ];
 
-  ctx = await runStateMachine<CheckoutStateName, CheckoutInput, CheckoutContext, CheckoutState | void>(config, ctx, updateHandlers);
+  ctx = await runStateMachine<
+    CheckoutStateName,
+    CheckoutInput,
+    CheckoutContext,
+    CheckoutState | void,
+    RecomputeSignal
+  >(config, ctx, updateHandlers, recomputeSignal);
 
   // ── Unified exit path ──
   const result: CheckoutWorkflowResult = {
@@ -183,7 +202,7 @@ async function signalParent(
 ): Promise<void> {
   try {
     const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
-    await parentHandle.signal(checkoutCompletedSignal, result);
+    await parentHandle.signal(cartInboundSignal, { kind: 'completed', result });
   } catch (err) {
     log.warn('Failed to signal parent cart with checkout result', {
       parentCartWorkflowId,

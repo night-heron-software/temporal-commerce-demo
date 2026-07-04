@@ -46,7 +46,9 @@ export type CartCommand =
   | { type: 'linkUser'; email: string; userId: string }
   | { type: 'beginCheckout'; checkoutWorkflowId: string }
   | { type: 'disownCheckout' }
-  | { type: 'checkoutCompleted'; result: CheckoutWorkflowResult };
+  | { type: 'checkoutCompleted'; result: CheckoutWorkflowResult }
+  | { type: 'submitStarted' }
+  | { type: 'submitAborted' };
 
 /** Past-tense domain facts. */
 export type CartFact =
@@ -65,7 +67,10 @@ export type CartFact =
   | { type: 'CheckoutEntered'; checkoutWorkflowId: string; checkoutVersion: number }
   | { type: 'CheckoutDisowned' }
   | { type: 'CartAbandoned' }
-  | { type: 'CartCompleted'; finalState: CheckoutState };
+  | { type: 'CartCompleted'; finalState: CheckoutState }
+  | { type: 'CheckoutFailed'; error: string }
+  | { type: 'SubmitFreezeStarted' }
+  | { type: 'SubmitFreezeCleared' };
 
 /** Deep-copy the context (cart + its items + coupons) for immutability. */
 function copyCtx(state: Readonly<CartWorkflowContext>): CartWorkflowContext {
@@ -158,8 +163,14 @@ export function decide(command: CartCommand, state: CartWorkflowContext): CartFa
       if (r.checkoutVersion !== undefined && r.checkoutVersion !== state.checkoutVersion) return [];
       return r.success && r.order
         ? [{ type: 'CartCompleted', finalState: r.finalState }]
-        : [{ type: 'CheckoutDisowned' }];
+        : [{ type: 'CheckoutFailed', error: r.error || 'Checkout failed' }];
     }
+
+    case 'submitStarted':
+      return [{ type: 'SubmitFreezeStarted' }];
+
+    case 'submitAborted':
+      return [{ type: 'SubmitFreezeCleared' }];
 
     default:
       return [];
@@ -235,6 +246,26 @@ export function evolve(state: CartWorkflowContext, fact: CartFact): CartWorkflow
       cart.totalTax = fact.finalState.tax;
       cart.totalPrice =
         cart.subtotalPrice - cart.totalDiscounts + fact.finalState.shippingCost + fact.finalState.tax;
+      return next;
+
+    case 'CheckoutFailed':
+      cart.status = 'active';
+      cart.checkout = {
+        step: 'failed',
+        isGuest: !cart.userId,
+        shippingCost: 0,
+        tax: 0,
+        error: fact.error,
+      };
+      next.checkoutWorkflowId = null;
+      return next;
+
+    case 'SubmitFreezeStarted':
+      next.submitting = true;
+      return next;
+
+    case 'SubmitFreezeCleared':
+      next.submitting = false;
       return next;
 
     default:

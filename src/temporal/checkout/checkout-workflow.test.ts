@@ -47,6 +47,14 @@ const order: Order = {
 
 function makeActivities() {
   return {
+    // The live-cart bridge: validating and each recompute/submit re-pull go through here.
+    queryCart: vi.fn(async () => ({
+      items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
+      subtotalPrice: 10,
+      totalDiscounts: 0,
+      appliedCoupons: [],
+      cartVersion: 1,
+    })),
     renewReservationsForCheckout: vi.fn(async () => ({
       success: true,
       reservations: [{ reservationId: 'r-1', variantId: 'v1', blankSku: 'SKU-1', quantity: 1 }],
@@ -65,14 +73,11 @@ function makeActivities() {
   };
 }
 
+// No item snapshot — contents come from the (mocked) queryCart activity.
 const input: CheckoutWorkflowInput = {
   cartId: 'cart-1',
   parentCartWorkflowId: 'demo.cart.cart-1', // parent doesn't exist in the test env; signal failure is tolerated
-  items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
-  subtotalPrice: 10,
-  totalDiscounts: 0,
   currency: 'USD',
-  appliedCoupons: [],
   isGuest: true,
   cartVersion: 1,
   checkoutVersion: 1,
