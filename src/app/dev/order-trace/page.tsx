@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { RefreshButton } from '@/components/RefreshButton';
 import {
@@ -1169,6 +1169,26 @@ export default function OrderTracePage() {
     fetchTrace({ [mode]: v });
   }, [fetchTrace, mode, value]);
 
+  // Deep-link support: /dev/order-trace?orderId=… (or confirmation= / email=) pre-fills the
+  // lookup and runs it on mount, so admin order entries can link straight to a trace.
+  // Read from window.location instead of useSearchParams to avoid the Suspense-boundary
+  // requirement; the mount-only setState is deliberate (a lazy useState initializer would
+  // read window during SSR and cause a hydration mismatch on the input value).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    for (const m of MODES) {
+      const v = params.get(m.key)?.trim();
+      if (v) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot deep-link init
+        setMode(m.key);
+        setValue(v);
+        fetchTrace({ [m.key]: v });
+        return;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only deep-link read
+  }, []);
+
   const refresh = useCallback(async () => {
     if (trace)             await fetchTrace({ orderId: trace.orderId });
     else if (value.trim()) await fetchTrace({ [mode]: value.trim() });
@@ -1181,7 +1201,7 @@ export default function OrderTracePage() {
           <h1 className="text-3xl font-bold">Order Trace</h1>
           <div className="flex items-center gap-3">
             {(trace || candidates) && <RefreshButton onRefresh={refresh} variant="dev" />}
-            <Link href="/dev" className="text-blue-400 hover:underline text-sm">← Dev Tools</Link>
+            <Link href="/admin" className="text-blue-400 hover:underline text-sm">← Admin and Dev Tools</Link>
           </div>
         </div>
         <p className="text-gray-400 mb-6">
