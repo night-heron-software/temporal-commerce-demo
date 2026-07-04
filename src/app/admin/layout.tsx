@@ -8,7 +8,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <Link href="/admin" className="font-bold text-lg tracking-tight">
-              ⚙️ Admin
+              ⚙️ Admin and Dev Tools
             </Link>
             <div className="flex gap-4 text-sm">
               <Link
@@ -34,6 +34,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 className="text-zinc-300 hover:text-white transition-colors"
               >
                 Search
+              </Link>
+              <Link
+                href="/dev/order-trace"
+                className="text-zinc-300 hover:text-white transition-colors"
+              >
+                Order Trace
               </Link>
             </div>
           </div>

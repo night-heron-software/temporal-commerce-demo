@@ -7,7 +7,8 @@ export default function AdminDashboardPage() {
         Temporal Commerce Demo
       </h1>
       <p className="text-zinc-500 dark:text-zinc-400 mb-8">
-        Admin panel for monitoring orders, inventory, and controlling fulfillment workflows.
+        Admin panel for monitoring orders, inventory, and controlling fulfillment workflows —
+        plus developer tools for tracing workflow journeys.
       </p>
 
       <div className="grid md:grid-cols-2 gap-6">
@@ -64,6 +65,21 @@ export default function AdminDashboardPage() {
           </h2>
           <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
             Query all Elasticsearch indices — products, orders, inventory, customers, and more.
+          </p>
+        </Link>
+
+        {/* Order Trace */}
+        <Link
+          href="/dev/order-trace"
+          className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-amber-400 dark:hover:border-amber-500 transition-all hover:shadow-lg"
+        >
+          <div className="text-3xl mb-3">🧭</div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
+            Order Trace
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            Trace an order&apos;s full workflow journey — cart → checkout → order → fulfillment —
+            with per-transition state history.
           </p>
         </Link>
 
