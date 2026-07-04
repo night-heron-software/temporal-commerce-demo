@@ -11,7 +11,7 @@ import {
   getFeatureFlag,
 } from './activities';
 
-import { runStateMachine, StateMachineConfig, SignalRegistration } from '../framework';
+import { runStateMachine, StateMachineConfig, SignalRegistration, isTerminal } from '../framework';
 import { buildSupplierOrderStates } from './supplier-states';
 
 export type SupplierOrderStateName = 'received' | 'submitting' | 'in_production' | 'shipped';
@@ -149,7 +149,7 @@ export async function supplierOrderWorkflow(
             trackingUrl,
           });
         }
-      } else if (to === '__terminal:delivered') {
+      } else if (isTerminal(to, 'delivered')) {
         if (currentCtx.customerEmail) {
           const confirmNumber = currentCtx.confirmationNumber || currentCtx.orderId;
           await sendDeliveredEmail(currentCtx.customerEmail, currentCtx.orderId, confirmNumber);

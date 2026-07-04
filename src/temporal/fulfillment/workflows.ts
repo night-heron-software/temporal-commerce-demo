@@ -30,6 +30,8 @@ import {
   runStateMachine,
   StateMachineConfig,
   SignalRegistration,
+  deriveDisplayStatus,
+  isTerminal,
 } from '../framework';
 import { FULFILLMENT_STATES } from './states';
 import {
@@ -183,10 +185,7 @@ export async function fulfillmentWorkflow(
     onContextUpdate: (newCtx: FulfillmentWorkflowState, currentState: FulfillmentStateName | `__terminal:${string}`) => {
       Object.assign(state, newCtx);
       // Sync top-level status from driver state
-      const derivedStatus = typeof currentState === 'string' && currentState.startsWith('__terminal:')
-        ? currentState.replace('__terminal:', '')
-        : currentState;
-      state.status = derivedStatus as any;
+      state.status = deriveDisplayStatus<FulfillmentWorkflowState['status']>(currentState);
     },
     onStart: async (startCtx: FulfillmentWorkflowState) => {
       // 1. Transfer inventory reservations to supplier locations
@@ -281,7 +280,7 @@ export async function fulfillmentWorkflow(
       await syncProjections(cancelCtx);
     },
     onTerminal: async (finalCtx: FulfillmentWorkflowState, finalState: string) => {
-      if (finalState === '__terminal:cancelled' || finalState === '__terminal:failed') {
+      if (isTerminal(finalState, 'cancelled') || isTerminal(finalState, 'failed')) {
         for (const [_, childHandle] of childHandles) {
           try {
             await childHandle.signal(childCancelSignal);
@@ -293,7 +292,7 @@ export async function fulfillmentWorkflow(
 
       // Fulfill inventory reservations on delivery — transitions CONFIRMED→FULFILLED,
       // decrementing both total_stock and reserved_stock in the inventory system.
-      if (finalState === '__terminal:delivered') {
+      if (isTerminal(finalState, 'delivered')) {
         const allItems = finalCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
           so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
         );

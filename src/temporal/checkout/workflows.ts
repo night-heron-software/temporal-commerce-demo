@@ -27,7 +27,13 @@ import {
   getCheckoutStateQuery,
 } from './definitions';
 
-import { runStateMachine, StateMachineConfig, MappedUpdateRegistration } from '../framework';
+import {
+  runStateMachine,
+  StateMachineConfig,
+  MappedUpdateRegistration,
+  deriveDisplayStatus,
+  isTerminal,
+} from '../framework';
 import { CHECKOUT_STATES } from './states';
 import { Cart } from '../contracts';
 
@@ -85,9 +91,7 @@ export async function checkoutWorkflow(
     initialState: 'validating',
     onContextUpdate: (newCtx: CheckoutContext, state: CheckoutStateName | `__terminal:${string}`) => {
       ctx = newCtx;
-      currentStep = (typeof state === 'string' && state.startsWith('__terminal:')
-        ? state.replace('__terminal:', '')
-        : state) as CheckoutStep;
+      currentStep = deriveDisplayStatus<CheckoutStep>(state);
     },
     onCancellation: async (cancelCtx: CheckoutContext, _currentState: CheckoutStateName | `__terminal:${string}`) => {
       currentStep = 'cancelled';
@@ -96,7 +100,7 @@ export async function checkoutWorkflow(
       }
     },
     onTerminal: async (finalCtx: CheckoutContext, terminalState: string) => {
-      if (terminalState !== '__terminal:complete' && finalCtx.reservations.length > 0) {
+      if (!isTerminal(terminalState, 'complete') && finalCtx.reservations.length > 0) {
         await releaseReservations(finalCtx.reservations);
       }
     },

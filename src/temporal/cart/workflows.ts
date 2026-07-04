@@ -29,6 +29,7 @@ import {
 import {
   runStateMachine,
   StateMachineConfig,
+  deriveDisplayStatus,
 } from '../framework';
 
 import { CART_STATES } from './states';
@@ -135,9 +136,7 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
     initialState: (inputCheckoutInProgress || legacyStateName === 'awaitingCheckout') ? 'checkout' : 'active',
     onContextUpdate: (newCtx: CartWorkflowContext, state: CartStateName | `__terminal:${string}`) => {
       workflowContext = newCtx;
-      currentStatus = (typeof state === 'string' && state.startsWith('__terminal:')
-        ? state.replace('__terminal:', '')
-        : state) as CartDetails['status'];
+      currentStatus = deriveDisplayStatus<CartDetails['status']>(state);
     },
     onTransition: async (
       from: CartStateName,
