@@ -236,6 +236,11 @@ temporal-commerce-demo/
 
 The application is organized into six Temporal workflow domains, each with its own task queue, worker module, and dedicated contracts.
 
+> **Auto-generated diagrams:** the [State Machine Reference](reference/state-machine-diagrams.md)
+> holds a Mermaid diagram + per-state trigger table for every machine below, plus the
+> cross-domain orchestration graph — regenerated from source by `npm run docs:diagrams`
+> and enforced fresh in CI (`npm run docs:diagrams:check`).
+
 ### Cart Workflow
 
 **Task Queue:** `cart-queue`

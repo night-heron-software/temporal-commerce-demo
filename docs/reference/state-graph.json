@@ -1,0 +1,901 @@
+{
+  "schemaVersion": 1,
+  "generator": "scripts/generate-state-diagrams.mjs",
+  "machines": [
+    {
+      "domain": "cart",
+      "registry": "CART_STATES",
+      "source": "src/temporal/cart/states.ts",
+      "initialState": "active",
+      "terminals": [
+        "abandoned",
+        "completed"
+      ],
+      "states": [
+        {
+          "name": "active",
+          "timeout": "30 days",
+          "transitional": false,
+          "hasPrepare": true,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "addItem",
+              "kind": "update",
+              "to": "active",
+              "conditions": [
+                "prepared.reserveError"
+              ],
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ]
+            },
+            {
+              "on": "updateQuantity",
+              "kind": "update",
+              "to": "active",
+              "conditions": [
+                "prepared.reserveError",
+                "context.cart.items.length === 0"
+              ],
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ]
+            },
+            {
+              "on": "updateQuantity",
+              "kind": "update",
+              "to": "__terminal:abandoned",
+              "conditions": [
+                "prepared.reserveError",
+                "context.cart.items.length === 0"
+              ],
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ]
+            },
+            {
+              "on": "removeItem",
+              "kind": "update",
+              "to": "__terminal:abandoned",
+              "conditions": [
+                "context.cart.items.length === 0"
+              ],
+              "prepareActivities": [
+                "releaseCartItem"
+              ]
+            },
+            {
+              "on": "removeItem",
+              "kind": "update",
+              "to": "active",
+              "conditions": [
+                "context.cart.items.length === 0"
+              ],
+              "prepareActivities": [
+                "releaseCartItem"
+              ]
+            },
+            {
+              "on": "applyCoupon",
+              "kind": "update",
+              "to": "active"
+            },
+            {
+              "on": "linkUser",
+              "kind": "update",
+              "to": "active"
+            },
+            {
+              "on": "beginCheckout",
+              "kind": "update",
+              "to": "active",
+              "conditions": [
+                "prepared.empty"
+              ],
+              "prepareActivities": [
+                "startChild"
+              ]
+            },
+            {
+              "on": "beginCheckout",
+              "kind": "update",
+              "to": "checkout",
+              "conditions": [
+                "prepared.empty"
+              ],
+              "prepareActivities": [
+                "startChild"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:abandoned"
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "active"
+            }
+          ]
+        },
+        {
+          "name": "checkout",
+          "timeout": "1 hour",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "addItem",
+              "kind": "update",
+              "to": "checkout"
+            },
+            {
+              "on": "updateQuantity",
+              "kind": "update",
+              "to": "checkout"
+            },
+            {
+              "on": "removeItem",
+              "kind": "update",
+              "to": "checkout"
+            },
+            {
+              "on": "applyCoupon",
+              "kind": "update",
+              "to": "checkout"
+            },
+            {
+              "on": "linkUser",
+              "kind": "update",
+              "to": "checkout"
+            },
+            {
+              "on": "beginCheckout",
+              "kind": "update",
+              "to": "checkout"
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "active"
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "checkout",
+              "conditions": [
+                "result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion",
+                "context.cart.status === 'completed'"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:completed",
+              "conditions": [
+                "result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion",
+                "context.cart.status === 'completed'"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "active",
+              "conditions": [
+                "result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion",
+                "context.cart.status === 'completed'"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "domain": "checkout",
+      "registry": "CHECKOUT_STATES",
+      "source": "src/temporal/checkout/states.ts",
+      "initialState": "validating",
+      "terminals": [
+        "cancelled",
+        "complete",
+        "failed"
+      ],
+      "states": [
+        {
+          "name": "validating",
+          "transitional": true,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "(auto)",
+              "kind": "auto",
+              "to": "shipping"
+            },
+            {
+              "on": "(auto)",
+              "kind": "auto",
+              "to": "__terminal:failed"
+            }
+          ]
+        },
+        {
+          "name": "shipping",
+          "timeout": "1 hour",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "setShipping",
+              "kind": "update",
+              "to": "shipping",
+              "conditions": [
+                "prepared.paymentIntentError"
+              ]
+            },
+            {
+              "on": "setShipping",
+              "kind": "update",
+              "to": "payment",
+              "conditions": [
+                "prepared.paymentIntentError"
+              ]
+            },
+            {
+              "on": "cancelCheckout",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "releaseReservations"
+              ]
+            },
+            {
+              "on": "acknowledgeCartChange",
+              "kind": "update",
+              "to": "shipping"
+            },
+            {
+              "on": "retargetParent",
+              "kind": "update",
+              "to": "shipping"
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "releaseReservations"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "payment",
+          "timeout": "1 hour",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "setShipping",
+              "kind": "update",
+              "to": "shipping",
+              "conditions": [
+                "prepared.paymentIntentError"
+              ]
+            },
+            {
+              "on": "setShipping",
+              "kind": "update",
+              "to": "payment",
+              "conditions": [
+                "prepared.paymentIntentError"
+              ]
+            },
+            {
+              "on": "setPayment",
+              "kind": "update",
+              "to": "payment",
+              "conditions": [
+                "!ctx.state.shippingAddress"
+              ]
+            },
+            {
+              "on": "setPayment",
+              "kind": "update",
+              "to": "review",
+              "conditions": [
+                "!ctx.state.shippingAddress"
+              ]
+            },
+            {
+              "on": "cancelCheckout",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "releaseReservations"
+              ]
+            },
+            {
+              "on": "acknowledgeCartChange",
+              "kind": "update",
+              "to": "payment"
+            },
+            {
+              "on": "retargetParent",
+              "kind": "update",
+              "to": "payment"
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "releaseReservations"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "review",
+          "timeout": "1 hour",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "setShipping",
+              "kind": "update",
+              "to": "shipping",
+              "conditions": [
+                "prepared.paymentIntentError"
+              ]
+            },
+            {
+              "on": "setShipping",
+              "kind": "update",
+              "to": "payment",
+              "conditions": [
+                "prepared.paymentIntentError"
+              ]
+            },
+            {
+              "on": "setPayment",
+              "kind": "update",
+              "to": "review"
+            },
+            {
+              "on": "submitOrder",
+              "kind": "update",
+              "to": "review",
+              "conditions": [
+                "!prepared.success && prepared.error === 'Shipping and payment required'",
+                "!prepared.success"
+              ]
+            },
+            {
+              "on": "submitOrder",
+              "kind": "update",
+              "to": "payment",
+              "conditions": [
+                "!prepared.success && prepared.error === 'Shipping and payment required'",
+                "!prepared.success"
+              ]
+            },
+            {
+              "on": "submitOrder",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "conditions": [
+                "!prepared.success && prepared.error === 'Shipping and payment required'",
+                "!prepared.success"
+              ]
+            },
+            {
+              "on": "cancelCheckout",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "releaseReservations"
+              ]
+            },
+            {
+              "on": "acknowledgeCartChange",
+              "kind": "update",
+              "to": "review"
+            },
+            {
+              "on": "retargetParent",
+              "kind": "update",
+              "to": "review"
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "releaseReservations"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "domain": "fulfillment",
+      "registry": "FULFILLMENT_STATES",
+      "source": "src/temporal/fulfillment/states.ts",
+      "initialState": "received",
+      "terminals": [
+        "cancelled",
+        "delivered",
+        "failed"
+      ],
+      "states": [
+        {
+          "name": "received",
+          "transitional": true,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "(auto)",
+              "kind": "auto",
+              "to": "in_production"
+            }
+          ]
+        },
+        {
+          "name": "in_production",
+          "timeout": "365 days",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "in_production"
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:delivered",
+              "conditions": [
+                "context.status === 'delivered'",
+                "context.status === 'failed'",
+                "context.status === 'cancelled'"
+              ],
+              "signalKinds": [
+                "childStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:failed",
+              "conditions": [
+                "context.status === 'delivered'",
+                "context.status === 'failed'",
+                "context.status === 'cancelled'"
+              ],
+              "signalKinds": [
+                "childStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "in_production",
+              "conditions": [
+                "context.status === 'delivered'",
+                "context.status === 'failed'",
+                "context.status === 'cancelled'"
+              ],
+              "signalKinds": [
+                "childStatus"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "domain": "fulfillment",
+      "registry": "SUPPLIER_ORDER_STATES",
+      "source": "src/temporal/fulfillment/supplier-states.ts",
+      "initialState": "received",
+      "terminals": [
+        "cancelled",
+        "delivered",
+        "failed"
+      ],
+      "states": [
+        {
+          "name": "received",
+          "doc": "received — book-keeping hop; marks the order as submitting.",
+          "timeout": "1 millisecond",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "submitting"
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "submitting",
+          "doc": "submitting — submits the order to the (simulated) supplier.",
+          "timeout": "1 millisecond",
+          "transitional": false,
+          "hasPrepare": true,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "in_production",
+              "prepareActivities": [
+                "submitSupplierOrder"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "in_production",
+          "doc": "in_production — auto-ships on timeout (unless manual mode); accepts supplier updates.",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "in_production",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "shipped",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "shipped",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:delivered",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:failed",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "in_production",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "shipped",
+          "doc": "shipped — auto-delivers on timeout (unless manual mode); accepts supplier updates.",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "shipped",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:delivered",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "shipped",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:delivered",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:failed",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "in_production",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "supplierStatus"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "domain": "oms",
+      "registry": "OMS_STATES",
+      "source": "src/temporal/oms/states.ts",
+      "initialState": "processing",
+      "terminals": [
+        "cancelled",
+        "complete",
+        "delivered",
+        "refunded"
+      ],
+      "states": [
+        {
+          "name": "processing",
+          "timeout": "365 days",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:delivered",
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase",
+                "sendOrderStatusEmail",
+                "signalFulfillmentCancel"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase",
+                "sendOrderStatusEmail",
+                "signalFulfillmentCancel"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase",
+                "sendOrderStatusEmail",
+                "signalFulfillmentCancel"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:refunded",
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase",
+                "sendOrderStatusEmail",
+                "signalFulfillmentCancel"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "processing",
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase",
+                "sendOrderStatusEmail",
+                "signalFulfillmentCancel"
+              ]
+            },
+            {
+              "on": "cancelOrder",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase",
+                "sendOrderStatusEmail",
+                "signalFulfillmentCancel"
+              ]
+            },
+            {
+              "on": "submitFeedback",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "finalizeActivities": [
+                "updateOrderInDatabase",
+                "sendFeedbackThankYouEmail",
+                "insertStatusHistoryEntry"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "processing"
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "processing",
+              "conditions": [
+                "facts.length === 0"
+              ],
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:delivered",
+              "conditions": [
+                "facts.length === 0"
+              ],
+              "finalizeActivities": [
+                "insertStatusHistoryEntry",
+                "updateOrderInDatabase"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "crossDomain": [
+    {
+      "from": "cart",
+      "to": "checkout",
+      "kind": "startChild",
+      "label": "checkoutWorkflow"
+    },
+    {
+      "from": "checkout",
+      "to": "cart",
+      "kind": "signal",
+      "label": "checkoutCompleted"
+    },
+    {
+      "from": "checkout",
+      "to": "oms",
+      "kind": "start",
+      "label": "orderWorkflow"
+    },
+    {
+      "from": "fulfillment",
+      "to": "oms",
+      "kind": "signal",
+      "label": "fulfillmentStatus"
+    },
+    {
+      "from": "oms",
+      "to": "fulfillment",
+      "kind": "signal",
+      "label": "cancel"
+    },
+    {
+      "from": "oms",
+      "to": "fulfillment",
+      "kind": "start",
+      "label": "fulfillmentWorkflow"
+    }
+  ]
+}

@@ -208,8 +208,27 @@ const shipped = supplier.transitions(
 );
 
 /**
- * Build the registry with the simulation delays supplied by the workflow (they come from
- * workflow memo, so the registry is assembled at run time).
+ * The supplier-order state registry. `in_production`/`shipped` timeouts are placeholders
+ * here — {@link buildSupplierOrderStates} overrides them with the memo-driven simulation
+ * delays at workflow start. Exported as a const so the state-diagram generator (static
+ * AST analysis over `*_STATES` registries) can discover the machine.
+ */
+export const SUPPLIER_ORDER_STATES: StateRegistry<
+  SupplierOrderStateName,
+  never,
+  SupplierOrderWorkflowContext,
+  void,
+  SupplierOrderSignal
+> = {
+  received: { ...received, timeout: '1 millisecond' },
+  submitting: { ...submitting, timeout: '1 millisecond' },
+  in_production: { ...inProduction },
+  shipped: { ...shipped },
+};
+
+/**
+ * Build the runtime registry with the simulation delays supplied by the workflow (they
+ * come from workflow memo, so the timeouts are only known at run time).
  */
 export function buildSupplierOrderStates(delays: {
   processingDelayMs: number;
@@ -223,9 +242,14 @@ export function buildSupplierOrderStates(delays: {
   SupplierOrderSignal
 > {
   return {
-    received: { ...received, timeout: '1 millisecond' },
-    submitting: { ...submitting, timeout: '1 millisecond' },
-    in_production: { ...inProduction, timeout: `${delays.processingDelayMs}ms` },
-    shipped: { ...shipped, timeout: `${delays.shippingDelayMs + delays.deliveryDelayMs}ms` },
+    ...SUPPLIER_ORDER_STATES,
+    in_production: {
+      ...SUPPLIER_ORDER_STATES.in_production,
+      timeout: `${delays.processingDelayMs}ms`,
+    },
+    shipped: {
+      ...SUPPLIER_ORDER_STATES.shipped,
+      timeout: `${delays.shippingDelayMs + delays.deliveryDelayMs}ms`,
+    },
   };
 }

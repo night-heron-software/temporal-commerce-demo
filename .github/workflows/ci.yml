@@ -35,3 +35,7 @@ jobs:
       # Unit + workflow tests run against the in-process time-skipping Temporal test
       # server — no Docker services required.
       - run: npm test
+
+      # State diagrams are generated from source (static AST analysis); fail if a
+      # states/decider change landed without regenerating them.
+      - run: npm run docs:diagrams:check
