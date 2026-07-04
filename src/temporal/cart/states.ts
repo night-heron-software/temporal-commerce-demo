@@ -1,7 +1,18 @@
+/**
+ * Cart states — the shell around the pure cart Decider (prepare → decide → finalize).
+ *
+ * `decide` (cart-decider.ts) emits facts; `evolve` folds them — the ONLY writer of cart
+ * contents / status / checkout link. Every side effect (inventory reservations, the checkout
+ * child, id generation) stays in the shell `prepare` handlers below. The command is enriched
+ * here with shell-provided data (a generated lineItemId, the started child's id) before it
+ * reaches decide.
+ */
 import { log, startChild, ParentClosePolicy, uuid4 } from '@temporalio/workflow';
 import { reserveCartItem, releaseCartItem } from './activities';
+import { buildCheckoutInput } from './cart-logic';
+import { decide as cartDecide, evolve } from './cart-decider';
+import type { CartCommand } from './cart-decider';
 import type {
-  CartDetails,
   CartEvent,
   CartUpdateResponse,
   CheckoutWorkflowResult,
@@ -9,177 +20,151 @@ import type {
   CartStateName,
   CartWorkflowContext,
 } from './types';
-import { StateInput, StateOutput, StateRegistry } from '../framework';
+import { defineDomain, terminal, SELF } from '../framework';
+import type { StateRegistry, TransitionMap } from '../framework';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 
 // ==================
-// Helpers
+// Domain factory — binds the shared type params once
 // ==================
 
-/** Deep-copy just the cart for immutability. */
-function copyCart(cart: CartDetails): CartDetails {
-  return { ...cart, items: cart.items.map((i) => ({ ...i })) };
-}
+const cart = defineDomain<
+  CartStateName,
+  CartEvent,
+  CartWorkflowContext,
+  CartUpdateResponse,
+  CheckoutWorkflowResult
+>();
 
+type CartTransitions = TransitionMap<
+  CartStateName,
+  CartWorkflowContext,
+  CartUpdateResponse,
+  CartEvent
+>;
 
+// ==================
+// Shell adapter — runs the pure Decider behind the driver.
+// ==================
 
-function recalculateTotals(cart: CartDetails): void {
-  cart.subtotalPrice = cart.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  cart.totalDiscounts = 0;
-  if (cart.appliedCoupons.includes('SAVE20')) {
-    cart.totalDiscounts = cart.subtotalPrice * 0.2;
-  }
-  cart.totalTax = (cart.subtotalPrice - cart.totalDiscounts) * 0.08;
-  cart.totalPrice = cart.subtotalPrice - cart.totalDiscounts + cart.shippingCost + cart.totalTax;
-}
-
-function createItem(
-  variantId: string,
-  quantity: number,
-  price: number,
-  properties?: Record<string, unknown>
-) {
-  return {
-    lineItemId: uuid4(),
-    variantId,
-    quantity,
-    price,
-    properties
-  };
-}
-
-function buildCheckoutInput(cart: CartDetails, parentCartWorkflowId: string) {
-  return {
-    cartId: cart.cartId,
-    parentCartWorkflowId,
-    items: cart.items,
-    subtotalPrice: cart.subtotalPrice,
-    totalDiscounts: cart.totalDiscounts,
-    currency: cart.currency,
-    appliedCoupons: cart.appliedCoupons,
-    isGuest: !cart.userId,
-    cartVersion: cart.cartVersion,
-  };
+function apply(ctx: Readonly<CartWorkflowContext>, command: CartCommand): CartWorkflowContext {
+  const state = ctx as CartWorkflowContext;
+  return cartDecide(command, state).reduce(evolve, state);
 }
 
 // ==================
-// State Functions
+// State: active — co-located per-event transitions
+//
+// The cart owns reservation writes (in `prepare`). A failed reservation is reported as a
+// prepared error (never thrown) so decide can reject the edit and keep the cart unchanged —
+// matching the pre-refactor behavior where the Server Action receives `error`, not a failure.
+// Emptying the cart routes to `terminal('abandoned')` (the decider emits `CartAbandoned`);
+// the cart's onTerminal then cancels any checkout child.
 // ==================
 
-export async function activeState(
-  ctx: Readonly<CartWorkflowContext>,
-  input: StateInput<CartEvent, CheckoutWorkflowResult>,
-): Promise<StateOutput<CartStateName, CartWorkflowContext, CartUpdateResponse>> {
-  if (input.kind === 'timeout') {
-    // Idle timeout: abandon cart
-    const draft = copyCart(ctx.cart);
-    draft.status = 'abandoned';
-    return {
-      context: { ...ctx, cart: draft },
-      next: '__terminal:abandoned',
-    };
-  }
-
-  if (input.kind === 'signal') {
-    // Ignore completion signals from stale checkouts in active state
-    return { context: ctx, next: 'active' };
-  }
-
-  const event = input.event;
-  const draft = copyCart(ctx.cart);
-
-  switch (event.type) {
-    case 'addItem': {
-      const existing = draft.items.find((i) => i.variantId === event.variantId);
+const activeTransitions: CartTransitions = {
+  addItem: {
+    async prepare(ctx, event) {
+      const lineItemId = uuid4();
+      const existing = ctx.cart.items.find((i) => i.variantId === event.variantId);
       const oldQty = existing ? existing.quantity : 0;
       const newQty = oldQty + event.quantity;
 
-      // Release existing reservation before re-reserving at new quantity
+      // Release existing reservation before re-reserving at the new quantity
       if (oldQty > 0) await releaseCartItem(ctx.cart.cartId, event.variantId);
       const reservationId = await reserveCartItem(ctx.cart.cartId, event.variantId, newQty);
 
       if (!reservationId) {
-        // Reservation failed — re-reserve at old quantity if we released
+        // Reservation failed — re-reserve at the old quantity if we released
         if (oldQty > 0) await reserveCartItem(ctx.cart.cartId, event.variantId, oldQty);
-        return { context: ctx, next: 'active', error: `Insufficient inventory for variant ${event.variantId}` };
+        return { lineItemId, reserveError: `Insufficient inventory for variant ${event.variantId}` };
       }
-
-      if (existing) {
-        existing.quantity = newQty;
-      } else {
-        draft.items.push(createItem(event.variantId, event.quantity, event.price, event.properties));
+      return { lineItemId, reserveError: undefined };
+    },
+    decide(ctx, event, _meta, prepared) {
+      if (prepared.reserveError) {
+        return { context: ctx as CartWorkflowContext, next: SELF, error: prepared.reserveError };
       }
+      const context = apply(ctx, {
+        type: 'addItem',
+        variantId: event.variantId,
+        quantity: event.quantity,
+        price: event.price,
+        properties: event.properties,
+        lineItemId: prepared.lineItemId,
+      });
+      return { context, next: SELF, response: context.cart };
+    },
+  },
 
-      recalculateTotals(draft);
-      const nextCtx = { ...ctx, cart: draft };
-      return { context: nextCtx, next: 'active', response: draft };
-    }
-
-    case 'updateQuantity': {
-      const item = draft.items.find((i) => i.lineItemId === event.lineItemId);
-      let nextState: CartStateName | '__terminal:abandoned' = 'active';
-      if (item) {
-        const variantId = item.variantId;
-        if (event.quantity <= 0) {
-          draft.items = draft.items.filter((i) => i.lineItemId !== event.lineItemId);
-          await releaseCartItem(ctx.cart.cartId, variantId);
-        } else {
-          await releaseCartItem(ctx.cart.cartId, variantId);
-          const resId = await reserveCartItem(ctx.cart.cartId, variantId, event.quantity);
-          if (!resId) {
-            // Re-reserve at old quantity
-            await reserveCartItem(ctx.cart.cartId, variantId, item.quantity);
-            return { context: ctx, next: 'active', error: `Insufficient inventory to update quantity for variant ${variantId}` };
-          }
-          item.quantity = event.quantity;
-        }
-        recalculateTotals(draft);
+  updateQuantity: {
+    async prepare(ctx, event) {
+      const item = ctx.cart.items.find((i) => i.lineItemId === event.lineItemId);
+      if (!item) return { reserveError: undefined };
+      const variantId = item.variantId;
+      if (event.quantity <= 0) {
+        await releaseCartItem(ctx.cart.cartId, variantId);
+        return { reserveError: undefined };
       }
-
-      if (draft.items.length === 0) {
-        draft.status = 'abandoned';
-        nextState = '__terminal:abandoned';
+      await releaseCartItem(ctx.cart.cartId, variantId);
+      const reservationId = await reserveCartItem(ctx.cart.cartId, variantId, event.quantity);
+      if (!reservationId) {
+        // Re-reserve at the old quantity
+        await reserveCartItem(ctx.cart.cartId, variantId, item.quantity);
+        return {
+          reserveError: `Insufficient inventory to update quantity for variant ${variantId}`,
+        };
       }
+      return { reserveError: undefined };
+    },
+    decide(ctx, event, _meta, prepared) {
+      if (prepared.reserveError) {
+        return { context: ctx as CartWorkflowContext, next: SELF, error: prepared.reserveError };
+      }
+      const context = apply(ctx, {
+        type: 'updateQuantity',
+        lineItemId: event.lineItemId,
+        quantity: event.quantity,
+      });
+      if (context.cart.items.length === 0) {
+        return { context, next: terminal('abandoned'), response: context.cart };
+      }
+      return { context, next: SELF, response: context.cart };
+    },
+  },
 
-      const nextCtx = { ...ctx, cart: draft };
-      return { context: nextCtx, next: nextState, response: draft };
-    }
-
-    case 'removeItem': {
-      const removed = draft.items.find((i) => i.lineItemId === event.lineItemId);
-      draft.items = draft.items.filter((i) => i.lineItemId !== event.lineItemId);
-      recalculateTotals(draft);
+  removeItem: {
+    async prepare(ctx, event) {
+      const removed = ctx.cart.items.find((i) => i.lineItemId === event.lineItemId);
       if (removed) await releaseCartItem(ctx.cart.cartId, removed.variantId);
-
-      let nextState: CartStateName | '__terminal:abandoned' = 'active';
-      if (draft.items.length === 0) {
-        draft.status = 'abandoned';
-        nextState = '__terminal:abandoned';
+    },
+    decide(ctx, event) {
+      const context = apply(ctx, { type: 'removeItem', lineItemId: event.lineItemId });
+      if (context.cart.items.length === 0) {
+        return { context, next: terminal('abandoned'), response: context.cart };
       }
+      return { context, next: SELF, response: context.cart };
+    },
+  },
 
-      const nextCtx = { ...ctx, cart: draft };
-      return { context: nextCtx, next: nextState, response: draft };
-    }
+  applyCoupon: {
+    decide(ctx, event) {
+      const context = apply(ctx, { type: 'applyCoupon', code: event.code });
+      return { context, next: SELF, response: context.cart };
+    },
+  },
 
-    case 'linkUser': {
-      draft.email = event.email;
-      draft.userId = event.userId;
-      const nextCtx = { ...ctx, cart: draft };
-      return { context: nextCtx, next: 'active', response: draft };
-    }
+  linkUser: {
+    decide(ctx, event) {
+      const context = apply(ctx, { type: 'linkUser', email: event.email, userId: event.userId });
+      return { context, next: SELF, response: context.cart };
+    },
+  },
 
-    case 'applyCoupon': {
-      if (!draft.appliedCoupons.includes(event.code)) {
-        draft.appliedCoupons.push(event.code);
-        recalculateTotals(draft);
-      }
-      const nextCtx = { ...ctx, cart: draft };
-      return { context: nextCtx, next: 'active', response: draft };
-    }
-
-    case 'beginCheckout': {
-      if (draft.items.length === 0) {
-        return { context: ctx, next: 'active', error: 'Cannot checkout with empty cart' };
+  beginCheckout: {
+    async prepare(ctx) {
+      if (ctx.cart.items.length === 0) {
+        return { empty: true as const };
       }
 
       const parentCartWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', ctx.cart.cartId);
@@ -194,17 +179,18 @@ export async function activeState(
       const newCheckoutWorkflowId = checkoutStart.workflowId;
       const newCheckoutVersion = ctx.checkoutVersion + 1;
 
-      draft.status = 'checkout';
-      draft.checkout = { step: 'validating', isGuest: !draft.userId, shippingCost: 0, tax: 0 };
-
-      // Start child checkout workflow
       await startChild<(input: CheckoutWorkflowInput) => Promise<CheckoutWorkflowResult>>(
         'checkoutWorkflow',
         {
           ...checkoutStart,
           taskQueue: 'checkout-queue',
           parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
-          args: [{ ...buildCheckoutInput(draft, parentCartWorkflowId), checkoutVersion: newCheckoutVersion }],
+          args: [
+            {
+              ...buildCheckoutInput(ctx.cart, parentCartWorkflowId),
+              checkoutVersion: newCheckoutVersion,
+            },
+          ],
           workflowExecutionTimeout: '2 hours',
         },
       );
@@ -214,79 +200,100 @@ export async function activeState(
         checkoutWorkflowId: newCheckoutWorkflowId,
       });
 
-      const nextCtx = {
-        cart: draft,
-        checkoutWorkflowId: newCheckoutWorkflowId,
-        checkoutVersion: newCheckoutVersion,
-      };
-      return { context: nextCtx, next: 'checkout', response: draft };
-    }
-
-    default:
-      return { context: ctx, next: 'active', error: `Unexpected event in active state` };
-  }
-}
-
-export async function checkoutState(
-  ctx: Readonly<CartWorkflowContext>,
-  input: StateInput<CartEvent, CheckoutWorkflowResult>,
-): Promise<StateOutput<CartStateName, CartWorkflowContext, CartUpdateResponse>> {
-  const draft = copyCart(ctx.cart);
-
-  if (input.kind === 'timeout') {
-    // Checkout timed out — return to active state
-    log.warn('Checkout completion signal timed out, protecting cart', {
-      cartId: ctx.cart.cartId,
-    });
-    draft.status = 'active';
-    draft.checkout = undefined;
-    const nextCtx = { ...ctx, cart: draft, checkoutWorkflowId: null };
-    return { context: nextCtx, next: 'active' };
-  }
-
-  // Handle Signal
-  if (input.kind === 'signal') {
-    const result = input.result;
-
-    // Ignore stale signals from a previous checkout attempt
-    if (result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion) {
-      log.warn('Ignoring stale checkout signal', {
-        cartId: ctx.cart.cartId,
-        expected: ctx.checkoutVersion,
-        received: result.checkoutVersion,
+      return { empty: false as const, newCheckoutWorkflowId };
+    },
+    decide(ctx, _event, _meta, prepared) {
+      if (prepared.empty) {
+        return {
+          context: ctx as CartWorkflowContext,
+          next: 'active' as const,
+          error: 'Cannot checkout with empty cart',
+        };
+      }
+      const context = apply(ctx, {
+        type: 'beginCheckout',
+        checkoutWorkflowId: prepared.newCheckoutWorkflowId,
       });
-      return { context: ctx, next: 'checkout' };
-    }
+      return { context, next: 'checkout' as const, response: context.cart };
+    },
+  },
+};
 
-    if (result.success && result.order) {
-      draft.status = 'completed';
-      draft.checkout = result.finalState;
-      draft.shippingCost = result.finalState.shippingCost;
-      draft.totalTax = result.finalState.tax;
-      draft.totalPrice =
-        ctx.cart.subtotalPrice -
-        ctx.cart.totalDiscounts +
-        result.finalState.shippingCost +
-        result.finalState.tax;
-      const nextCtx = { ...ctx, cart: draft };
-      return { context: nextCtx, next: '__terminal:completed' };
-    }
+const active = cart.transitions('active', activeTransitions, {
+  onTimeout: {
+    decide(ctx) {
+      // Idle timeout: abandon cart
+      const context = evolve(ctx as CartWorkflowContext, { type: 'CartAbandoned' });
+      return { context, next: terminal('abandoned') };
+    },
+  },
+  onSignal: {
+    decide(ctx) {
+      // Ignore completion signals from stale checkouts in active state
+      return { context: ctx as CartWorkflowContext, next: 'active' as const };
+    },
+  },
+});
 
-    // Cancelled or failed — return to active state
-    draft.status = 'active';
-    draft.checkout = undefined;
-    log.info('Checkout cancelled/failed, returning to active', { cartId: ctx.cart.cartId });
-    const nextCtx = { ...ctx, cart: draft, checkoutWorkflowId: null };
-    return { context: nextCtx, next: 'active' };
-  }
+// ==================
+// State: checkout — cart edits are rejected while the checkout child drives the order;
+// the completion signal (or a timeout protecting the cart) moves the machine on.
+// ==================
 
-  const event = input.event;
+/** Reject any cart edit while checkout is in progress (pre-refactor behavior). */
+function rejectDuringCheckout(ctx: Readonly<CartWorkflowContext>, eventType: CartEvent['type']) {
   return {
-    context: ctx,
-    next: 'checkout',
-    error: `Cannot '${event.type}' while checkout is in progress`,
+    context: ctx as CartWorkflowContext,
+    next: SELF,
+    error: `Cannot '${eventType}' while checkout is in progress`,
   };
 }
+
+const checkoutTransitions: CartTransitions = {
+  addItem: { decide: (ctx, e) => rejectDuringCheckout(ctx, e.type) },
+  updateQuantity: { decide: (ctx, e) => rejectDuringCheckout(ctx, e.type) },
+  removeItem: { decide: (ctx, e) => rejectDuringCheckout(ctx, e.type) },
+  applyCoupon: { decide: (ctx, e) => rejectDuringCheckout(ctx, e.type) },
+  linkUser: { decide: (ctx, e) => rejectDuringCheckout(ctx, e.type) },
+  beginCheckout: { decide: (ctx, e) => rejectDuringCheckout(ctx, e.type) },
+};
+
+const checkout = cart.transitions('checkout', checkoutTransitions, {
+  onTimeout: {
+    decide(ctx) {
+      // Checkout timed out — return to active state (preserve the cart, not abandon).
+      log.warn('Checkout completion signal timed out, protecting cart', {
+        cartId: ctx.cart.cartId,
+      });
+      const context = evolve(ctx as CartWorkflowContext, { type: 'CheckoutDisowned' });
+      return { context, next: 'active' as const };
+    },
+  },
+  onSignal: {
+    decide(ctx, result) {
+      // Ignore stale signals from a previous checkout attempt.
+      if (result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion) {
+        log.warn('Ignoring stale checkout signal', {
+          cartId: ctx.cart.cartId,
+          expected: ctx.checkoutVersion,
+          received: result.checkoutVersion,
+        });
+        return { context: ctx as CartWorkflowContext, next: 'checkout' as const };
+      }
+
+      const context = apply(ctx, { type: 'checkoutCompleted', result });
+      if (context.cart.status === 'completed') {
+        return { context, next: terminal('completed') };
+      }
+      log.info('Checkout cancelled/failed, returning to active', { cartId: ctx.cart.cartId });
+      return { context, next: 'active' as const };
+    },
+  },
+});
+
+// ==================
+// Registry
+// ==================
 
 export const CART_STATES: StateRegistry<
   CartStateName,
@@ -295,6 +302,6 @@ export const CART_STATES: StateRegistry<
   CartUpdateResponse,
   CheckoutWorkflowResult
 > = {
-  active: { fn: activeState, timeout: '30 days' },
-  checkout: { fn: checkoutState, timeout: '1 hour' },
+  active: { ...active, timeout: '30 days' },
+  checkout: { ...checkout, timeout: '1 hour' },
 };
