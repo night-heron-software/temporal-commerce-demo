@@ -17,10 +17,31 @@ import {
   StateInput,
   StateOutput,
   SignalRegistration,
+  TransitionTrigger,
 } from './types';
+import { createTransitionRecorder } from './transition-sink';
 
 function isTerminalState(name: string): boolean {
   return name.startsWith('__terminal:');
+}
+
+/** The `type` field of a command event, when present — a friendly trigger name. */
+function triggerName(value: unknown): string | undefined {
+  return value && typeof value === 'object' && typeof (value as { type?: unknown }).type === 'string'
+    ? (value as { type: string }).type
+    : undefined;
+}
+
+function describeTrigger<TEvent, TSignal>(input: StateInput<TEvent, TSignal>): TransitionTrigger {
+  if (input.kind === 'timeout') return { kind: 'timeout' };
+  if (input.kind === 'signal') return { kind: 'signal', name: triggerName(input.result) };
+  return { kind: 'update', name: triggerName(input.event) };
+}
+
+function triggerPayload<TEvent, TSignal>(input: StateInput<TEvent, TSignal>): unknown {
+  if (input.kind === 'signal') return input.result;
+  if (input.kind === 'event') return input.event;
+  return undefined;
 }
 
 function isMappedUpdate<TEvent, TContext, TResponse>(
@@ -31,19 +52,27 @@ function isMappedUpdate<TEvent, TContext, TResponse>(
   return Array.isArray(updates);
 }
 
-export async function runStateMachine<TState extends string, TEvent, TContext, TResponse, TSignal = never>(
+export async function runStateMachine<
+  TState extends string,
+  TEvent,
+  TContext,
+  TResponse,
+  TSignal = never,
+>(
   config: StateMachineConfig<TState, TEvent, TContext, TResponse, TSignal>,
   initialContext: TContext,
   updates:
     | SingleUpdateRegistration<TEvent, TResponse>
     | MappedUpdateRegistration<TEvent, TContext, TResponse>[],
-  signals?:
-    | SignalDefinition<[TSignal]>
-    | SignalRegistration<TSignal>[],
+  signals?: SignalDefinition<[TSignal]> | SignalRegistration<TSignal>[],
 ): Promise<TContext> {
   let ctx = initialContext;
   let currentStateName = config.initialState;
-  let updateCount = 0;
+  // Counts every processed input (update, signal, or timeout) toward the
+  // continue-as-new threshold. Signals and timeouts grow workflow history just as
+  // updates do, so a purely signal-driven workflow (e.g. identity account lifecycle)
+  // must be able to continue-as-new too — counting only updates would never fire.
+  let inputCount = 0;
 
   // FIFO queue for update exchanges — prevents concurrent overwrites
   const updateQueue: UpdateExchange<TEvent, TResponse>[] = [];
@@ -53,6 +82,7 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
   if (signals) {
     if (Array.isArray(signals)) {
       for (const sig of signals) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         setHandler(sig.definition, (...args: any[]) => {
           signalQueue.push(sig.toSignal(...args));
         });
@@ -67,6 +97,7 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
   // ── Register Update Handlers ──
   if (isMappedUpdate(updates)) {
     for (const update of updates) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setHandler(update.definition, async (...args: any[]): Promise<TResponse> => {
         if (isTerminalState(currentStateName)) {
           throw new Error('Workflow is in a terminal state');
@@ -102,17 +133,40 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
     });
   }
 
+  // ── Async transition recorder (ADR-0010) ──
+  // On by default; no-ops for untagged workflows or when opted out. record() is non-blocking;
+  // a background flusher coroutine batch-persists off the hot path.
+  const recorder = createTransitionRecorder<TContext>(config.transitionRecording);
+  const flusher = recorder?.runFlusher();
+  let recorderShutdown = false;
+  const shutdownRecorder = async (): Promise<void> => {
+    if (!recorder || recorderShutdown) return;
+    recorderShutdown = true;
+    recorder.close();
+    await recorder.drain();
+    await flusher;
+  };
+
   // ── Run Start Hook ──
   if (config.onStart) {
     const startResult = await config.onStart(ctx);
     ctx = startResult.context;
     if (startResult.nextState) {
-      currentStateName = startResult.nextState as any;
+      currentStateName = startResult.nextState as TState;
     }
     if (config.onContextUpdate) {
       config.onContextUpdate(ctx, currentStateName);
     }
   }
+
+  // Record the initial state as the machine's first transition (∅ → initialState).
+  recorder?.record({
+    from: '',
+    to: currentStateName,
+    trigger: { kind: 'start' },
+    context: ctx,
+    at: new Date().toISOString(),
+  });
 
   // ── Driver Loop ──
   try {
@@ -124,7 +178,7 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
 
       // 2. Continue-As-New check (top of loop, non-blocking drain)
       const threshold = config.continueAsNewThreshold || 100;
-      if (config.serializeForContinueAsNew && updateCount >= threshold) {
+      if (config.serializeForContinueAsNew && inputCount >= threshold) {
         // Wait for handlers to finish OR new input to arrive
         await condition(
           () => allHandlersFinished() || updateQueue.length > 0 || signalQueue.length > 0,
@@ -132,6 +186,8 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
         // If all handlers finished and no new input queued, safe to continue-as-new
         if (allHandlersFinished() && updateQueue.length === 0 && signalQueue.length === 0) {
           const nextInput = config.serializeForContinueAsNew(ctx, currentStateName);
+          // Flush buffered transitions before the run ends (the next run gets a fresh recorder).
+          await shutdownRecorder();
           await continueAsNew(nextInput);
         }
         // Otherwise: new input arrived during drain — fall through to process it
@@ -203,13 +259,13 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
       const previousStateName = currentStateName;
       ctx = output.context;
       if (config.onContextUpdate) {
-        config.onContextUpdate(ctx, output.next as any);
+        config.onContextUpdate(ctx, output.next);
       }
 
       // 7. Trigger onTransition Hook
       if (config.onTransition) {
         try {
-          await config.onTransition(previousStateName, output.next, inputEventDesc, ctx);
+          await config.onTransition(previousStateName, output.next, inputEventDesc, ctx, input.timestamp);
         } catch (transitionErr) {
           log.error('onTransition hook threw an error', {
             from: previousStateName,
@@ -219,33 +275,61 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
         }
       }
 
+      // 7b. Record the transition (ADR-0010) — on a real state change, or any command
+      // (update/signal) so context mutations within a state are captured too. Idle timeout
+      // ticks that change nothing are skipped.
+      if (recorder && (output.next !== previousStateName || input.kind !== 'timeout')) {
+        recorder.record({
+          from: previousStateName,
+          to: output.next,
+          trigger: describeTrigger(input),
+          triggerPayload: triggerPayload(input),
+          context: ctx,
+          at: input.timestamp,
+          prepareActivities: output.activities?.prepare,
+          finalizeActivities: output.activities?.finalize,
+        });
+      }
+
       // 8. Respond to update handler if active
       if (activeExchange) {
         if (output.error) {
           activeExchange.error = output.error;
         } else if (output.response !== undefined) {
           activeExchange.result = output.response;
-          updateCount++;
         } else {
-          activeExchange.result = undefined as any;
-          updateCount++;
+          activeExchange.result = undefined as unknown as TResponse;
         }
         activeExchange.processed = true;
       }
 
       // 9. Advance state
-      currentStateName = output.next as any;
+      currentStateName = output.next as TState;
+
+      // 10. Count this processed input toward the continue-as-new threshold
+      // (every kind — update, signal, timeout — adds to workflow history).
+      inputCount++;
     }
   } catch (err) {
     if (isCancellation(err)) {
       log.info('State machine driver loop caught cancellation', { state: currentStateName });
-      if (config.onCancellation) {
-        await CancellationScope.nonCancellable(async () => {
+      // Best-effort flush of buffered transitions before unwinding.
+      await CancellationScope.nonCancellable(async () => {
+        try {
+          await shutdownRecorder();
+        } catch (drainErr) {
+          log.warn('transition recorder drain failed during cancellation', {
+            error: String(drainErr),
+          });
+        }
+        if (config.onCancellation) {
           await config.onCancellation!(ctx, currentStateName);
-        });
-      }
+        }
+      });
       return ctx;
     }
+    // Let the flusher coroutine unwind with the failing workflow task.
+    recorder?.close();
     throw err;
   }
 
@@ -258,6 +342,8 @@ export async function runStateMachine<TState extends string, TEvent, TContext, T
   }
 
   await condition(allHandlersFinished);
+  // Flush buffered transitions before terminal hooks / return, then stop the flusher coroutine.
+  await shutdownRecorder();
   if (config.onTerminal) {
     await config.onTerminal(ctx, currentStateName);
   }
