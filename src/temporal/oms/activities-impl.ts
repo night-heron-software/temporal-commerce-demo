@@ -354,37 +354,6 @@ export async function getOrderById(orderId: string): Promise<Order | null> {
   } as unknown as Order;
 }
 
-/**
- * Start a standalone fulfillment workflow via Temporal client.
- * Uses the same pattern as checkout's startOrderManagementWorkflow.
- */
-export async function startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string> {
-  const orderId = input.orderId as string;
-
-  const { getTemporalClient } = await import('../../lib/temporal-client');
-  const { buildWorkflowStartOptions, DEMO_STORE_ID } = await import('../contracts/constants');
-  const client = await getTemporalClient();
-
-  const startOptions = buildWorkflowStartOptions({
-    storeId: DEMO_STORE_ID,
-    domain: 'fulfillment',
-    entityId: orderId,
-    orderId,
-    cartId: input.cartId as string | undefined,
-  });
-  log.info(`[Activity] Starting fulfillment workflow: ${startOptions.workflowId}`);
-
-  await client.workflow.start('fulfillmentWorkflow', {
-    ...startOptions,
-    taskQueue: 'fulfillment-queue',
-    args: [input],
-    workflowExecutionTimeout: '90 days'
-  });
-
-  log.info(`[Activity] Started fulfillment workflow: ${startOptions.workflowId}`);
-  return startOptions.workflowId;
-}
-
 export function createOmsActivities() {
   return {
     saveOrderToDatabase,
@@ -398,6 +367,5 @@ export function createOmsActivities() {
     indexOrder,
     indexFulfillerOrder,
     indexCustomer,
-    startFulfillmentWorkflow,
   };
 }

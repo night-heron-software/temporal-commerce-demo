@@ -1,384 +1,277 @@
-import { log, setHandler, uuid4 } from '@temporalio/workflow';
-import { OrderLineItem, Cart } from '../contracts';
-type CartItem = Cart.CartItem;
+import { log, setHandler, getExternalWorkflowHandle } from '@temporalio/workflow';
+import { buildWorkflowId, DEMO_STORE_ID } from '../contracts/constants';
+
 import {
   saveOrderToDatabase,
   updateOrderInDatabase,
-  resolveFulfillerAssignments,
   insertStatusHistoryEntry,
   indexOrder,
   indexFulfillerOrder,
-  indexCustomer,
-  startFulfillmentWorkflow
 } from './activities';
+
 import {
   OrderState,
-  OrderEvent,
   OrderWorkflowInput,
-  OmsStateName,
-  OmsWorkflowContext,
   StatusHistoryEntry,
-  FulfillerOrder,
+  OrderStateName,
+  OrderEvent,
+  OrderStatus,
   FulfillmentStatusUpdate,
-  UpdateStatusSignal,
-  CancelOrderSignal,
-  SubmitFeedbackSignal
 } from './types';
+
 import { buildOrderDocument, buildFulfillerOrderDocument } from './document-builder';
 
-import type { FulfillmentFulfillerOrderInput, FulfillmentItem } from '../contracts/fulfillment';
-
-// Import definitions from the dedicated definitions file
 import {
   updateStatusUpdate,
   cancelOrderUpdate,
   submitFeedbackUpdate,
+  refundOrderUpdate,
+  requestReturnUpdate,
+  confirmReturnUpdate,
+  denyReturnUpdate,
   getOrderStateQuery,
-  fulfillmentStatusSignal
+  fulfillmentStatusSignal,
 } from './definitions';
+
+import {
+  runStateMachine,
+  StateMachineConfig,
+  MappedUpdateRegistration,
+  deriveDisplayStatus,
+} from '../framework';
+
+import { OMS_STATES } from './states';
 
 // Re-export definitions for backward compatibility with workers
 export {
   updateStatusUpdate,
   cancelOrderUpdate,
   submitFeedbackUpdate,
+  refundOrderUpdate,
+  requestReturnUpdate,
+  confirmReturnUpdate,
+  denyReturnUpdate,
   getOrderStateQuery,
-  fulfillmentStatusSignal
+  fulfillmentStatusSignal,
 };
-
-import { runStateMachine, StateMachineConfig, MappedUpdateRegistration } from '../framework';
-import { OMS_STATES } from './states';
-
-// ==================
-// Order Workflow
-// ==================
 
 export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderState> {
   log.info('[OMS] orderWorkflow started', {
     orderId: input.order.orderId,
     cartId: input.order.cartId,
-    itemCount: input.order.items.length,
-    customerEmail: input.customerEmail
   });
 
-  let ctx: OmsWorkflowContext = {
-    customerEmail: input.customerEmail,
-    state: {
-      order: input.order,
-      status: 'pending_assignment',
-      statusHistory: [
-        {
-          status: 'pending_assignment',
-          timestamp: new Date().toISOString(),
-          updatedBy: 'system'
-        }
-      ],
-      assignments: [],
-      fulfillerOrders: []
-    }
+  const state: OrderState = input.restoredState || {
+    order: input.order,
+    status: 'pending_assignment',
+    statusHistory: [
+      {
+        status: 'pending_assignment',
+        timestamp: new Date().toISOString(),
+        updatedBy: 'system',
+      },
+    ],
+    assignments: [],
+    fulfillerOrders: [],
   };
 
-  // Query for current order state (reads the driver-owned context)
-  setHandler(getOrderStateQuery, () => ctx.state);
+  const getOrderDocument = () => buildOrderDocument(input.order, state, input.customerEmail);
 
-  // Helper to build OrderDocument from current state
-  const getOrderDocument = (state: OrderState) =>
-    buildOrderDocument(input.order, state, input.customerEmail);
+  // Wire Query
+  setHandler(getOrderStateQuery, () => state);
 
+  // Wire State Machine Config
   const config: StateMachineConfig<
-    OmsStateName,
+    OrderStateName,
     OrderEvent,
-    OmsWorkflowContext,
+    OrderState,
     OrderState,
     FulfillmentStatusUpdate
   > = {
     states: OMS_STATES,
-    initialState: 'processing',
-    // Startup pipeline: persist, index, auto-assign, trigger fulfillment — then wait.
-    onStart: async (startCtx: OmsWorkflowContext) => {
-      const state = startCtx.state;
+    initialState: input.restoredState
+      ? (input.restoredState.status as OrderStateName)
+      : 'pending_assignment',
+    onContextUpdate: (newCtx, currentState) => {
+      Object.assign(state, newCtx);
+      // Sync status from driver state — the driver is the single source of truth
+      state.status = deriveDisplayStatus<OrderStateName>(currentState);
+    },
+    onStart: async (startCtx) => {
+      const isResumed = !!input.restoredState;
+      if (isResumed) return { context: startCtx };
 
-      // Persist order to database
-      log.info('[OMS] Saving order to database');
+      // Idempotent bootstrap only. All order-intake orchestration — fulfiller
+      // assignment (assigning_fulfillers), fulfiller-order creation + starting the
+      // fulfillment child (requesting_fulfillment) — lives in the state machine.
       await saveOrderToDatabase(input.order);
+      await insertStatusHistoryEntry(input.order.orderId, startCtx.statusHistory[0]);
+      await indexOrder(buildOrderDocument(input.order, startCtx, input.customerEmail));
 
-      // Persist initial status history entry
-      await insertStatusHistoryEntry(input.order.orderId, state.statusHistory[0]);
+      return { context: startCtx, nextState: 'pending_assignment' };
+    },
+    onTransition: async (from, to, eventDesc, _ctx, at) => {
+      state.updatedAt = at;
 
-      // Index order to Elasticsearch
-      await indexOrder(getOrderDocument(state));
+      const cleanToStatus = deriveDisplayStatus<OrderStatus>(to);
 
-      // Index/upsert customer to Elasticsearch
-      await indexCustomer({
-        email: input.customerEmail,
-        firstName: input.order.shippingAddress.firstName,
-        lastName: input.order.shippingAddress.lastName,
-        phone: input.order.shippingAddress.phone || '',
-        totalSpent: input.order.total,
-        orderCount: 1,
-        lastOrderAt: new Date().toISOString()
-      });
+      if (cleanToStatus !== from) {
+        let note = 'State transition';
+        let updatedBy: 'system' | 'admin' | 'customer' = 'system';
 
-      // ── AUTO-ASSIGNMENT: Resolve fulfiller assignments via plugins ──
-      const lineItems: OrderLineItem[] = input.order.items.map((item) => {
-        // CartItem may carry extra fields at runtime (productId, title) from checkout
-        const ext = item as CartItem & { productId?: string; title?: string; variantTitle?: string };
-        return {
-          lineItemId: item.lineItemId,
-          variantId: item.variantId,
-          productId: ext.productId || 'unknown',
-          quantity: item.quantity,
-          productTitle: ext.title || 'Unknown Product',
-          variantTitle: ext.variantTitle || 'Unknown Variant',
-          unitPrice: item.price,
-          currency: input.order.currency
-        } as OrderLineItem;
-      });
+        if (eventDesc !== 'timeout' && eventDesc !== 'signal') {
+          if (eventDesc.type === 'updateStatus') {
+            note = eventDesc.note || 'Status updated';
+            updatedBy = eventDesc.updatedBy;
+          } else if (eventDesc.type === 'cancelOrder') {
+            note = eventDesc.reason || 'Order cancelled';
+            updatedBy = 'admin';
+          } else if (eventDesc.type === 'submitFeedback') {
+            note = 'Customer submitted feedback';
+            updatedBy = 'customer';
+          }
+        } else if (eventDesc === 'signal') {
+          note = 'Status updated from fulfillment';
+        }
 
-      log.info('[OMS] Resolving fulfiller assignments', { itemCount: lineItems.length });
-      const assignments = await resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
-
-      // Auto-assign all items based on plugin resolution
-      for (let i = 0; i < input.order.items.length; i++) {
-        const item = input.order.items[i];
-        const assignment = assignments[i];
-
-        state.assignments.push({
-          assignmentId: `asg-${uuid4().slice(0, 8)}`,
-          lineItemId: item.lineItemId,
-          variantId: item.variantId,
-          fulfillerId: assignment.fulfillerId,
-          fulfillerName: assignment.fulfillerName,
-          quantity: item.quantity,
-          status: 'assigned'
-        });
+        const entry: StatusHistoryEntry = {
+          status: cleanToStatus,
+          timestamp: at,
+          note,
+          updatedBy,
+        };
+        state.statusHistory.push(entry);
+        await insertStatusHistoryEntry(input.order.orderId, entry);
       }
 
-      const simulatedCount = state.assignments.filter(
-        (a) => a.fulfillerId === 'default-fulfiller' || a.fulfillerId === 'simulated'
-      ).length;
-      log.info('[OMS] Auto-assignment complete', {
-        totalAssignments: state.assignments.length,
-        simulated: simulatedCount
-      });
-
-      // All items are now assigned, move to ready_to_fulfill
-      state.status = 'ready_to_fulfill';
-      const readyEntry: StatusHistoryEntry = {
-        status: 'ready_to_fulfill',
-        timestamp: new Date().toISOString(),
-        note: 'All items auto-assigned',
-        updatedBy: 'system'
-      };
-      state.statusHistory.push(readyEntry);
-
-      // Persist assignments to database
       await updateOrderInDatabase(input.order.orderId, {
         status: state.status,
         statusHistory: state.statusHistory,
-        assignments: state.assignments
-      });
-      await insertStatusHistoryEntry(input.order.orderId, readyEntry);
-
-      // Trigger fulfillment
-      log.info('[OMS] Triggering fulfillment');
-      await triggerFulfillment(state, input, 'system');
-      log.info('[OMS] Fulfillment triggered, entering main loop', {
-        status: state.status,
-        fulfillerOrderCount: state.fulfillerOrders.length
+        assignments: state.assignments,
+        fulfillerOrders: state.fulfillerOrders,
+        customerFeedback: state.customerFeedback,
+        deliveredAt: state.deliveredAt,
       });
 
-      return { context: startCtx, nextState: 'processing' as const };
-    },
-    onContextUpdate: (newCtx: OmsWorkflowContext) => {
-      ctx = newCtx;
-    },
-    // Projection sync after every transition (replaces the old dirty-flag loop).
-    onTransition: async (_from, _to, _event, currentCtx: OmsWorkflowContext) => {
-      await indexOrder(getOrderDocument(currentCtx.state));
-      for (const so of currentCtx.state.fulfillerOrders) {
+      await indexOrder(getOrderDocument());
+
+      for (const so of state.fulfillerOrders) {
         await indexFulfillerOrder(buildFulfillerOrderDocument(so));
       }
     },
-    onTerminal: async (finalCtx: OmsWorkflowContext) => {
-      log.info('[OMS] Reached terminal state', { finalStatus: finalCtx.state.status });
-      await indexOrder(getOrderDocument(finalCtx.state));
-      for (const so of finalCtx.state.fulfillerOrders) {
+    continueAsNewThreshold: 200,
+    serializeForContinueAsNew: (currentCtx) => {
+      return {
+        ...input,
+        restoredState: currentCtx,
+        signalCount: 0,
+      };
+    },
+    onCancellation: async (cancelCtx) => {
+      log.info('[OMS] Order workflow cancelled, signaling fulfillment to cancel', {
+        orderId: input.order.orderId,
+      });
+      cancelCtx.status = 'cancelled';
+      const cancelEntry: StatusHistoryEntry = {
+        status: 'cancelled',
+        timestamp: new Date().toISOString(),
+        note: 'Order workflow cancelled',
+        updatedBy: 'system',
+      };
+      cancelCtx.statusHistory.push(cancelEntry);
+
+      // Cancel the child fulfillment workflow if it exists
+      try {
+        const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', input.order.orderId);
+        const handle = getExternalWorkflowHandle(fulfillmentWorkflowId);
+        await handle.cancel();
+      } catch (e) {
+        log.warn('[OMS] Failed to cancel fulfillment workflow (may have already completed)', {
+          error: String(e),
+        });
+      }
+
+      await updateOrderInDatabase(input.order.orderId, {
+        status: cancelCtx.status,
+        statusHistory: cancelCtx.statusHistory,
+      });
+      await insertStatusHistoryEntry(input.order.orderId, cancelEntry);
+      await indexOrder(getOrderDocument());
+    },
+    onTerminal: async (finalCtx, terminalState) => {
+      log.info('[OMS] Order reached terminal state', {
+        orderId: input.order.orderId,
+        terminalState,
+      });
+      // Final projection sync to ensure ES is consistent
+      await indexOrder(getOrderDocument());
+      for (const so of finalCtx.fulfillerOrders) {
         await indexFulfillerOrder(buildFulfillerOrderDocument(so));
       }
-    }
+    },
   };
 
-  const updateHandlers: MappedUpdateRegistration<OrderEvent, OmsWorkflowContext, OrderState>[] = [
+  const updateHandlers: MappedUpdateRegistration<OrderEvent, OrderState, OrderState>[] = [
     {
       definition: updateStatusUpdate,
-      toEvent: (s: UpdateStatusSignal) => ({ type: 'updateStatus', ...s })
+      toEvent: (args) => ({
+        type: 'updateStatus',
+        status: args.status,
+        note: args.note,
+        updatedBy: args.updatedBy,
+      }),
+      formatError: (err) => ({ ...state, error: err }),
     },
     {
       definition: cancelOrderUpdate,
-      toEvent: (s: CancelOrderSignal) => ({ type: 'cancelOrder', reason: s.reason })
+      toEvent: (args) => ({ type: 'cancelOrder', reason: args.reason }),
+      formatError: (err) => ({ ...state, error: err }),
     },
     {
       definition: submitFeedbackUpdate,
-      toEvent: (s: SubmitFeedbackSignal) => ({ type: 'submitFeedback', rating: s.rating, comment: s.comment })
-    }
+      toEvent: (args) => ({ type: 'submitFeedback', rating: args.rating, comment: args.comment }),
+      formatError: (err) => ({ ...state, error: err }),
+    },
+    {
+      definition: refundOrderUpdate,
+      toEvent: (args) => ({
+        type: 'refundOrder',
+        lines: args.lines,
+        reason: args.reason,
+        updatedBy: args.updatedBy,
+      }),
+      // No formatError: invalid refund selections (over-refund, unknown line)
+      // should reject the update so the caller sees the failure.
+    },
+    {
+      definition: requestReturnUpdate,
+      toEvent: (args) => ({
+        type: 'requestReturn',
+        lines: args.lines,
+        reason: args.reason,
+        updatedBy: args.updatedBy,
+      }),
+      formatError: (err) => ({ ...state, error: err }),
+    },
+    {
+      definition: confirmReturnUpdate,
+      toEvent: (args) => ({ type: 'confirmReturn', reason: args.reason }),
+      // No formatError: an invalid return refund selection should reject the update.
+    },
+    {
+      definition: denyReturnUpdate,
+      toEvent: (args) => ({ type: 'denyReturn', reason: args.reason }),
+      formatError: (err) => ({ ...state, error: err }),
+    },
   ];
 
-  ctx = await runStateMachine<
-    OmsStateName,
+  await runStateMachine<
+    OrderStateName,
     OrderEvent,
-    OmsWorkflowContext,
+    OrderState,
     OrderState,
     FulfillmentStatusUpdate
-  >(config, ctx, updateHandlers, fulfillmentStatusSignal);
+  >(config, state, updateHandlers, fulfillmentStatusSignal);
 
-  return ctx.state;
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/**
- * Trigger fulfillment for all assigned items.
- * Groups assignments by fulfiller, builds FulfillerOrder records,
- * then starts a standalone fulfillment workflow via activity.
- */
-async function triggerFulfillment(
-  state: OrderState,
-  input: OrderWorkflowInput,
-  updatedBy: 'admin' | 'system'
-): Promise<void> {
-  // Group assignments by fulfillerId
-  const byFulfiller: Record<string, typeof state.assignments> = {};
-  for (const assignment of state.assignments) {
-    if (!byFulfiller[assignment.fulfillerId]) {
-      byFulfiller[assignment.fulfillerId] = [];
-    }
-    byFulfiller[assignment.fulfillerId].push(assignment);
-  }
-
-  log.info('[OMS] triggerFulfillment grouping', { fulfillerIds: Object.keys(byFulfiller) });
-
-  // Build FulfillerOrder records and fulfillment inputs
-  const fulfillmentFulfillerOrders: FulfillmentFulfillerOrderInput[] = [];
-
-  for (const [fulfillerId, assignments] of Object.entries(byFulfiller)) {
-    const fulfillerOrderId = `so-${uuid4().slice(0, 8)}`;
-    const isSimulated = fulfillerId === 'default-fulfiller' || fulfillerId === 'simulated';
-    log.info('[OMS] Creating fulfiller order', { fulfillerOrderId, fulfillerId, itemCount: assignments.length, isSimulated });
-
-    // Build OMS FulfillerOrder (stays in OMS state)
-    const fulfillerOrder: FulfillerOrder = {
-      fulfillerOrderId,
-      orderId: input.order.orderId,
-      fulfillerId,
-      fulfillerName: assignments[0].fulfillerName || fulfillerId,
-      status: 'pending',
-      items: assignments.map((a) => ({
-        assignmentId: a.assignmentId,
-        variantId: a.variantId,
-        quantity: a.quantity
-      })),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      statusHistory: [
-        {
-          status: 'pending',
-          timestamp: new Date().toISOString(),
-          note: 'Fulfiller order created'
-        }
-      ]
-    };
-    state.fulfillerOrders.push(fulfillerOrder);
-
-    // Index fulfiller order to Elasticsearch
-    await indexFulfillerOrder(buildFulfillerOrderDocument(fulfillerOrder));
-
-    // Update assignment references
-    for (const assignment of assignments) {
-      assignment.fulfillerOrderId = fulfillerOrderId;
-      assignment.status = 'fulfilled';
-    }
-
-    // Build fulfillment items from order items
-    const fulfillmentItems: FulfillmentItem[] = assignments.map((a) => {
-      const orderItem = input.order.items.find((i) => i.variantId === a.variantId);
-      return {
-        sku: a.variantId,
-        productId: a.variantId,
-        variantId: a.variantId,
-        quantity: a.quantity,
-        unitPrice: orderItem?.price ?? 0,
-        title: `Item ${a.variantId.slice(0, 8)}`
-      };
-    });
-
-    fulfillmentFulfillerOrders.push({
-      fulfillerOrderId,
-      fulfillerId,
-      fulfillerType: 'simulated',
-      items: fulfillmentItems
-    });
-  }
-
-  // Start standalone fulfillment workflow via activity
-  const fulfillmentInput = {
-    orderId: input.order.orderId,
-    cartId: input.order.cartId,
-    customerId: input.customerEmail,
-    customerEmail: input.customerEmail,
-    confirmationNumber: input.order.confirmationNumber,
-    shippingAddress: {
-      firstName: input.order.shippingAddress.firstName,
-      lastName: input.order.shippingAddress.lastName,
-      email: input.customerEmail,
-      phone: input.order.shippingAddress.phone,
-      address1: input.order.shippingAddress.address1,
-      address2: input.order.shippingAddress.address2,
-      city: input.order.shippingAddress.city,
-      region: input.order.shippingAddress.state,
-      zip: input.order.shippingAddress.postalCode,
-      country: input.order.shippingAddress.country
-    },
-    shippingMethod: 'standard',
-    fulfillerOrders: fulfillmentFulfillerOrders
-  };
-
-  log.info('[OMS] Starting fulfillment workflow via activity', {
-    orderId: input.order.orderId,
-    fulfillerOrderCount: fulfillmentFulfillerOrders.length
-  });
-
-  await startFulfillmentWorkflow(fulfillmentInput);
-
-  // Mark all fulfiller orders as processing
-  for (const fulfillerOrder of state.fulfillerOrders) {
-    fulfillerOrder.status = 'processing';
-    fulfillerOrder.statusHistory.push({
-      status: 'processing',
-      timestamp: new Date().toISOString(),
-      note: 'Submitted to fulfillment workflow'
-    });
-    await indexFulfillerOrder(buildFulfillerOrderDocument(fulfillerOrder));
-  }
-
-  state.status = 'processing';
-  const processingEntry: StatusHistoryEntry = {
-    status: 'processing',
-    timestamp: new Date().toISOString(),
-    note: `Fulfilled via ${Object.keys(byFulfiller).length} fulfiller(s)`,
-    updatedBy
-  };
-  state.statusHistory.push(processingEntry);
-  await insertStatusHistoryEntry(input.order.orderId, processingEntry);
-
-  await updateOrderInDatabase(input.order.orderId, {
-    status: state.status,
-    statusHistory: state.statusHistory,
-    assignments: state.assignments,
-    fulfillerOrders: state.fulfillerOrders
-  });
-
-  await indexOrder(buildOrderDocument(input.order, state, input.customerEmail));
+  return state;
 }

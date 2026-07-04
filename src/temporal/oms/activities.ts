@@ -27,7 +27,6 @@ export interface OmsActivities {
   indexOrder(doc: Elasticsearch.OrderDocument): Promise<void>;
   indexFulfillerOrder(doc: Elasticsearch.FulfillerOrderDocument): Promise<void>;
   indexCustomer(doc: Elasticsearch.CustomerDocument): Promise<void>;
-  startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string>;
 }
 
 // Database write activities: order persistence and status tracking
@@ -76,8 +75,7 @@ export const {
 export const {
   getOrdersByEmail,
   getOrderById,
-  resolveFulfillerAssignments,
-  startFulfillmentWorkflow
+  resolveFulfillerAssignments
 } = proxyActivities<OmsActivities>({
   startToCloseTimeout: '1m',
   retry: {

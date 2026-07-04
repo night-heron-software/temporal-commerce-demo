@@ -31,31 +31,48 @@ export interface OrderLineItem {
   thumbnailS3Key?: string; // Persisted copy: order-snapshots/{orderId}/{lineItemId}.jpg
 }
 
-// Order lifecycle status
+// Order lifecycle status (superset of the machine states — includes terminals)
 export type OrderStatus =
   | 'pending_assignment'
+  | 'assigning_fulfillers'
+  | 'requesting_fulfillment'
   | 'ready_to_fulfill'
   | 'processing'
+  | 'partially_shipped'
   | 'shipped'
   | 'delivered'
+  | 'return_requested'
   | 'cancelled'
   | 'refunded'
+  | 'returned'
   | 'complete';
 
 export interface OrderWorkflowInput {
   order: Order;
   customerEmail: string;
+  /** Continue-as-new carryover: the full order state to resume from. */
+  restoredState?: OrderState;
+  signalCount?: number;
 }
 
 export interface OrderState {
   order: Order;
   status: OrderStatus;
+  /** Set on rejected updates via formatError (never persisted as part of the lifecycle). */
+  error?: string;
   updatedAt?: string;
   deliveredAt?: string;
   customerFeedback?: CustomerFeedback;
   statusHistory: StatusHistoryEntry[];
   assignments: OrderAssignment[];
   fulfillerOrders: FulfillerOrder[];
+  /** Ledger of refunds applied to this order (supports partial / per-line refunds). */
+  refunds?: RefundRecord[];
+  /**
+   * In-flight return request while the order sits in `return_requested`.
+   * Transient workflow state — cleared on confirm (→ `returned`) or deny (→ `delivered`).
+   */
+  returnRequest?: ReturnRequestRecord;
 }
 
 // Assignment of a line item quantity to a fulfiller
@@ -67,6 +84,9 @@ export interface OrderAssignment {
   fulfillerName?: string;
   quantity: number;
   status: 'pending' | 'assigned' | 'fulfilled' | 'shipped' | 'delivered' | 'rejected';
+  sku?: string;
+  /** Resolved fulfiller type (plugin id / 'simulated'), threaded to the fulfillment request. */
+  fulfillerType?: string;
   fulfillerOrderId?: string; // Set when order is fulfilled
   carrier?: string; // Shipping carrier (e.g., 'USPS', 'FedEx')
 }
@@ -136,7 +156,45 @@ export interface StatusHistoryEntry {
   updatedBy: 'system' | 'admin' | 'customer';
 }
 
-// Update signals
+// ==================
+// Refunds & Returns
+// ==================
+
+/** One line-item selection in a refund / return request. */
+export interface RefundLineInput {
+  lineItemId: string;
+  quantity: number;
+}
+
+/**
+ * A single refund applied to an order — recorded on OrderState for audit and
+ * over-refund guarding. Simplified from the mono version: the demo has no per-item
+ * economics (markup/commission/fulfiller cost), so only the retail refund and the
+ * pro-rated tax are tracked.
+ */
+export interface RefundRecord {
+  refundId: string;
+  timestamp: string;
+  reason?: string;
+  lines: Array<{ lineItemId: string; quantity: number }>;
+  /** Aggregate amounts (same currency units as the order totals). */
+  refundAmount: number;
+  taxAmount: number;
+}
+
+/** A pending return recorded on OrderState while the order is in `return_requested`. */
+export interface ReturnRequestRecord {
+  /** Lines + quantities to return; omit for a full return of all remaining quantity. */
+  lines?: RefundLineInput[];
+  reason?: string;
+  requestedAt: string;
+  requestedBy?: 'system' | 'admin' | 'customer';
+}
+
+// ==================
+// Update payloads
+// ==================
+
 export interface UpdateStatusSignal {
   status: OrderStatus;
   note?: string;
@@ -152,24 +210,68 @@ export interface CancelOrderSignal {
   reason?: string;
 }
 
+/** `lines` selects what to refund; omit / empty = full refund of all remaining quantity. */
+export interface RefundOrderSignal {
+  lines?: RefundLineInput[];
+  reason?: string;
+  updatedBy?: 'system' | 'admin' | 'customer';
+}
+
+/** `lines` selects what to return; omit / empty = full return of all remaining quantity. */
+export interface RequestReturnSignal {
+  lines?: RefundLineInput[];
+  reason?: string;
+  updatedBy?: 'system' | 'admin' | 'customer';
+}
+
+export interface ConfirmReturnSignal {
+  reason?: string;
+}
+
+export interface DenyReturnSignal {
+  reason?: string;
+}
+
 // ==================
-// State-machine driver types (prepare→decide→finalize refactor)
+// State-machine driver types
 // ==================
 
-/** The single waiting state; the startup pipeline runs in the driver's onStart hook. */
-export type OmsStateName = 'processing';
+/** The machine's waiting + transitional states (terminals are `__terminal:` targets). */
+export type OrderStateName =
+  | 'pending_assignment'
+  | 'assigning_fulfillers'
+  | 'requesting_fulfillment'
+  | 'ready_to_fulfill'
+  | 'processing'
+  | 'partially_shipped'
+  | 'shipped'
+  | 'delivered'
+  | 'return_requested';
 
 /** Driver event union — one member per admin/customer update. */
 export type OrderEvent =
-  | ({ type: 'updateStatus' } & UpdateStatusSignal)
-  | ({ type: 'cancelOrder' } & CancelOrderSignal)
-  | ({ type: 'submitFeedback' } & SubmitFeedbackSignal);
-
-/** Workflow context: the order state plus the input's customer email (needed by I/O phases). */
-export interface OmsWorkflowContext {
-  state: OrderState;
-  customerEmail: string;
-}
+  | {
+      type: 'updateStatus';
+      status: OrderStatus;
+      note?: string;
+      updatedBy: 'system' | 'admin' | 'customer';
+    }
+  | { type: 'cancelOrder'; reason?: string }
+  | { type: 'submitFeedback'; rating: 1 | 2 | 3 | 4 | 5; comment?: string }
+  | {
+      type: 'refundOrder';
+      lines?: RefundLineInput[];
+      reason?: string;
+      updatedBy?: 'system' | 'admin' | 'customer';
+    }
+  | {
+      type: 'requestReturn';
+      lines?: RefundLineInput[];
+      reason?: string;
+      updatedBy?: 'system' | 'admin' | 'customer';
+    }
+  | { type: 'confirmReturn'; reason?: string }
+  | { type: 'denyReturn'; reason?: string };
 
 // Query result type for order status history (used by admin server actions)
 export interface StatusHistoryRow {

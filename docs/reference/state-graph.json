@@ -735,14 +735,216 @@
       "domain": "oms",
       "registry": "OMS_STATES",
       "source": "src/temporal/oms/states.ts",
-      "initialState": "processing",
+      "initialState": "pending_assignment",
       "terminals": [
         "cancelled",
         "complete",
-        "delivered",
-        "refunded"
+        "refunded",
+        "returned"
       ],
       "states": [
+        {
+          "name": "pending_assignment",
+          "doc": "Transitional initial state. (The mono posts the ORDER_CAPTURE accounting transaction\nhere; the demo has no ledger, so this is a pure hop to `assigning_fulfillers`.)",
+          "timeout": "1 minute",
+          "transitional": true,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "(auto)",
+              "kind": "auto",
+              "to": "assigning_fulfillers"
+            }
+          ]
+        },
+        {
+          "name": "assigning_fulfillers",
+          "doc": "Transitional state. `prepare` calls the fulfiller-resolution activity (impure I/O);\n`decide` records the resulting assignments on the order. Advances to\n`requesting_fulfillment` when at least one assignment resolved, otherwise falls back\nto the manual `ready_to_fulfill` path.",
+          "timeout": "1 minute",
+          "transitional": true,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "(auto)",
+              "kind": "auto",
+              "to": "requesting_fulfillment"
+            },
+            {
+              "on": "(auto)",
+              "kind": "auto",
+              "to": "ready_to_fulfill"
+            }
+          ]
+        },
+        {
+          "name": "requesting_fulfillment",
+          "timeout": "1 minute",
+          "transitional": true,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "(auto)",
+              "kind": "auto",
+              "to": "processing"
+            }
+          ]
+        },
+        {
+          "name": "ready_to_fulfill",
+          "timeout": "365 days",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "cancelOrder",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "processing",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "partially_shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "return_requested",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:refunded",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:returned",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "ready_to_fulfill",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "ready_to_fulfill",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            }
+          ]
+        },
         {
           "name": "processing",
           "timeout": "365 days",
@@ -751,25 +953,75 @@
           "hasFinalize": true,
           "transitions": [
             {
-              "on": "updateStatus",
+              "on": "cancelOrder",
               "kind": "update",
-              "to": "__terminal:delivered",
+              "to": "__terminal:cancelled",
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase",
                 "sendOrderStatusEmail",
-                "signalFulfillmentCancel"
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
               "on": "updateStatus",
               "kind": "update",
-              "to": "__terminal:complete",
+              "to": "processing",
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase",
                 "sendOrderStatusEmail",
-                "signalFulfillmentCancel"
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "partially_shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "return_requested",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
@@ -777,10 +1029,11 @@
               "kind": "update",
               "to": "__terminal:cancelled",
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase",
                 "sendOrderStatusEmail",
-                "signalFulfillmentCancel"
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
@@ -788,10 +1041,152 @@
               "kind": "update",
               "to": "__terminal:refunded",
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase",
                 "sendOrderStatusEmail",
-                "signalFulfillmentCancel"
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:returned",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "processing",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "processing",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "delivered",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "shipped",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "partially_shipped",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "partially_shipped",
+          "timeout": "365 days",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "cancelOrder",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
@@ -799,60 +1194,702 @@
               "kind": "update",
               "to": "processing",
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase",
                 "sendOrderStatusEmail",
-                "signalFulfillmentCancel"
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
-              "on": "cancelOrder",
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "partially_shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "return_requested",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
               "kind": "update",
               "to": "__terminal:cancelled",
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase",
                 "sendOrderStatusEmail",
-                "signalFulfillmentCancel"
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
-              "on": "submitFeedback",
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:refunded",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:returned",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
               "kind": "update",
               "to": "__terminal:complete",
               "finalizeActivities": [
-                "updateOrderInDatabase",
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
                 "sendFeedbackThankYouEmail",
-                "insertStatusHistoryEntry"
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
               "on": "timeout",
               "kind": "timeout",
-              "to": "processing"
+              "to": "partially_shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "partially_shipped",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "delivered",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "shipped",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
             },
             {
               "on": "signal",
               "kind": "signal",
               "to": "processing",
               "conditions": [
-                "facts.length === 0"
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
               ],
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase"
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "shipped",
+          "timeout": "365 days",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "cancelOrder",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "processing",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "partially_shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "return_requested",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:refunded",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:returned",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             },
             {
               "on": "signal",
               "kind": "signal",
-              "to": "__terminal:delivered",
+              "to": "shipped",
               "conditions": [
-                "facts.length === 0"
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
               ],
               "finalizeActivities": [
-                "insertStatusHistoryEntry",
-                "updateOrderInDatabase"
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "delivered",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "partially_shipped",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "processing",
+              "conditions": [
+                "facts.length === 0",
+                "agg === 'delivered'",
+                "agg === 'shipped'",
+                "agg === 'partially_shipped'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ],
+              "signalKinds": [
+                "applyFulfillmentStatus"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "delivered",
+          "timeout": "30 days",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "submitFeedback",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:refunded",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "delivered",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "processing",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "partially_shipped",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "shipped",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "return_requested",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:cancelled",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:returned",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "updateStatus",
+              "kind": "update",
+              "to": "__terminal:complete",
+              "conditions": [
+                "event.status === 'refunded'"
+              ],
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "refundOrder",
+              "kind": "update",
+              "to": "__terminal:refunded",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "refundOrder",
+              "kind": "update",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "requestReturn",
+              "kind": "update",
+              "to": "return_requested",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "return_requested",
+          "doc": "A return has been requested on a delivered order. `confirmReturn` issues the refund\n(via the decider's ReturnConfirmed fact) and finishes the order as `returned`; `denyReturn`\nclears the request and drops back to `delivered`.",
+          "timeout": "30 days",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "confirmReturn",
+              "kind": "update",
+              "to": "__terminal:returned",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "denyReturn",
+              "kind": "update",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "return_requested",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "return_requested",
+              "finalizeActivities": [
+                "sendOrderStatusEmail",
+                "triggerFulfillmentCancel",
+                "sendFeedbackThankYouEmail",
+                "indexFulfillerOrder",
+                "startChild"
               ]
             }
           ]
@@ -894,7 +1931,7 @@
     {
       "from": "oms",
       "to": "fulfillment",
-      "kind": "start",
+      "kind": "startChild",
       "label": "fulfillmentWorkflow"
     }
   ]
