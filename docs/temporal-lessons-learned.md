@@ -254,12 +254,12 @@ ctx = await runStateMachine(config, ctx, updateHandlers);
 export async function signalInventoryChanged(blankSkus: string[]) {
   const client = await getTemporalClient();
   try {
-    await client.workflow.getHandle('inventory-service')
+    await client.workflow.getHandle('demo.inventory.service')
       .signal('inventoryChanged', { blankSkus });
   } catch (e) {
     // Auto-start if not running
     await client.workflow.signalWithStart('inventoryServiceWorkflow', {
-      workflowId: 'inventory-service',
+      workflowId: 'demo.inventory.service',
       taskQueue: INVENTORY_TASK_QUEUE,
       signal: 'inventoryChanged',
       signalArgs: [{ blankSkus }],

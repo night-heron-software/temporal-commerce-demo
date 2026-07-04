@@ -40,6 +40,13 @@ graph TB
 | **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
 | **Identity** | Email-based shopper auth and address persistence | Cookie sessions, auto-create accounts, address pre-fill |
 
+Domain workflows are authored as **prepare → decide → finalize state machines** around
+pure, unit-tested deciders (`src/temporal/framework`). Every workflow carries a parseable
+`demo.{domain}.{entityId}` ID plus correlation Search Attributes, so one Temporal
+visibility query (`CorrelationId = '<cartId>'`) returns the whole
+cart → checkout → order → fulfillment journey; each state transition is also recorded to
+Cassandra with a full context snapshot for the order-trace tool.
+
 ## Quick Start
 
 ### Prerequisites
@@ -78,6 +85,7 @@ This starts the Next.js dev server and Temporal workers concurrently.
 
 - **Storefront** → [http://localhost:3000/shop](http://localhost:3000/shop)
 - **Temporal UI** → [http://localhost:8233](http://localhost:8233)
+- **Order Trace (dev tool)** → [http://localhost:3000/dev/order-trace](http://localhost:3000/dev/order-trace) — cross-domain trace of an order's workflow journey with per-transition state history
 
 ## NPM Scripts
 
