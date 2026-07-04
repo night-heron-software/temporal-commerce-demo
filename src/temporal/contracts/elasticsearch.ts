@@ -14,7 +14,7 @@ export interface ProductDocument {
   id: string;
   name: string;
   sku?: string;
-  supplierType?: string;
+  fulfillerType?: string;
   description?: string;
   type: 'PRINTED' | 'PHYSICAL' | 'DIGITAL';
   brand?: string;
@@ -81,9 +81,9 @@ export interface OrderDocument {
   items: OrderItemDocument[];
   itemCount: number;
   variantIds: string[]; // Flattened for easy lookup
-  // Assignments and supplier orders
+  // Assignments and fulfiller orders
   assignments: OrderAssignmentDocument[];
-  supplierOrders: OrderSupplierOrderDocument[];
+  fulfillerOrders: OrderFulfillerOrderDocument[];
   // Status tracking
   statusHistory: OrderStatusHistoryDocument[];
   deliveredAt?: string;
@@ -123,18 +123,18 @@ export interface OrderAssignmentDocument {
   assignmentId: string;
   lineItemId: string;
   variantId: string;
-  supplierId: string;
-  supplierName?: string;
+  fulfillerId: string;
+  fulfillerName?: string;
   quantity: number;
   status: string;
-  supplierOrderId?: string;
+  fulfillerOrderId?: string;
   carrier?: string;
 }
 
-export interface OrderSupplierOrderDocument {
-  supplierOrderId: string;
-  supplierId: string;
-  supplierName: string;
+export interface OrderFulfillerOrderDocument {
+  fulfillerOrderId: string;
+  fulfillerId: string;
+  fulfillerName: string;
   status: string;
   itemCount: number;
   carrier?: string;
@@ -168,14 +168,14 @@ export interface CustomerDocument {
   lastOrderAt: string;
 }
 
-// Suppliers Index
-export interface SupplierDocument {
-  supplierId: string;
+// Fulfillers Index
+export interface FulfillerDocument {
+  fulfillerId: string;
   name: string;
-  locations: SupplierLocationDocument[];
+  locations: FulfillerLocationDocument[];
 }
 
-export interface SupplierLocationDocument {
+export interface FulfillerLocationDocument {
   locationId: string;
   name: string;
   cost: number;
@@ -194,23 +194,23 @@ export interface InventoryDocument {
   totalStock: number;
   reservedStock: number;
   availableStock: number;
-  supplierCount: number;
-  supplierLocations: InventorySupplierLocationDocument[];
+  fulfillerCount: number;
+  fulfillerLocations: InventoryFulfillerLocationDocument[];
   reservations: InventoryReservationDocument[]; // Item-level reservations only
   reservationIds: string[]; // Flattened for lookup (all reservations)
   cartIds: string[]; // Flattened for lookup (all unique cart IDs)
 }
 
-export interface InventorySupplierLocationDocument {
-  supplierId: string;
-  supplierName: string;
+export interface InventoryFulfillerLocationDocument {
+  fulfillerId: string;
+  fulfillerName: string;
   totalStock: number;
   reservedStock: number;
   orderedStock: number;
   city: string;
   state: string;
   country: string;
-  reservations: InventoryReservationDocument[]; // Supplier-level reservations
+  reservations: InventoryReservationDocument[]; // Fulfiller-level reservations
 }
 
 export interface InventoryReservationDocument {
@@ -222,30 +222,30 @@ export interface InventoryReservationDocument {
   expiresAt: number | null;
 }
 
-// Supplier Orders Index
-export interface SupplierOrderDocument {
-  supplierOrderId: string;
+// Fulfiller Orders Index
+export interface FulfillerOrderDocument {
+  fulfillerOrderId: string;
   orderId: string;
-  supplierId: string;
-  supplierName: string;
+  fulfillerId: string;
+  fulfillerName: string;
   status: string;
-  items: SupplierOrderItemDocument[];
+  items: FulfillerOrderItemDocument[];
   itemCount: number;
   carrier?: string;
   trackingNumber?: string;
   createdAt: string;
   updatedAt: string;
   rejectionReason?: string;
-  statusHistory: SupplierOrderHistoryEntryDocument[];
+  statusHistory: FulfillerOrderHistoryEntryDocument[];
 }
 
-export interface SupplierOrderItemDocument {
+export interface FulfillerOrderItemDocument {
   assignmentId: string;
   variantId: string;
   quantity: number;
 }
 
-export interface SupplierOrderHistoryEntryDocument {
+export interface FulfillerOrderHistoryEntryDocument {
   status: string;
   timestamp: string;
   note?: string;
@@ -290,7 +290,7 @@ export interface FulfillmentDocument {
   orderId: string;
   customerId: string;
   status: string;
-  supplierOrderCount: number;
+  fulfillerOrderCount: number;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
@@ -315,9 +315,9 @@ export const ES_INDICES = {
   collections: 'collections',
   orders: 'orders',
   customers: 'customers',
-  suppliers: 'suppliers',
+  fulfillers: 'fulfillers',
   inventory: 'inventory',
-  supplierOrders: 'supplier_orders',
+  fulfillerOrders: 'fulfiller_orders',
   carts: 'carts',
   reservations: 'reservations',
   fulfillments: 'fulfillments',

@@ -8,7 +8,7 @@ import { getCassandraClient, cassandraTypes as types, getElasticsearchClient } f
 import { Order, OrderState, OrderStatus, OrderAssignment } from './types';
 import type { Elasticsearch } from '../contracts';
 import { ES_INDICES } from '../contracts/elasticsearch';
-import type { OrderLineItem, SupplierResolutionContext, SupplierAssignment } from '../contracts/product-type';
+import type { OrderLineItem, FulfillerResolutionContext, FulfillerAssignment } from '../contracts/product-type';
 
 
 
@@ -61,11 +61,11 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
       assignment_id: a.assignmentId,
       line_item_id: a.lineItemId,
       variant_id: a.variantId,
-      supplier_id: a.supplierId,
-      supplier_name: a.supplierName || '',
+      fulfiller_id: a.fulfillerId,
+      fulfiller_name: a.fulfillerName || '',
       quantity: a.quantity,
       status: a.status,
-      supplier_order_id: a.supplierOrderId || ''
+      fulfiller_order_id: a.fulfillerOrderId || ''
     })) || [];
 
   // Execute all three inserts as an atomic logged batch
@@ -176,11 +176,11 @@ export async function updateOrderInDatabase(
       assignment_id: a.assignmentId,
       line_item_id: a.lineItemId,
       variant_id: a.variantId,
-      supplier_id: a.supplierId,
-      supplier_name: a.supplierName || '',
+      fulfiller_id: a.fulfillerId,
+      fulfiller_name: a.fulfillerName || '',
       quantity: a.quantity,
       status: a.status,
-      supplier_order_id: a.supplierOrderId || ''
+      fulfiller_order_id: a.fulfillerOrderId || ''
     }));
 
     await client.execute(
@@ -190,13 +190,13 @@ export async function updateOrderInDatabase(
     );
   }
 
-  // Update supplier orders
-  if (updates.supplierOrders) {
-    const supplierOrdersCql = updates.supplierOrders.map((so) => ({
-      supplier_order_id: so.supplierOrderId,
+  // Update fulfiller orders
+  if (updates.fulfillerOrders) {
+    const fulfillerOrdersCql = updates.fulfillerOrders.map((so) => ({
+      fulfiller_order_id: so.fulfillerOrderId,
       order_id: so.orderId,
-      supplier_id: so.supplierId,
-      supplier_name: so.supplierName,
+      fulfiller_id: so.fulfillerId,
+      fulfiller_name: so.fulfillerName,
       status: so.status,
       items: so.items.map((item) => ({
         assignment_id: item.assignmentId,
@@ -211,8 +211,8 @@ export async function updateOrderInDatabase(
     }));
 
     await client.execute(
-      `UPDATE orders SET supplier_orders = ?, updated_at = ? WHERE order_id = ?`,
-      [supplierOrdersCql, now, orderIdUuid],
+      `UPDATE orders SET fulfiller_orders = ?, updated_at = ? WHERE order_id = ?`,
+      [fulfillerOrdersCql, now, orderIdUuid],
       { prepare: true }
     );
   }
@@ -238,18 +238,18 @@ export async function sendFeedbackThankYouEmail(email: string, _orderId: string)
 }
 
 /**
- * Resolve supplier assignments — always assigns to 'default-supplier' supplier
+ * Resolve fulfiller assignments — always assigns to 'default-fulfiller' fulfiller
  * (In full platform, this routes through plugin registry)
  */
-export async function resolveSupplierAssignments(
+export async function resolveFulfillerAssignments(
   items: OrderLineItem[],
-  _context: SupplierResolutionContext,
-): Promise<SupplierAssignment[]> {
-  log.info(`[Activity] Resolving supplier assignments for ${items.length} items`);
+  _context: FulfillerResolutionContext,
+): Promise<FulfillerAssignment[]> {
+  log.info(`[Activity] Resolving fulfiller assignments for ${items.length} items`);
   return items.map(() => ({
-    supplierId: 'default-supplier',
-    supplierType: 'simulated',
-    supplierName: 'Default Supplier',
+    fulfillerId: 'default-fulfiller',
+    fulfillerType: 'simulated',
+    fulfillerName: 'Default Fulfiller',
   }));
 }
 
@@ -263,14 +263,14 @@ export async function indexOrder(doc: Elasticsearch.OrderDocument): Promise<void
   log.info(`[Activity] Indexed order ${doc.orderId} to Elasticsearch`);
 }
 
-export async function indexSupplierOrder(doc: Elasticsearch.SupplierOrderDocument): Promise<void> {
+export async function indexFulfillerOrder(doc: Elasticsearch.FulfillerOrderDocument): Promise<void> {
   const client = getElasticsearchClient();
   await client.index({
-    index: ES_INDICES.supplierOrders,
-    id: doc.supplierOrderId,
+    index: ES_INDICES.fulfillerOrders,
+    id: doc.fulfillerOrderId,
     document: doc
   });
-  log.info(`[Activity] Indexed supplier order ${doc.supplierOrderId} to Elasticsearch`);
+  log.info(`[Activity] Indexed fulfiller order ${doc.fulfillerOrderId} to Elasticsearch`);
 }
 
 export async function indexCustomer(doc: Elasticsearch.CustomerDocument): Promise<void> {
@@ -354,50 +354,18 @@ export async function getOrderById(orderId: string): Promise<Order | null> {
   } as unknown as Order;
 }
 
-/**
- * Start a standalone fulfillment workflow via Temporal client.
- * Uses the same pattern as checkout's startOrderManagementWorkflow.
- */
-export async function startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string> {
-  const orderId = input.orderId as string;
-
-  const { getTemporalClient } = await import('../../lib/temporal-client');
-  const { buildWorkflowStartOptions, DEMO_STORE_ID } = await import('../contracts/constants');
-  const client = await getTemporalClient();
-
-  const startOptions = buildWorkflowStartOptions({
-    storeId: DEMO_STORE_ID,
-    domain: 'fulfillment',
-    entityId: orderId,
-    orderId,
-    cartId: input.cartId as string | undefined,
-  });
-  log.info(`[Activity] Starting fulfillment workflow: ${startOptions.workflowId}`);
-
-  await client.workflow.start('fulfillmentWorkflow', {
-    ...startOptions,
-    taskQueue: 'fulfillment-queue',
-    args: [input],
-    workflowExecutionTimeout: '90 days'
-  });
-
-  log.info(`[Activity] Started fulfillment workflow: ${startOptions.workflowId}`);
-  return startOptions.workflowId;
-}
-
 export function createOmsActivities() {
   return {
     saveOrderToDatabase,
     updateOrderInDatabase,
     sendOrderStatusEmail,
     sendFeedbackThankYouEmail,
-    resolveSupplierAssignments,
+    resolveFulfillerAssignments,
     insertStatusHistoryEntry,
     getOrdersByEmail,
     getOrderById,
     indexOrder,
-    indexSupplierOrder,
+    indexFulfillerOrder,
     indexCustomer,
-    startFulfillmentWorkflow,
   };
 }

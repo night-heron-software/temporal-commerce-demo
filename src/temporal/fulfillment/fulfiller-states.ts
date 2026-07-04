@@ -1,61 +1,61 @@
 /**
- * Supplier-order states — the shell around the pure supplier-order Decider.
+ * Fulfiller-order states — the shell around the pure fulfiller-order Decider.
  *
- * The child simulates supplier fulfillment: timer-driven auto-progression
+ * The child simulates fulfiller fulfillment: timer-driven auto-progression
  * (received → submitting → in_production → shipped → delivered) unless
- * MANUAL_FULFILLMENT mode is on, in which case webhook/manual `supplierStatus`
- * signals drive the transitions. All I/O (the supplier submit call, shipment
+ * MANUAL_FULFILLMENT mode is on, in which case webhook/manual `fulfillerStatus`
+ * signals drive the transitions. All I/O (the fulfiller submit call, shipment
  * indexing) lives in prepare/finalize; timestamps come from the driver's
  * deterministic `meta.timestamp`.
  */
 import * as wf from '@temporalio/workflow';
-import { submitSupplierOrder, indexShipment } from './activities';
-import { decide as supplierDecide, evolve } from './supplier-decider';
-import type { SupplierOrderCommand } from './supplier-decider';
+import { submitFulfillerOrder, indexShipment } from './activities';
+import { decide as fulfillerDecide, evolve } from './fulfiller-decider';
+import type { FulfillerOrderCommand } from './fulfiller-decider';
 import type {
-  SupplierOrderStateName,
-  SupplierOrderSignal,
-  SupplierOrderWorkflowContext,
-} from './supplier-workflows';
+  FulfillerOrderStateName,
+  FulfillerOrderSignal,
+  FulfillerOrderWorkflowContext,
+} from './fulfiller-workflows';
 import { defineDomain, terminal, SELF } from '../framework';
 import type { StateRegistry } from '../framework';
 
-const supplier = defineDomain<
-  SupplierOrderStateName,
+const fulfiller = defineDomain<
+  FulfillerOrderStateName,
   never,
-  SupplierOrderWorkflowContext,
+  FulfillerOrderWorkflowContext,
   void,
-  SupplierOrderSignal
+  FulfillerOrderSignal
 >();
 
 /** Shell adapter — run the pure Decider (decide → evolve) for the next context. */
 function apply(
-  ctx: Readonly<SupplierOrderWorkflowContext>,
-  command: SupplierOrderCommand,
-): SupplierOrderWorkflowContext {
-  const state = ctx as SupplierOrderWorkflowContext;
-  return supplierDecide(command, state).reduce(evolve, state);
+  ctx: Readonly<FulfillerOrderWorkflowContext>,
+  command: FulfillerOrderCommand,
+): FulfillerOrderWorkflowContext {
+  const state = ctx as FulfillerOrderWorkflowContext;
+  return fulfillerDecide(command, state).reduce(evolve, state);
 }
 
 // ==================
-// Shared signal entries — cancel and supplier webhook/manual updates
+// Shared signal entries — cancel and fulfiller webhook/manual updates
 // ==================
 
 const cancelEntry = {
-  decide(ctx: Readonly<SupplierOrderWorkflowContext>) {
+  decide(ctx: Readonly<FulfillerOrderWorkflowContext>) {
     const context = apply(ctx, { type: 'cancel' });
     return { context, next: terminal('cancelled') };
   },
 };
 
-/** Index the newest shipment when a supplier update added one (side effect → finalize). */
-async function indexNewestShipment(ctx: SupplierOrderWorkflowContext): Promise<void> {
+/** Index the newest shipment when a fulfiller update added one (side effect → finalize). */
+async function indexNewestShipment(ctx: FulfillerOrderWorkflowContext): Promise<void> {
   const so = ctx.so;
   if (!so.shipments?.length) return;
   const shipment = so.shipments[so.shipments.length - 1];
   await indexShipment({
     shipmentId: shipment.shipmentId,
-    orderId: so.supplierOrderId,
+    orderId: so.fulfillerOrderId,
     carrier: shipment.carrier,
     trackingNumber: shipment.trackingNumber,
     trackingUrl: shipment.trackingUrl,
@@ -65,10 +65,10 @@ async function indexNewestShipment(ctx: SupplierOrderWorkflowContext): Promise<v
   });
 }
 
-/** Route a supplier-status decision by the resulting status. */
+/** Route a fulfiller-status decision by the resulting status. */
 function routeByStatus(
-  context: SupplierOrderWorkflowContext,
-): SupplierOrderStateName | `__terminal:${string}` {
+  context: FulfillerOrderWorkflowContext,
+): FulfillerOrderStateName | `__terminal:${string}` {
   const status = context.so.status;
   if (status === 'shipped' || status === 'partially_shipped') return 'shipped';
   if (status === 'delivered') return terminal('delivered');
@@ -77,12 +77,12 @@ function routeByStatus(
   return 'in_production';
 }
 
-const supplierStatusEntry = {
+const fulfillerStatusEntry = {
   decide(
-    ctx: Readonly<SupplierOrderWorkflowContext>,
-    signal: Extract<SupplierOrderSignal, { kind: 'supplierStatus' }>,
+    ctx: Readonly<FulfillerOrderWorkflowContext>,
+    signal: Extract<FulfillerOrderSignal, { kind: 'fulfillerStatus' }>,
   ) {
-    const context = apply(ctx, { type: 'supplierStatus', update: signal.update });
+    const context = apply(ctx, { type: 'fulfillerStatus', update: signal.update });
     const addedShipment =
       (context.so.shipments?.length ?? 0) > (ctx.so.shipments?.length ?? 0);
     return {
@@ -92,8 +92,8 @@ const supplierStatusEntry = {
     };
   },
   async finalize(
-    ctx: Readonly<SupplierOrderWorkflowContext>,
-    decision: { context: SupplierOrderWorkflowContext; finalize?: { indexShipment: boolean } },
+    ctx: Readonly<FulfillerOrderWorkflowContext>,
+    decision: { context: FulfillerOrderWorkflowContext; finalize?: { indexShipment: boolean } },
   ) {
     if (decision.finalize?.indexShipment) {
       await indexNewestShipment(decision.context);
@@ -106,7 +106,7 @@ const supplierStatusEntry = {
 // ==================
 
 /** received — book-keeping hop; marks the order as submitting. */
-const received = supplier.transitions(
+const received = fulfiller.transitions(
   'received',
   {},
   {
@@ -120,22 +120,22 @@ const received = supplier.transitions(
   },
 );
 
-/** submitting — submits the order to the (simulated) supplier. */
-const submitting = supplier.transitions(
+/** submitting — submits the order to the (simulated) fulfiller. */
+const submitting = fulfiller.transitions(
   'submitting',
   {},
   {
     onTimeout: {
       async prepare(ctx) {
-        const result = await submitSupplierOrder({
+        const result = await submitFulfillerOrder({
           fulfillmentId: wf.workflowInfo().workflowId,
-          supplierType: 'simulated',
+          fulfillerType: 'simulated',
           items: ctx.so.items.map((item) => ({
             sku: item.sku,
             productId: item.productId,
             quantity: item.quantity,
-            supplierProductId: 'simulated',
-            supplierVariantId: 0,
+            fulfillerProductId: 'simulated',
+            fulfillerVariantId: 0,
           })),
           shippingAddress: {
             firstName: 'Simulated',
@@ -149,12 +149,12 @@ const submitting = supplier.transitions(
           },
           shippingMethod: ctx.shippingMethod ?? 'standard',
         });
-        return { supplierExternalId: result.supplierOrderId };
+        return { fulfillerExternalId: result.fulfillerOrderId };
       },
-      decide(ctx, meta, prepared: { supplierExternalId: string }) {
+      decide(ctx, meta, prepared: { fulfillerExternalId: string }) {
         const context = apply(ctx, {
           type: 'submitted',
-          supplierExternalId: prepared.supplierExternalId,
+          fulfillerExternalId: prepared.fulfillerExternalId,
           at: meta.timestamp,
         });
         return { context, next: 'in_production' as const };
@@ -164,15 +164,15 @@ const submitting = supplier.transitions(
   },
 );
 
-/** in_production — auto-ships on timeout (unless manual mode); accepts supplier updates. */
-const inProduction = supplier.transitions(
+/** in_production — auto-ships on timeout (unless manual mode); accepts fulfiller updates. */
+const inProduction = fulfiller.transitions(
   'in_production',
   {},
   {
     onTimeout: {
       decide(ctx, meta) {
         if (ctx.manualMode) {
-          return { context: ctx as SupplierOrderWorkflowContext, next: SELF };
+          return { context: ctx as FulfillerOrderWorkflowContext, next: SELF };
         }
         const trackingNumber = `SIM${wf.workflowInfo().workflowId.slice(0, 8).toUpperCase()}`;
         const context = apply(ctx, { type: 'autoShipped', trackingNumber, at: meta.timestamp });
@@ -181,20 +181,20 @@ const inProduction = supplier.transitions(
     },
     onSignals: {
       cancel: cancelEntry,
-      supplierStatus: supplierStatusEntry,
+      fulfillerStatus: fulfillerStatusEntry,
     },
   },
 );
 
-/** shipped — auto-delivers on timeout (unless manual mode); accepts supplier updates. */
-const shipped = supplier.transitions(
+/** shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller updates. */
+const shipped = fulfiller.transitions(
   'shipped',
   {},
   {
     onTimeout: {
       decide(ctx, meta) {
         if (ctx.manualMode) {
-          return { context: ctx as SupplierOrderWorkflowContext, next: SELF };
+          return { context: ctx as FulfillerOrderWorkflowContext, next: SELF };
         }
         const context = apply(ctx, { type: 'autoDelivered', at: meta.timestamp });
         return { context, next: terminal('delivered') };
@@ -202,23 +202,23 @@ const shipped = supplier.transitions(
     },
     onSignals: {
       cancel: cancelEntry,
-      supplierStatus: supplierStatusEntry,
+      fulfillerStatus: fulfillerStatusEntry,
     },
   },
 );
 
 /**
- * The supplier-order state registry. `in_production`/`shipped` timeouts are placeholders
- * here — {@link buildSupplierOrderStates} overrides them with the memo-driven simulation
+ * The fulfiller-order state registry. `in_production`/`shipped` timeouts are placeholders
+ * here — {@link buildFulfillerOrderStates} overrides them with the memo-driven simulation
  * delays at workflow start. Exported as a const so the state-diagram generator (static
  * AST analysis over `*_STATES` registries) can discover the machine.
  */
-export const SUPPLIER_ORDER_STATES: StateRegistry<
-  SupplierOrderStateName,
+export const FULFILLER_ORDER_STATES: StateRegistry<
+  FulfillerOrderStateName,
   never,
-  SupplierOrderWorkflowContext,
+  FulfillerOrderWorkflowContext,
   void,
-  SupplierOrderSignal
+  FulfillerOrderSignal
 > = {
   received: { ...received, timeout: '1 millisecond' },
   submitting: { ...submitting, timeout: '1 millisecond' },
@@ -230,25 +230,25 @@ export const SUPPLIER_ORDER_STATES: StateRegistry<
  * Build the runtime registry with the simulation delays supplied by the workflow (they
  * come from workflow memo, so the timeouts are only known at run time).
  */
-export function buildSupplierOrderStates(delays: {
+export function buildFulfillerOrderStates(delays: {
   processingDelayMs: number;
   shippingDelayMs: number;
   deliveryDelayMs: number;
 }): StateRegistry<
-  SupplierOrderStateName,
+  FulfillerOrderStateName,
   never,
-  SupplierOrderWorkflowContext,
+  FulfillerOrderWorkflowContext,
   void,
-  SupplierOrderSignal
+  FulfillerOrderSignal
 > {
   return {
-    ...SUPPLIER_ORDER_STATES,
+    ...FULFILLER_ORDER_STATES,
     in_production: {
-      ...SUPPLIER_ORDER_STATES.in_production,
+      ...FULFILLER_ORDER_STATES.in_production,
       timeout: `${delays.processingDelayMs}ms`,
     },
     shipped: {
-      ...SUPPLIER_ORDER_STATES.shipped,
+      ...FULFILLER_ORDER_STATES.shipped,
       timeout: `${delays.shippingDelayMs + delays.deliveryDelayMs}ms`,
     },
   };

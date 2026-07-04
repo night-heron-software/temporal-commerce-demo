@@ -50,37 +50,37 @@ CREATE TYPE IF NOT EXISTS order_assignment (
     assignment_id TEXT,
     line_item_id TEXT,
     variant_id TEXT,
-    supplier_id TEXT,
-    supplier_name TEXT,
-    supplier_order_id TEXT,
+    fulfiller_id TEXT,
+    fulfiller_name TEXT,
+    fulfiller_order_id TEXT,
     quantity INT,
     carrier TEXT,
     status TEXT
 );
 
-CREATE TYPE IF NOT EXISTS supplier_order_item (
+CREATE TYPE IF NOT EXISTS fulfiller_order_item (
     assignment_id TEXT,
     variant_id TEXT,
     quantity INT
 );
 
-CREATE TYPE IF NOT EXISTS supplier_order_history_entry (
+CREATE TYPE IF NOT EXISTS fulfiller_order_history_entry (
     status TEXT,
     timestamp TIMESTAMP,
     note TEXT
 );
 
-CREATE TYPE IF NOT EXISTS supplier_order (
-    supplier_order_id TEXT,
+CREATE TYPE IF NOT EXISTS fulfiller_order (
+    fulfiller_order_id TEXT,
     order_id TEXT,
-    supplier_id TEXT,
-    supplier_name TEXT,
+    fulfiller_id TEXT,
+    fulfiller_name TEXT,
     status TEXT,
-    items LIST<FROZEN<supplier_order_item>>,
+    items LIST<FROZEN<fulfiller_order_item>>,
     carrier TEXT,
     tracking_number TEXT,
     rejection_reason TEXT,
-    status_history LIST<FROZEN<supplier_order_history_entry>>,
+    status_history LIST<FROZEN<fulfiller_order_history_entry>>,
     created_at TIMESTAMP,
     updated_at TIMESTAMP
 );
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS orders (
     customer_email TEXT,
     items LIST<FROZEN<order_item>>,
     assignments LIST<FROZEN<order_assignment>>,
-    supplier_orders LIST<FROZEN<supplier_order>>,
+    fulfiller_orders LIST<FROZEN<fulfiller_order>>,
     shipping_address FROZEN<shipping_address>,
     payment_method FROZEN<payment_method>,
     subtotal INT,
@@ -203,21 +203,21 @@ CREATE TABLE IF NOT EXISTS order_status_history (
 ) WITH CLUSTERING ORDER BY (event_time DESC, id DESC);
 
 -- ===========================================
--- Supplier Tables
+-- Fulfiller Tables
 -- ===========================================
 
-CREATE TABLE IF NOT EXISTS suppliers (
+CREATE TABLE IF NOT EXISTS fulfillers (
     id TEXT,
     name TEXT,
     created_at TIMESTAMP,
     PRIMARY KEY (id)
 );
 
-INSERT INTO suppliers (id, name, created_at)
-VALUES ('default-supplier', 'Default Supplier', toTimestamp(now()));
+INSERT INTO fulfillers (id, name, created_at)
+VALUES ('default-fulfiller', 'Default Fulfiller', toTimestamp(now()));
 
-CREATE TABLE IF NOT EXISTS supplier_locations (
-    supplier_id TEXT,
+CREATE TABLE IF NOT EXISTS fulfiller_locations (
+    fulfiller_id TEXT,
     location_id TEXT,
     name TEXT,
     cost INT,
@@ -229,12 +229,12 @@ CREATE TABLE IF NOT EXISTS supplier_locations (
     country TEXT,
     is_primary BOOLEAN,
     created_at TIMESTAMP,
-    PRIMARY KEY (supplier_id, location_id)
+    PRIMARY KEY (fulfiller_id, location_id)
 );
-CREATE INDEX IF NOT EXISTS idx_supplier_locations_is_primary ON supplier_locations (is_primary);
+CREATE INDEX IF NOT EXISTS idx_fulfiller_locations_is_primary ON fulfiller_locations (is_primary);
 
-INSERT INTO supplier_locations (supplier_id, location_id, name, cost, address1, city, state, postal_code, country, is_primary, created_at)
-VALUES ('default-supplier', 'default-warehouse', 'Default Warehouse', 0, '123 Warehouse Ave', 'Warehouse City', 'WC', '00000', 'US', true, toTimestamp(now()));
+INSERT INTO fulfiller_locations (fulfiller_id, location_id, name, cost, address1, city, state, postal_code, country, is_primary, created_at)
+VALUES ('default-fulfiller', 'default-warehouse', 'Default Warehouse', 0, '123 Warehouse Ave', 'Warehouse City', 'WC', '00000', 'US', true, toTimestamp(now()));
 
 -- ===========================================
 -- Inventory Tables (CQRS Write Side)
@@ -242,8 +242,8 @@ VALUES ('default-supplier', 'default-warehouse', 'Default Warehouse', 0, '123 Wa
 
 CREATE TABLE IF NOT EXISTS inventory_stock_w (
     blank_sku TEXT,
-    supplier_id TEXT,
-    supplier_name TEXT,
+    fulfiller_id TEXT,
+    fulfiller_name TEXT,
     total_stock INT,
     reserved_stock INT,
     ordered_stock INT,
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS inventory_stock_w (
     postal_code TEXT,
     country TEXT,
     updated_at TIMESTAMP,
-    PRIMARY KEY (blank_sku, supplier_id)
+    PRIMARY KEY (blank_sku, fulfiller_id)
 );
 
 CREATE TABLE IF NOT EXISTS inventory_reservations_w (
@@ -263,7 +263,7 @@ CREATE TABLE IF NOT EXISTS inventory_reservations_w (
     blank_sku TEXT,
     cart_id TEXT,
     variant_id TEXT,
-    supplier_id TEXT,
+    fulfiller_id TEXT,
     quantity INT,
     reference_id TEXT,
     status TEXT,
@@ -293,15 +293,15 @@ CREATE TABLE IF NOT EXISTS inventory_stock_summary (
     total_stock INT,
     reserved_stock INT,
     available_stock INT,
-    supplier_count INT,
+    fulfiller_count INT,
     low_stock BOOLEAN,
     last_projected_at TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS inventory_stock_by_supplier (
-    supplier_id TEXT,
+CREATE TABLE IF NOT EXISTS inventory_stock_by_fulfiller (
+    fulfiller_id TEXT,
     blank_sku TEXT,
-    supplier_name TEXT,
+    fulfiller_name TEXT,
     total_stock INT,
     reserved_stock INT,
     available_stock INT,
@@ -310,7 +310,7 @@ CREATE TABLE IF NOT EXISTS inventory_stock_by_supplier (
     state TEXT,
     country TEXT,
     last_projected_at TIMESTAMP,
-    PRIMARY KEY (supplier_id, blank_sku)
+    PRIMARY KEY (fulfiller_id, blank_sku)
 );
 
 CREATE TABLE IF NOT EXISTS inventory_reservations_by_sku (
@@ -320,7 +320,7 @@ CREATE TABLE IF NOT EXISTS inventory_reservations_by_sku (
     variant_id TEXT,
     quantity INT,
     status TEXT,
-    supplier_id TEXT,
+    fulfiller_id TEXT,
     expires_at TIMESTAMP,
     created_at TIMESTAMP,
     PRIMARY KEY (blank_sku, reservation_id)

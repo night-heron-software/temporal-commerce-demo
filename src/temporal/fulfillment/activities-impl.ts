@@ -1,6 +1,6 @@
 import { heartbeat } from "@temporalio/activity";
 import { logger, getElasticsearchClient } from '../../lib';
-import type { Suppliers, Elasticsearch } from '../contracts';
+import type { Fulfillers, Elasticsearch } from '../contracts';
 import type { TrackingInfo } from './activities';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import { getFlag } from '../../lib/feature-flags';
@@ -10,19 +10,19 @@ export async function getFeatureFlag(name: string): Promise<boolean> {
   return getFlag(name);
 }
 
-export async function submitSupplierOrder(
-  request: Suppliers.SupplierOrderInput,
-): Promise<Suppliers.SupplierOrderResult> {
-  heartbeat("Submitting order to supplier");
+export async function submitFulfillerOrder(
+  request: Fulfillers.FulfillerOrderInput,
+): Promise<Fulfillers.FulfillerOrderResult> {
+  heartbeat("Submitting order to fulfiller");
   logger.info(
-    { supplierType: request.supplierType },
-    "submitSupplierOrder called",
+    { fulfillerType: request.fulfillerType },
+    "submitFulfillerOrder called",
   );
 
   // Demo: always simulate success
   return {
     success: true,
-    supplierOrderId: `SIM-${Date.now()}`,
+    fulfillerOrderId: `SIM-${Date.now()}`,
   };
 }
 
@@ -45,15 +45,15 @@ export async function sendDeliveredEmail(
 
 export async function transferInventoryReservations(
   cartId: string,
-  items: Array<{ variantId: string; supplierId: string; quantity: number }>,
+  items: Array<{ variantId: string; fulfillerId: string; quantity: number }>,
 ): Promise<void> {
-  logger.info({ cartId, itemCount: items.length }, 'Transferring inventory reservations to suppliers');
+  logger.info({ cartId, itemCount: items.length }, 'Transferring inventory reservations to fulfillers');
 
   for (const item of items) {
     const reservationId = `${cartId}-${item.variantId}`;
-    await InventoryCommandRepository.transferToSupplier(
+    await InventoryCommandRepository.transferToFulfiller(
       reservationId,
-      item.supplierId,
+      item.fulfillerId,
       item.quantity,
     );
   }
@@ -114,7 +114,7 @@ export async function releaseInventoryReservations(
 export function createFulfillmentActivities() {
   return {
     getFeatureFlag,
-    submitSupplierOrder,
+    submitFulfillerOrder,
     sendShippedEmail,
     sendDeliveredEmail,
     transferInventoryReservations,

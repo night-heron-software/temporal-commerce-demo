@@ -1,31 +1,31 @@
 /**
- * Supplier-Order Decider — pure Functional Core for the fulfiller-order child workflow.
+ * Fulfiller-Order Decider — pure Functional Core for the fulfiller-order child workflow.
  *
  *   decide: (command, state) => Event[]
- *   evolve: (state, event)   => State   // the ONLY writer of the supplier-order state
+ *   evolve: (state, event)   => State   // the ONLY writer of the fulfiller-order state
  *
  * Pure and infrastructure-free: timestamps and generated ids (tracking numbers, the
- * supplier's external id) arrive on the command from the shell.
+ * fulfiller's external id) arrive on the command from the shell.
  */
-import type { Suppliers } from '../contracts';
+import type { Fulfillers } from '../contracts';
 import type { ShipmentInfo } from './types';
-import type { SupplierOrderWorkflowContext } from './supplier-workflows';
+import type { FulfillerOrderWorkflowContext } from './fulfiller-workflows';
 
-export type SupplierOrderCommand =
-  | { type: 'submitted'; supplierExternalId: string; at: string }
+export type FulfillerOrderCommand =
+  | { type: 'submitted'; fulfillerExternalId: string; at: string }
   | { type: 'autoShipped'; trackingNumber: string; at: string }
   | { type: 'autoDelivered'; at: string }
-  | { type: 'supplierStatus'; update: Suppliers.SupplierStatusUpdate }
+  | { type: 'fulfillerStatus'; update: Fulfillers.FulfillerStatusUpdate }
   | { type: 'cancel' };
 
-export type SupplierOrderFact =
-  | { type: 'OrderSubmitted'; supplierExternalId: string; at: string }
+export type FulfillerOrderFact =
+  | { type: 'OrderSubmitted'; fulfillerExternalId: string; at: string }
   | { type: 'AutoShipped'; trackingNumber: string; at: string }
   | { type: 'AutoDelivered'; at: string }
-  | { type: 'SupplierStatusApplied'; update: Suppliers.SupplierStatusUpdate }
+  | { type: 'FulfillerStatusApplied'; update: Fulfillers.FulfillerStatusUpdate }
   | { type: 'OrderCancelled' };
 
-function copyCtx(ctx: Readonly<SupplierOrderWorkflowContext>): SupplierOrderWorkflowContext {
+function copyCtx(ctx: Readonly<FulfillerOrderWorkflowContext>): FulfillerOrderWorkflowContext {
   return {
     ...ctx,
     so: {
@@ -37,18 +37,18 @@ function copyCtx(ctx: Readonly<SupplierOrderWorkflowContext>): SupplierOrderWork
 }
 
 export function decide(
-  command: SupplierOrderCommand,
-  _state: SupplierOrderWorkflowContext,
-): SupplierOrderFact[] {
+  command: FulfillerOrderCommand,
+  _state: FulfillerOrderWorkflowContext,
+): FulfillerOrderFact[] {
   switch (command.type) {
     case 'submitted':
-      return [{ type: 'OrderSubmitted', supplierExternalId: command.supplierExternalId, at: command.at }];
+      return [{ type: 'OrderSubmitted', fulfillerExternalId: command.fulfillerExternalId, at: command.at }];
     case 'autoShipped':
       return [{ type: 'AutoShipped', trackingNumber: command.trackingNumber, at: command.at }];
     case 'autoDelivered':
       return [{ type: 'AutoDelivered', at: command.at }];
-    case 'supplierStatus':
-      return [{ type: 'SupplierStatusApplied', update: command.update }];
+    case 'fulfillerStatus':
+      return [{ type: 'FulfillerStatusApplied', update: command.update }];
     case 'cancel':
       return [{ type: 'OrderCancelled' }];
     default:
@@ -56,10 +56,10 @@ export function decide(
   }
 }
 
-/** Fold a supplier webhook/manual status update into the supplier-order state. */
-function applySupplierUpdate(
-  draft: SupplierOrderWorkflowContext,
-  update: Suppliers.SupplierStatusUpdate,
+/** Fold a fulfiller webhook/manual status update into the fulfiller-order state. */
+function applyFulfillerUpdate(
+  draft: FulfillerOrderWorkflowContext,
+  update: Fulfillers.FulfillerStatusUpdate,
 ): void {
   const so = draft.so;
 
@@ -75,8 +75,8 @@ function applySupplierUpdate(
         for (const updateItem of update.lineItems) {
           const stateItem = so.items.find(
             (i) =>
-              i.sku === updateItem.supplierLineItemId ||
-              i.supplierLineItemId === updateItem.supplierLineItemId,
+              i.sku === updateItem.fulfillerLineItemId ||
+              i.fulfillerLineItemId === updateItem.fulfillerLineItemId,
           );
           if (stateItem && updateItem.status === 'shipped') {
             stateItem.status = 'shipped';
@@ -119,12 +119,12 @@ function applySupplierUpdate(
 }
 
 function appendShipment(
-  so: SupplierOrderWorkflowContext['so'],
-  shipmentInfo: NonNullable<Suppliers.SupplierStatusUpdate['shipmentInfo']>,
+  so: FulfillerOrderWorkflowContext['so'],
+  shipmentInfo: NonNullable<Fulfillers.FulfillerStatusUpdate['shipmentInfo']>,
   at: string,
 ): void {
   const shipment: ShipmentInfo = {
-    shipmentId: `${so.supplierOrderId}-${(so.shipments?.length ?? 0) + 1}`,
+    shipmentId: `${so.fulfillerOrderId}-${(so.shipments?.length ?? 0) + 1}`,
     carrier: shipmentInfo.carrier,
     trackingNumber: shipmentInfo.trackingNumber,
     trackingUrl: shipmentInfo.trackingUrl,
@@ -138,15 +138,15 @@ function appendShipment(
 }
 
 export function evolve(
-  state: SupplierOrderWorkflowContext,
-  fact: SupplierOrderFact,
-): SupplierOrderWorkflowContext {
+  state: FulfillerOrderWorkflowContext,
+  fact: FulfillerOrderFact,
+): FulfillerOrderWorkflowContext {
   const draft = copyCtx(state);
   const so = draft.so;
 
   switch (fact.type) {
     case 'OrderSubmitted':
-      so.supplierExternalId = fact.supplierExternalId;
+      so.fulfillerExternalId = fact.fulfillerExternalId;
       so.submittedAt = fact.at;
       so.status = 'in_production';
       so.items.forEach((i) => (i.status = 'in_production'));
@@ -159,7 +159,7 @@ export function evolve(
       so.trackingNumber = fact.trackingNumber;
       so.shipments = [
         {
-          shipmentId: `${draft.orderId}-${so.supplierOrderId}-1`,
+          shipmentId: `${draft.orderId}-${so.fulfillerOrderId}-1`,
           carrier: 'Simulated Carrier',
           trackingNumber: fact.trackingNumber,
           items: so.items.map((i) => ({ sku: i.sku, quantity: i.quantity })),
@@ -175,8 +175,8 @@ export function evolve(
       so.items.forEach((i) => (i.status = 'delivered'));
       return draft;
 
-    case 'SupplierStatusApplied':
-      applySupplierUpdate(draft, fact.update);
+    case 'FulfillerStatusApplied':
+      applyFulfillerUpdate(draft, fact.update);
       return draft;
 
     case 'OrderCancelled':

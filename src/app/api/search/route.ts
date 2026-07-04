@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
 import { getElasticsearchClient } from '@/lib/es-client';
 
-// Option type names can be inconsistent across suppliers.
+// Option type names can be inconsistent across fulfillers.
 // Group them by semantic category for search/faceting.
 // 'Color'/'Size' are normalized names used in the demo catalog.json.
 const COLOR_OPTION_TYPES = ['Color', 'Colors', 'Bella + Canvas Colors', 'AS Color colors', 'Comfort Colors® Colors'];

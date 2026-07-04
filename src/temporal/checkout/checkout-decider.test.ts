@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { decide, evolve } from './checkout-decider';
 import type { CheckoutCommand } from './checkout-decider';
-import type { CheckoutContext, Order } from './types';
+import type { CheckoutContext, Order, QueriedCart } from './types';
 
 function makeCtx(overrides: Partial<CheckoutContext> = {}): CheckoutContext {
   return {
@@ -40,23 +40,85 @@ const address = {
 
 const order = { orderId: 'o-1', confirmationNumber: 'DEMO1234' } as Order;
 
+const queriedCart = (overrides: Partial<QueriedCart> = {}): QueriedCart => ({
+  items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
+  subtotalPrice: 10,
+  totalDiscounts: 0,
+  appliedCoupons: [],
+  cartVersion: 1,
+  ...overrides,
+});
+
 describe('checkout decide/evolve', () => {
-  it('validated(success) stores reservations and moves to shipping', () => {
-    const ctx = apply(makeCtx(), {
+  it('validated(success) stores reservations, folds the live cart, and moves to shipping', () => {
+    const ctx = apply(makeCtx({ items: [], subtotalPrice: 0, totalPrice: 0 }), {
       type: 'validated',
-      prepared: { success: true, reservations: [{ reservationId: 'r-1' } as never] },
+      prepared: {
+        success: true,
+        reservations: [{ reservationId: 'r-1' } as never],
+        cart: queriedCart(),
+      },
     });
     expect(ctx.state.step).toBe('shipping');
     expect(ctx.reservations).toHaveLength(1);
+    // Live contents replace the empty seed (no snapshot in the input).
+    expect(ctx.items).toHaveLength(1);
+    expect(ctx.subtotalPrice).toBe(10);
+    expect(ctx.totalPrice).toBe(10);
   });
 
   it('validated(failure) fails the checkout with the reservation error', () => {
     const ctx = apply(makeCtx(), {
       type: 'validated',
-      prepared: { success: false, reservations: [], error: 'out of stock' },
+      prepared: { success: false, reservations: [], error: 'out of stock', cart: queriedCart() },
     });
     expect(ctx.state.step).toBe('failed');
     expect(ctx.state.error).toBe('out of stock');
+  });
+
+  it('recompute folds fresh contents, re-prices when priced, and un-checks payment', () => {
+    const priced = makeCtx({
+      state: {
+        step: 'review',
+        isGuest: true,
+        shippingCost: 5,
+        tax: 0.8,
+        shippingAddress: address,
+        paymentMethod: { type: 'mock', token: 'tok_1' },
+      },
+      shippingCost: 5,
+      totalTax: 0.8,
+      totalPrice: 15.8,
+    });
+    const ctx = apply(priced, {
+      type: 'recompute',
+      prepared: {
+        cart: queriedCart({
+          items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 10 }],
+          subtotalPrice: 20,
+          cartVersion: 2,
+        }),
+        shippingCost: 5,
+        tax: 1.6,
+      },
+    });
+    expect(ctx.subtotalPrice).toBe(20);
+    expect(ctx.cartVersion).toBe(2);
+    expect(ctx.totalTax).toBe(1.6);
+    expect(ctx.totalPrice).toBeCloseTo(26.6);
+    // Shopper must re-confirm payment against the new total.
+    expect(ctx.state.paymentMethod).toBeUndefined();
+  });
+
+  it('recompute without an address folds contents but leaves pricing alone', () => {
+    const ctx = apply(makeCtx(), {
+      type: 'recompute',
+      prepared: { cart: queriedCart({ subtotalPrice: 30, cartVersion: 3 }) },
+    });
+    expect(ctx.subtotalPrice).toBe(30);
+    expect(ctx.cartVersion).toBe(3);
+    expect(ctx.shippingCost).toBe(0);
+    expect(ctx.totalPrice).toBe(30);
   });
 
   it('setShipping success prices the order and advances to payment', () => {

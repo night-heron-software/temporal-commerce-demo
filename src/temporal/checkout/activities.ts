@@ -50,6 +50,17 @@ export interface CheckoutActivities {
   confirmReservations(reservations: ReservationInfo[]): Promise<void>;
   releaseReservations(reservations: ReservationInfo[]): Promise<void>;
   cancelReservations(reservations: ReservationInfo[]): Promise<void>;
+  /**
+   * Live view of the parent cart (a workflow can't query a peer directly, so this
+   * activity bridges via the Temporal client). Lets checkout avoid a stale item snapshot.
+   */
+  queryCart(parentCartWorkflowId: string): Promise<{
+    items: CartItem[];
+    subtotalPrice: number;
+    totalDiscounts: number;
+    appliedCoupons: string[];
+    cartVersion: number;
+  }>;
 }
 
 // Payment activities: non-retryable for permanent failures (declined cards, invalid tokens)
@@ -86,6 +97,7 @@ export const {
   calculateTax,
   createOrder,
   startOrderManagementWorkflow,
+  queryCart,
   renewReservationsForCheckout,
   confirmReservations,
   releaseReservations,

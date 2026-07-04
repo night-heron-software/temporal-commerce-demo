@@ -1,14 +1,14 @@
 /**
  * Shared OMS Document Builders
  *
- * Builds OrderDocument and SupplierOrderDocument for Elasticsearch.
+ * Builds OrderDocument and FulfillerOrderDocument for Elasticsearch.
  * Used by both the order workflow (real-time sync) and reindex route (bulk).
  */
 
-import type { OrderState, Order, SupplierOrder } from './types';
+import type { OrderState, Order, FulfillerOrder } from './types';
 import { Elasticsearch } from '../contracts';
 type OrderDocument = Elasticsearch.OrderDocument;
-type SupplierOrderDocument = Elasticsearch.SupplierOrderDocument;
+type FulfillerOrderDocument = Elasticsearch.FulfillerOrderDocument;
 
 /**
  * Builds an ES OrderDocument from workflow state.
@@ -60,17 +60,17 @@ export function buildOrderDocument(
       assignmentId: a.assignmentId,
       lineItemId: a.lineItemId,
       variantId: a.variantId,
-      supplierId: a.supplierId,
-      supplierName: a.supplierName,
+      fulfillerId: a.fulfillerId,
+      fulfillerName: a.fulfillerName,
       quantity: a.quantity,
       status: a.status,
-      supplierOrderId: a.supplierOrderId,
+      fulfillerOrderId: a.fulfillerOrderId,
       carrier: a.carrier
     })),
-    supplierOrders: state.supplierOrders.map((so) => ({
-      supplierOrderId: so.supplierOrderId,
-      supplierId: so.supplierId,
-      supplierName: so.supplierName,
+    fulfillerOrders: state.fulfillerOrders.map((so) => ({
+      fulfillerOrderId: so.fulfillerOrderId,
+      fulfillerId: so.fulfillerId,
+      fulfillerName: so.fulfillerName,
       status: so.status,
       itemCount: so.items.length,
       carrier: so.carrier,
@@ -99,28 +99,28 @@ export function buildOrderDocument(
 }
 
 /**
- * Builds an ES SupplierOrderDocument from a SupplierOrder.
+ * Builds an ES FulfillerOrderDocument from a FulfillerOrder.
  * Pure function - no side effects.
  */
-export function buildSupplierOrderDocument(supplierOrder: SupplierOrder): SupplierOrderDocument {
+export function buildFulfillerOrderDocument(fulfillerOrder: FulfillerOrder): FulfillerOrderDocument {
   return {
-    supplierOrderId: supplierOrder.supplierOrderId,
-    orderId: supplierOrder.orderId,
-    supplierId: supplierOrder.supplierId,
-    supplierName: supplierOrder.supplierName,
-    status: supplierOrder.status,
-    itemCount: supplierOrder.items.length,
-    items: supplierOrder.items.map((item) => ({
+    fulfillerOrderId: fulfillerOrder.fulfillerOrderId,
+    orderId: fulfillerOrder.orderId,
+    fulfillerId: fulfillerOrder.fulfillerId,
+    fulfillerName: fulfillerOrder.fulfillerName,
+    status: fulfillerOrder.status,
+    itemCount: fulfillerOrder.items.length,
+    items: fulfillerOrder.items.map((item) => ({
       assignmentId: item.assignmentId,
       variantId: item.variantId,
       quantity: item.quantity
     })),
-    carrier: supplierOrder.carrier,
-    trackingNumber: supplierOrder.trackingNumber,
-    createdAt: supplierOrder.createdAt,
-    updatedAt: supplierOrder.updatedAt,
-    rejectionReason: supplierOrder.rejectionReason,
-    statusHistory: supplierOrder.statusHistory.map((h) => ({
+    carrier: fulfillerOrder.carrier,
+    trackingNumber: fulfillerOrder.trackingNumber,
+    createdAt: fulfillerOrder.createdAt,
+    updatedAt: fulfillerOrder.updatedAt,
+    rejectionReason: fulfillerOrder.rejectionReason,
+    statusHistory: fulfillerOrder.statusHistory.map((h) => ({
       status: h.status,
       timestamp: h.timestamp,
       note: h.note

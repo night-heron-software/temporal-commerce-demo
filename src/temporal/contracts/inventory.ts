@@ -1,17 +1,17 @@
 export interface InventoryItem {
   variantId: string;
-  supplierLocations: Record<string, SupplierLocation>; // keyed by supplierId
+  fulfillerLocations: Record<string, FulfillerLocation>; // keyed by fulfillerId
   reservations: Record<string, Reservation>; // Item-level reservations (pre-assignment)
 }
 
-export interface SupplierLocation {
-  supplierId: string; // UUID
-  supplierName: string;
+export interface FulfillerLocation {
+  fulfillerId: string; // UUID
+  fulfillerName: string;
   cost: number;
   totalStock: number;
   orderedStock: number;
   reservedStock: number;
-  reservations: Record<string, Reservation>; // Supplier-level reservations
+  reservations: Record<string, Reservation>; // Fulfiller-level reservations
   address1: string;
   address2?: string;
   city: string;
@@ -20,15 +20,15 @@ export interface SupplierLocation {
   country: string;
 }
 
-// Database supplier record (company)
-export interface Supplier {
+// Database fulfiller record (company)
+export interface Fulfiller {
   id: string;
   name: string;
 }
 
-// Database supplier location record (warehouse)
-export interface SupplierLocationRecord {
-  supplierId: string;
+// Database fulfiller location record (warehouse)
+export interface FulfillerLocationRecord {
+  fulfillerId: string;
   locationId: string;
   name: string;
   cost: number;
@@ -73,11 +73,11 @@ export type ReserveInventoryResult =
   | { success: true; reservation: Reservation }
   | { success: false; error: string };
 
-// Update: Set supplier location stock (replaces adminSetStock)
-export const setSupplierStockUpdate = 'setSupplierStock';
-export interface SetSupplierStockArgs {
-  supplierId: string;
-  supplierName: string;
+// Update: Set fulfiller location stock (replaces adminSetStock)
+export const setFulfillerStockUpdate = 'setFulfillerStock';
+export interface SetFulfillerStockArgs {
+  fulfillerId: string;
+  fulfillerName: string;
   cost: number;
   totalStock: number;
   orderedStock?: number;
@@ -88,18 +88,18 @@ export interface SetSupplierStockArgs {
   postalCode: string;
   country: string;
 }
-export type SetSupplierStockResult = {
-  supplierId: string;
+export type SetFulfillerStockResult = {
+  fulfillerId: string;
   previousStock: number;
   newStock: number;
   available: number;
 };
 
-// Signal: Transfer reservation to supplier location
+// Signal: Transfer reservation to fulfiller location
 export const transferReservationSignal = 'transferReservation';
 export interface TransferReservationArgs {
   reservationId: string;
-  supplierId: string;
+  fulfillerId: string;
   quantity: number; // Allows partial transfers for splitting
 }
 
@@ -149,7 +149,7 @@ export const getStockLevelQueryDef = defineQuery<StockLevel>(getStockLevelQuery)
 export const getFullStateQueryDef = defineQuery<InventoryItem>(getFullStateQuery);
 
 // Updates
-export const setSupplierStockUpdateDef = defineUpdate<SetSupplierStockResult, [SetSupplierStockArgs]>(setSupplierStockUpdate);
+export const setFulfillerStockUpdateDef = defineUpdate<SetFulfillerStockResult, [SetFulfillerStockArgs]>(setFulfillerStockUpdate);
 export const reserveInventoryUpdateDef = defineUpdate<ReserveInventoryResult, [ReserveInventoryArgs]>(reserveInventoryUpdate);
 
 // Signals

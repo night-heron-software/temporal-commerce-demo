@@ -115,20 +115,20 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           assignmentId: { type: 'keyword' },
           lineItemId: { type: 'keyword' },
           variantId: { type: 'keyword' },
-          supplierId: { type: 'keyword' },
-          supplierName: { type: 'keyword' },
+          fulfillerId: { type: 'keyword' },
+          fulfillerName: { type: 'keyword' },
           quantity: { type: 'integer' },
           status: { type: 'keyword' },
-          supplierOrderId: { type: 'keyword' },
+          fulfillerOrderId: { type: 'keyword' },
           carrier: { type: 'keyword' }
         }
       },
-      supplierOrders: {
+      fulfillerOrders: {
         type: 'nested',
         properties: {
-          supplierOrderId: { type: 'keyword' },
-          supplierId: { type: 'keyword' },
-          supplierName: { type: 'keyword' },
+          fulfillerOrderId: { type: 'keyword' },
+          fulfillerId: { type: 'keyword' },
+          fulfillerName: { type: 'keyword' },
           status: { type: 'keyword' },
           itemCount: { type: 'integer' },
           carrier: { type: 'keyword' },
@@ -170,9 +170,9 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       lastOrderAt: { type: 'date' }
     }
   },
-  suppliers: {
+  fulfillers: {
     properties: {
-      supplierId: { type: 'keyword' },
+      fulfillerId: { type: 'keyword' },
       name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       locations: {
         type: 'nested',
@@ -197,12 +197,12 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       totalStock: { type: 'integer' },
       reservedStock: { type: 'integer' },
       availableStock: { type: 'integer' },
-      supplierCount: { type: 'integer' },
-      supplierLocations: {
+      fulfillerCount: { type: 'integer' },
+      fulfillerLocations: {
         type: 'nested',
         properties: {
-          supplierId: { type: 'keyword' },
-          supplierName: { type: 'keyword' },
+          fulfillerId: { type: 'keyword' },
+          fulfillerName: { type: 'keyword' },
           totalStock: { type: 'integer' },
           reservedStock: { type: 'integer' },
           orderedStock: { type: 'integer' },
@@ -237,12 +237,12 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       cartIds: { type: 'keyword' }
     }
   },
-  supplier_orders: {
+  fulfiller_orders: {
     properties: {
-      supplierOrderId: { type: 'keyword' },
+      fulfillerOrderId: { type: 'keyword' },
       orderId: { type: 'keyword' },
-      supplierId: { type: 'keyword' },
-      supplierName: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+      fulfillerId: { type: 'keyword' },
+      fulfillerName: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       status: { type: 'keyword' },
       items: {
         type: 'nested',
@@ -308,7 +308,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       orderId: { type: 'keyword' },
       customerId: { type: 'keyword' },
       status: { type: 'keyword' },
-      supplierOrderCount: { type: 'integer' },
+      fulfillerOrderCount: { type: 'integer' },
       createdAt: { type: 'date' },
       updatedAt: { type: 'date' },
       completedAt: { type: 'date' },

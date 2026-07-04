@@ -54,7 +54,12 @@ function makeCtx(overrides: Partial<CartWorkflowContext> = {}): CartWorkflowCont
 }
 
 const ev = (event: CartEvent) => ({ kind: 'event' as const, event, timestamp: 't' });
-const sig = (result: CheckoutWorkflowResult) => ({ kind: 'signal' as const, result, timestamp: 't' });
+// The combined inbound signal ('checkoutCompleted' on the wire) — completion results are
+// wrapped as {kind:'completed'}; the submit-freeze phases are their own kinds.
+const sig = (result: CheckoutWorkflowResult) =>
+  ({ kind: 'signal' as const, result: { kind: 'completed' as const, result }, timestamp: 't' });
+const freezeSig = (kind: 'submitStarted' | 'submitAborted') =>
+  ({ kind: 'signal' as const, result: { kind }, timestamp: 't' });
 const timeout = { kind: 'timeout' as const, timestamp: 't' };
 
 const okResult = (over: Partial<CheckoutWorkflowResult> = {}): CheckoutWorkflowResult => ({
@@ -173,17 +178,45 @@ describe('active — beginCheckout', () => {
   });
 });
 
-// ── checkout: edits rejected, completion signal drives the exit ───────────────
-describe('checkout — rejected edits + completion signal', () => {
+// ── checkout: editable mid-checkout, submit freeze, completion signal ─────────
+describe('checkout — editable mid-checkout + submit freeze + completion signal', () => {
   const inCheckout = (over: Partial<CartWorkflowContext> = {}) =>
     makeCtx({ checkoutWorkflowId: 'checkout-child', checkoutVersion: 0, cart: makeCart({ status: 'checkout' }), ...over });
 
-  it('cart edits are rejected while checkout is in progress (no reservation writes)', async () => {
+  it('cart edits are ALLOWED while checkout is in progress (stays in checkout)', async () => {
     const out = await CART_STATES.checkout.fn(inCheckout(), ev({ type: 'addItem', variantId: 'v2', quantity: 1, price: 5 }));
     expect(out.next).toBe('checkout');
-    expect(out.error).toMatch(/while checkout is in progress/);
+    expect(out.error).toBeUndefined();
+    expect(out.context.cart.items.map((i) => i.variantId)).toContain('v2');
+    expect(reserveCartItem).toHaveBeenCalledWith('cart-1', 'v2', 1);
+  });
+
+  it('submitStarted freezes the cart: edits rejected without reservation writes', async () => {
+    const frozen = await CART_STATES.checkout.fn(inCheckout(), freezeSig('submitStarted'));
+    expect(frozen.next).toBe('checkout');
+    expect(frozen.context.submitting).toBe(true);
+
+    const out = await CART_STATES.checkout.fn(
+      frozen.context,
+      ev({ type: 'addItem', variantId: 'v2', quantity: 1, price: 5 }),
+    );
+    expect(out.next).toBe('checkout');
+    expect(out.error).toMatch(/being placed/i);
     expect(out.context.cart.items.map((i) => i.variantId)).not.toContain('v2');
     expect(reserveCartItem).not.toHaveBeenCalled();
+  });
+
+  it('submitAborted clears the freeze: edits work again', async () => {
+    const frozen = await CART_STATES.checkout.fn(inCheckout(), freezeSig('submitStarted'));
+    const thawed = await CART_STATES.checkout.fn(frozen.context, freezeSig('submitAborted'));
+    expect(thawed.context.submitting).toBe(false);
+
+    const out = await CART_STATES.checkout.fn(
+      thawed.context,
+      ev({ type: 'updateQuantity', lineItemId: 'li-1', quantity: 4 }),
+    );
+    expect(out.next).toBe('checkout');
+    expect(out.context.cart.items[0].quantity).toBe(4);
   });
 
   it('completed(success) terminates the cart as completed with final totals', async () => {

@@ -8,7 +8,7 @@ export function buildFulfillmentDocument(
     orderId: state.orderId,
     customerId: state.customerId,
     status: state.status,
-    supplierOrderCount: state.supplierOrders.length,
+    fulfillerOrderCount: state.fulfillerOrders.length,
     createdAt: state.createdAt,
     updatedAt: state.updatedAt
   };

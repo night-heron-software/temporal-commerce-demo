@@ -95,7 +95,7 @@ describe('decide', () => {
     expect(facts).toEqual([]);
   });
 
-  it('checkoutCompleted success emits CartCompleted; failure emits CheckoutDisowned', () => {
+  it('checkoutCompleted success emits CartCompleted; failure emits CheckoutFailed with the error', () => {
     expect(decide({ type: 'checkoutCompleted', result: okResult() }, makeCtx()).map((f) => f.type)).toEqual([
       'CartCompleted',
     ]);
@@ -103,8 +103,13 @@ describe('decide', () => {
       decide(
         { type: 'checkoutCompleted', result: okResult({ success: false, order: undefined, error: 'declined' }) },
         makeCtx(),
-      ).map((f) => f.type),
-    ).toEqual(['CheckoutDisowned']);
+      ),
+    ).toEqual([{ type: 'CheckoutFailed', error: 'declined' }]);
+  });
+
+  it('submitStarted / submitAborted drive the freeze facts', () => {
+    expect(decide({ type: 'submitStarted' }, makeCtx())).toEqual([{ type: 'SubmitFreezeStarted' }]);
+    expect(decide({ type: 'submitAborted' }, makeCtx())).toEqual([{ type: 'SubmitFreezeCleared' }]);
   });
 });
 
@@ -166,13 +171,22 @@ describe('evolve', () => {
     expect(ctx.checkoutVersion).toBe(2);
   });
 
-  it('CheckoutDisowned returns the cart to active and drops the link', () => {
+  it('CheckoutFailed returns the cart to active, keeps the failure visible, drops the link', () => {
     const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x' });
     const ctx = apply(inCheckout, {
       type: 'checkoutCompleted',
       // checkoutVersion 1 matches the version beginCheckout just bumped to (0 → 1).
-      result: okResult({ success: false, order: undefined, checkoutVersion: 1 }),
+      result: okResult({ success: false, order: undefined, error: 'declined', checkoutVersion: 1 }),
     });
+    expect(ctx.cart.status).toBe('active');
+    expect(ctx.cart.checkout?.step).toBe('failed');
+    expect(ctx.cart.checkout?.error).toBe('declined');
+    expect(ctx.checkoutWorkflowId).toBeNull();
+  });
+
+  it('CheckoutDisowned (disownCheckout) clears the checkout fields entirely', () => {
+    const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x' });
+    const ctx = apply(inCheckout, { type: 'disownCheckout' });
     expect(ctx.cart.status).toBe('active');
     expect(ctx.cart.checkout).toBeUndefined();
     expect(ctx.checkoutWorkflowId).toBeNull();

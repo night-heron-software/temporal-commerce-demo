@@ -16,17 +16,34 @@ export type CheckoutStep = CheckoutStateName | 'complete' | 'failed' | 'cancelle
  */
 export type CheckoutState = Cart.CheckoutState;
 
+/**
+ * Checkout input carries no cart-content snapshot — contents are pulled live via the
+ * queryCart activity at `validating` and re-pulled on each recompute nudge.
+ */
 export interface CheckoutWorkflowInput {
   cartId: string;
   parentCartWorkflowId: string;
-  items: CartItem[];
-  subtotalPrice: number;
-  totalDiscounts: number;
   currency: string;
-  appliedCoupons: string[];
   isGuest: boolean;
   cartVersion: number;
   checkoutVersion: number;
+}
+
+/**
+ * Inbound nudge from the parent cart when items changed during checkout. Trigger-only:
+ * carries the new cartVersion; the checkout re-pulls contents via queryCart.
+ */
+export interface RecomputeSignal {
+  cartVersion: number;
+}
+
+/** Live cart contents as returned by the queryCart activity. */
+export interface QueriedCart {
+  items: CartItem[];
+  subtotalPrice: number;
+  totalDiscounts: number;
+  appliedCoupons: string[];
+  cartVersion: number;
 }
 
 export interface CheckoutWorkflowResult {

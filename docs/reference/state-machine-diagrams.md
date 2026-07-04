@@ -19,12 +19,13 @@ flowchart LR
   checkout[checkout]
   fulfillment[fulfillment]
   oms[oms]
+  cart -.->|signal: recompute| checkout
   cart -->|child: checkoutWorkflow| checkout
   checkout -.->|signal: checkoutCompleted| cart
   checkout -->|start: orderWorkflow| oms
   fulfillment -.->|signal: fulfillmentStatus| oms
   oms -.->|signal: cancel| fulfillment
-  oms -->|start: fulfillmentWorkflow| fulfillment
+  oms -->|child: fulfillmentWorkflow| fulfillment
 ```
 
 ---
@@ -41,9 +42,10 @@ stateDiagram-v2
   active --> active: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / signal
   active --> [*]: updateQuantity / removeItem / timeout → abandoned
   active --> checkout: beginCheckout
-  checkout --> checkout: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / signal
-  checkout --> active: timeout / signal
-  checkout --> [*]: signal → completed
+  checkout --> checkout: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / submitStarted / submitAborted
+  checkout --> [*]: updateQuantity / removeItem → abandoned
+  checkout --> active: timeout / submitStarted / submitAborted
+  checkout --> [*]: submitStarted / submitAborted → completed
   note right of active: timeout 30 days
   note right of checkout: timeout 1 hour
 ```
@@ -52,12 +54,12 @@ stateDiagram-v2
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: addItem` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `prepared.reserveError` |
-| `update: updateQuantity` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `context.cart.items.length === 0` |
-| `update: removeItem` | `active` | prepare: `releaseCartItem` · if: `context.cart.items.length === 0` |
-| `update: applyCoupon` | `active` |  |
+| `update: addItem` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError` |
+| `update: updateQuantity` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: removeItem` | `active` | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: applyCoupon` | `active` | if: `ctx.submitting` |
 | `update: linkUser` | `active` |  |
 | `update: beginCheckout` | `active` | prepare: `startChild` · if: `prepared.empty` |
 | `update: beginCheckout` | `checkout` | prepare: `startChild` · if: `prepared.empty` |
@@ -70,16 +72,18 @@ stateDiagram-v2
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: addItem` | `checkout` |  |
-| `update: updateQuantity` | `checkout` |  |
-| `update: removeItem` | `checkout` |  |
-| `update: applyCoupon` | `checkout` |  |
+| `update: addItem` | `checkout` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError` |
+| `update: updateQuantity` | `checkout` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
+| `update: removeItem` | `checkout` | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
+| `update: applyCoupon` | `checkout` | if: `ctx.submitting` |
 | `update: linkUser` | `checkout` |  |
 | `update: beginCheckout` | `checkout` |  |
 | `timeout` | `active` |  |
-| `signal` | `checkout` | if: `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` |
-| `signal` | ⇒ completed | if: `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` |
-| `signal` | `active` | if: `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` |
+| `signal` | `checkout` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `signal` | ⇒ completed | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `signal` | `active` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
 
 **Timeout:** 1 hour
 
@@ -98,18 +102,18 @@ stateDiagram-v2
   [*] --> validating
   validating --> shipping
   validating --> [*]: failed
-  shipping --> shipping: setShipping / acknowledgeCartChange / retargetParent
-  shipping --> payment: setShipping
-  shipping --> [*]: cancelCheckout / timeout → cancelled
-  payment --> shipping: setShipping
-  payment --> payment: setShipping / setPayment / acknowledgeCartChange / retargetParent
+  shipping --> shipping: setShipping / acknowledgeCartChange / retargetParent / signal
+  shipping --> payment: setShipping / signal
+  shipping --> [*]: cancelCheckout → cancelled
+  payment --> shipping: setShipping / signal
+  payment --> payment: setShipping / setPayment / acknowledgeCartChange / retargetParent / signal
   payment --> review: setPayment
-  payment --> [*]: cancelCheckout / timeout → cancelled
-  review --> shipping: setShipping
-  review --> payment: setShipping / submitOrder
+  payment --> [*]: cancelCheckout → cancelled
+  review --> shipping: setShipping / signal
+  review --> payment: setShipping / submitOrder / signal
   review --> review: setPayment / submitOrder / acknowledgeCartChange / retargetParent
   review --> [*]: submitOrder → complete
-  review --> [*]: cancelCheckout / timeout → cancelled
+  review --> [*]: cancelCheckout → cancelled
   note right of shipping: timeout 1 hour
   note right of payment: timeout 1 hour
   note right of review: timeout 1 hour
@@ -131,7 +135,8 @@ stateDiagram-v2
 | `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
 | `update: acknowledgeCartChange` | `shipping` |  |
 | `update: retargetParent` | `shipping` |  |
-| `timeout` | ⇒ cancelled | finalize: `releaseReservations` |
+| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
+| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
 
 **Timeout:** 1 hour
 
@@ -146,7 +151,8 @@ stateDiagram-v2
 | `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
 | `update: acknowledgeCartChange` | `payment` |  |
 | `update: retargetParent` | `payment` |  |
-| `timeout` | ⇒ cancelled | finalize: `releaseReservations` |
+| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
+| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
 
 **Timeout:** 1 hour
 
@@ -157,15 +163,102 @@ stateDiagram-v2
 | `update: setShipping` | `shipping` | if: `prepared.paymentIntentError` |
 | `update: setShipping` | `payment` | if: `prepared.paymentIntentError` |
 | `update: setPayment` | `review` |  |
-| `update: submitOrder` | `review` | if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
-| `update: submitOrder` | `payment` | if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
-| `update: submitOrder` | ⇒ complete | if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
+| `update: submitOrder` | `review` | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
+| `update: submitOrder` | `payment` | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
+| `update: submitOrder` | ⇒ complete | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
 | `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
 | `update: acknowledgeCartChange` | `review` |  |
 | `update: retargetParent` | `review` |  |
-| `timeout` | ⇒ cancelled | finalize: `releaseReservations` |
+| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
+| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
 
 **Timeout:** 1 hour
+
+---
+
+## Fulfillment — `FULFILLER_ORDER_STATES`
+
+Source: [src/temporal/fulfillment/fulfiller-states.ts](../../src/temporal/fulfillment/fulfiller-states.ts)
+
+The fulfiller-order state registry. `in_production`/`shipped` timeouts are placeholders
+here — {@link buildFulfillerOrderStates} overrides them with the memo-driven simulation
+delays at workflow start. Exported as a const so the state-diagram generator (static
+AST analysis over `*_STATES` registries) can discover the machine.
+
+```mermaid
+stateDiagram-v2
+  received
+  submitting
+  in_production
+  shipped
+  [*] --> received
+  received --> submitting: timeout
+  received --> [*]: cancel → cancelled
+  submitting --> in_production: timeout
+  submitting --> [*]: cancel → cancelled
+  in_production --> in_production: timeout / fulfillerStatus
+  in_production --> shipped: timeout / fulfillerStatus
+  in_production --> [*]: cancel → cancelled
+  in_production --> [*]: fulfillerStatus → delivered
+  in_production --> [*]: fulfillerStatus → failed
+  shipped --> shipped: timeout / fulfillerStatus
+  shipped --> [*]: timeout / fulfillerStatus → delivered
+  shipped --> [*]: cancel → cancelled
+  shipped --> [*]: fulfillerStatus → failed
+  shipped --> in_production: fulfillerStatus
+  note right of received: timeout 1 millisecond
+  note right of submitting: timeout 1 millisecond
+```
+
+### State: `received`
+
+received — book-keeping hop; marks the order as submitting.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `submitting` |  |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+
+**Timeout:** 1 millisecond
+
+### State: `submitting`
+
+submitting — submits the order to the (simulated) fulfiller.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `in_production` | prepare: `submitFulfillerOrder` |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+
+**Timeout:** 1 millisecond
+
+### State: `in_production`
+
+in_production — auto-ships on timeout (unless manual mode); accepts fulfiller updates.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `in_production` | if: `ctx.manualMode` |
+| `timeout` | `shipped` | if: `ctx.manualMode` |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+
+### State: `shipped`
+
+shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller updates.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `shipped` | if: `ctx.manualMode` |
+| `timeout` | ⇒ delivered | if: `ctx.manualMode` |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
 
 ---
 
@@ -206,124 +299,240 @@ stateDiagram-v2
 
 ---
 
-## Fulfillment — `SUPPLIER_ORDER_STATES`
-
-Source: [src/temporal/fulfillment/supplier-states.ts](../../src/temporal/fulfillment/supplier-states.ts)
-
-The supplier-order state registry. `in_production`/`shipped` timeouts are placeholders
-here — {@link buildSupplierOrderStates} overrides them with the memo-driven simulation
-delays at workflow start. Exported as a const so the state-diagram generator (static
-AST analysis over `*_STATES` registries) can discover the machine.
-
-```mermaid
-stateDiagram-v2
-  received
-  submitting
-  in_production
-  shipped
-  [*] --> received
-  received --> submitting: timeout
-  received --> [*]: cancel → cancelled
-  submitting --> in_production: timeout
-  submitting --> [*]: cancel → cancelled
-  in_production --> in_production: timeout / supplierStatus
-  in_production --> shipped: timeout / supplierStatus
-  in_production --> [*]: cancel → cancelled
-  in_production --> [*]: supplierStatus → delivered
-  in_production --> [*]: supplierStatus → failed
-  shipped --> shipped: timeout / supplierStatus
-  shipped --> [*]: timeout / supplierStatus → delivered
-  shipped --> [*]: cancel → cancelled
-  shipped --> [*]: supplierStatus → failed
-  shipped --> in_production: supplierStatus
-  note right of received: timeout 1 millisecond
-  note right of submitting: timeout 1 millisecond
-```
-
-### State: `received`
-
-received — book-keeping hop; marks the order as submitting.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `submitting` |  |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-
-**Timeout:** 1 millisecond
-
-### State: `submitting`
-
-submitting — submits the order to the (simulated) supplier.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `in_production` | prepare: `submitSupplierOrder` |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-
-**Timeout:** 1 millisecond
-
-### State: `in_production`
-
-in_production — auto-ships on timeout (unless manual mode); accepts supplier updates.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `in_production` | if: `ctx.manualMode` |
-| `timeout` | `shipped` | if: `ctx.manualMode` |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-
-### State: `shipped`
-
-shipped — auto-delivers on timeout (unless manual mode); accepts supplier updates.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `shipped` | if: `ctx.manualMode` |
-| `timeout` | ⇒ delivered | if: `ctx.manualMode` |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-
----
-
 ## OMS — `OMS_STATES`
 
 Source: [src/temporal/oms/states.ts](../../src/temporal/oms/states.ts)
 
 ```mermaid
 stateDiagram-v2
+  pending_assignment
+  assigning_fulfillers
+  requesting_fulfillment
+  ready_to_fulfill
   processing
-  [*] --> processing
-  processing --> [*]: updateStatus / signal → delivered
-  processing --> [*]: updateStatus / submitFeedback → complete
-  processing --> [*]: updateStatus / cancelOrder → cancelled
+  partially_shipped
+  shipped
+  delivered
+  return_requested
+  [*] --> pending_assignment
+  pending_assignment --> assigning_fulfillers
+  assigning_fulfillers --> requesting_fulfillment
+  assigning_fulfillers --> ready_to_fulfill
+  requesting_fulfillment --> processing
+  ready_to_fulfill --> [*]: cancelOrder / updateStatus → cancelled
+  ready_to_fulfill --> processing: updateStatus
+  ready_to_fulfill --> partially_shipped: updateStatus
+  ready_to_fulfill --> shipped: updateStatus
+  ready_to_fulfill --> delivered: updateStatus
+  ready_to_fulfill --> return_requested: updateStatus
+  ready_to_fulfill --> [*]: updateStatus → refunded
+  ready_to_fulfill --> [*]: updateStatus → returned
+  ready_to_fulfill --> [*]: updateStatus → complete
+  ready_to_fulfill --> ready_to_fulfill: timeout / signal
+  processing --> [*]: cancelOrder / updateStatus → cancelled
+  processing --> processing: updateStatus / timeout / applyFulfillmentStatus
+  processing --> partially_shipped: updateStatus / applyFulfillmentStatus
+  processing --> shipped: updateStatus / applyFulfillmentStatus
+  processing --> delivered: updateStatus / applyFulfillmentStatus
+  processing --> return_requested: updateStatus
   processing --> [*]: updateStatus → refunded
-  processing --> processing: updateStatus / timeout / signal
+  processing --> [*]: updateStatus → returned
+  processing --> [*]: updateStatus → complete
+  partially_shipped --> [*]: cancelOrder / updateStatus → cancelled
+  partially_shipped --> processing: updateStatus / applyFulfillmentStatus
+  partially_shipped --> partially_shipped: updateStatus / timeout / applyFulfillmentStatus
+  partially_shipped --> shipped: updateStatus / applyFulfillmentStatus
+  partially_shipped --> delivered: updateStatus / applyFulfillmentStatus
+  partially_shipped --> return_requested: updateStatus
+  partially_shipped --> [*]: updateStatus → refunded
+  partially_shipped --> [*]: updateStatus → returned
+  partially_shipped --> [*]: updateStatus → complete
+  shipped --> [*]: cancelOrder / updateStatus → cancelled
+  shipped --> processing: updateStatus / applyFulfillmentStatus
+  shipped --> partially_shipped: updateStatus / applyFulfillmentStatus
+  shipped --> shipped: updateStatus / timeout / applyFulfillmentStatus
+  shipped --> delivered: updateStatus / applyFulfillmentStatus
+  shipped --> return_requested: updateStatus
+  shipped --> [*]: updateStatus → refunded
+  shipped --> [*]: updateStatus → returned
+  shipped --> [*]: updateStatus → complete
+  delivered --> [*]: submitFeedback / updateStatus → complete
+  delivered --> [*]: updateStatus / refundOrder → refunded
+  delivered --> delivered: updateStatus / refundOrder / timeout / signal
+  delivered --> processing: updateStatus
+  delivered --> partially_shipped: updateStatus
+  delivered --> shipped: updateStatus
+  delivered --> return_requested: updateStatus / requestReturn
+  delivered --> [*]: updateStatus → cancelled
+  delivered --> [*]: updateStatus → returned
+  return_requested --> [*]: confirmReturn → returned
+  return_requested --> delivered: denyReturn
+  return_requested --> return_requested: timeout / signal
+  note right of pending_assignment: timeout 1 minute
+  note right of assigning_fulfillers: timeout 1 minute
+  note right of requesting_fulfillment: timeout 1 minute
+  note right of ready_to_fulfill: timeout 365 days
   note right of processing: timeout 365 days
+  note right of partially_shipped: timeout 365 days
+  note right of shipped: timeout 365 days
+  note right of delivered: timeout 30 days
+  note right of return_requested: timeout 30 days
 ```
+
+### State: `pending_assignment`
+
+Transitional initial state. (The mono posts the ORDER_CAPTURE accounting transaction
+here; the demo has no ledger, so this is a pure hop to `assigning_fulfillers`.)
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| *(auto)* | `assigning_fulfillers` |  |
+
+**Timeout:** 1 minute
+
+### State: `assigning_fulfillers`
+
+Transitional state. `prepare` calls the fulfiller-resolution activity (impure I/O);
+`decide` records the resulting assignments on the order. Advances to
+`requesting_fulfillment` when at least one assignment resolved, otherwise falls back
+to the manual `ready_to_fulfill` path.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| *(auto)* | `requesting_fulfillment` |  |
+| *(auto)* | `ready_to_fulfill` |  |
+
+**Timeout:** 1 minute
+
+### State: `requesting_fulfillment`
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| *(auto)* | `processing` |  |
+
+**Timeout:** 1 minute
+
+### State: `ready_to_fulfill`
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `update: cancelOrder` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `processing` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `partially_shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `return_requested` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ refunded | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ returned | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ complete | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `timeout` | `ready_to_fulfill` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `signal` | `ready_to_fulfill` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+
+**Timeout:** 365 days
 
 ### State: `processing`
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: updateStatus` | ⇒ delivered | finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase`, `sendOrderStatusEmail`, `signalFulfillmentCancel` |
-| `update: updateStatus` | ⇒ complete | finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase`, `sendOrderStatusEmail`, `signalFulfillmentCancel` |
-| `update: updateStatus` | ⇒ cancelled | finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase`, `sendOrderStatusEmail`, `signalFulfillmentCancel` |
-| `update: updateStatus` | ⇒ refunded | finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase`, `sendOrderStatusEmail`, `signalFulfillmentCancel` |
-| `update: updateStatus` | `processing` | finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase`, `sendOrderStatusEmail`, `signalFulfillmentCancel` |
-| `update: cancelOrder` | ⇒ cancelled | finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase`, `sendOrderStatusEmail`, `signalFulfillmentCancel` |
-| `update: submitFeedback` | ⇒ complete | finalize: `updateOrderInDatabase`, `sendFeedbackThankYouEmail`, `insertStatusHistoryEntry` |
-| `timeout` | `processing` |  |
-| `signal` | `processing` | if: `facts.length === 0` · finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase` |
-| `signal` | ⇒ delivered | if: `facts.length === 0` · finalize: `insertStatusHistoryEntry`, `updateOrderInDatabase` |
+| `update: cancelOrder` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `processing` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `partially_shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `return_requested` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ refunded | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ returned | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ complete | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `timeout` | `processing` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `signal` | `processing` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `delivered` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `shipped` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `partially_shipped` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
 
 **Timeout:** 365 days
+
+### State: `partially_shipped`
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `update: cancelOrder` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `processing` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `partially_shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `return_requested` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ refunded | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ returned | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ complete | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `timeout` | `partially_shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `signal` | `partially_shipped` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `delivered` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `shipped` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `processing` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+
+**Timeout:** 365 days
+
+### State: `shipped`
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `update: cancelOrder` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `processing` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `partially_shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `return_requested` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ cancelled | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ refunded | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ returned | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ complete | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `timeout` | `shipped` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `signal` | `shipped` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `delivered` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `partially_shipped` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+| `signal` | `processing` | if: `facts.length === 0`; `agg === 'delivered'`; `agg === 'shipped'`; `agg === 'partially_shipped'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` · signal kinds: `applyFulfillmentStatus` |
+
+**Timeout:** 365 days
+
+### State: `delivered`
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `update: submitFeedback` | ⇒ complete | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ refunded | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `delivered` | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `processing` | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `partially_shipped` | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `shipped` | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | `return_requested` | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ cancelled | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ returned | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: updateStatus` | ⇒ complete | if: `event.status === 'refunded'` · finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: refundOrder` | ⇒ refunded | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: refundOrder` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: requestReturn` | `return_requested` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `timeout` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `signal` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+
+**Timeout:** 30 days
+
+### State: `return_requested`
+
+A return has been requested on a delivered order. `confirmReturn` issues the refund
+(via the decider's ReturnConfirmed fact) and finishes the order as `returned`; `denyReturn`
+clears the request and drops back to `delivered`.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `update: confirmReturn` | ⇒ returned | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `update: denyReturn` | `delivered` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `timeout` | `return_requested` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+| `signal` | `return_requested` | finalize: `sendOrderStatusEmail`, `triggerFulfillmentCancel`, `sendFeedbackThankYouEmail`, `indexFulfillerOrder`, `startChild` |
+
+**Timeout:** 30 days
 
 ---
 

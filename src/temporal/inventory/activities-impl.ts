@@ -13,7 +13,7 @@ import { getElasticsearchClient } from '../../lib';
 import { Elasticsearch } from '../contracts';
 const { ES_INDICES } = Elasticsearch;
 type InventoryDocument = Elasticsearch.InventoryDocument;
-type InventorySupplierLocationDocument = Elasticsearch.InventorySupplierLocationDocument;
+type InventoryFulfillerLocationDocument = Elasticsearch.InventoryFulfillerLocationDocument;
 type InventoryReservationDocument = Elasticsearch.InventoryReservationDocument;
 import { logger } from '../../lib';
 
@@ -42,8 +42,8 @@ export async function expireReservations(): Promise<number> {
 
 interface StockWriteRow {
   blank_sku: string;
-  supplier_id: string;
-  supplier_name: string;
+  fulfiller_id: string;
+  fulfiller_name: string;
   total_stock: number;
   reserved_stock: number;
   ordered_stock: number;
@@ -61,7 +61,7 @@ interface ReservationWriteRow {
   blank_sku: string;
   cart_id: string;
   variant_id: string;
-  supplier_id: string | null;
+  fulfiller_id: string | null;
   quantity: number;
   status: string;
   expires_at: Date | null;
@@ -90,11 +90,11 @@ export async function projectStockSummaries(): Promise<void> {
 
   const now = new Date();
   const summaryBatch: Array<{ query: string; params: unknown[] }> = [];
-  const supplierBatch: Array<{ query: string; params: unknown[] }> = [];
+  const fulfillerBatch: Array<{ query: string; params: unknown[] }> = [];
 
-  for (const [blankSku, suppliers] of bySkuMap) {
-    const totalStock = suppliers.reduce((s, r) => s + r.total_stock, 0);
-    const reservedStock = suppliers.reduce((s, r) => s + r.reserved_stock, 0);
+  for (const [blankSku, fulfillers] of bySkuMap) {
+    const totalStock = fulfillers.reduce((s, r) => s + r.total_stock, 0);
+    const reservedStock = fulfillers.reduce((s, r) => s + r.reserved_stock, 0);
     const availableStock = totalStock - reservedStock;
     const lowStock = availableStock < LOW_STOCK_THRESHOLD;
 
@@ -102,22 +102,22 @@ export async function projectStockSummaries(): Promise<void> {
     summaryBatch.push({
       query: `INSERT INTO inventory_stock_summary (
         blank_sku, total_stock, reserved_stock, available_stock,
-        supplier_count, low_stock, last_projected_at
+        fulfiller_count, low_stock, last_projected_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       params: [blankSku, totalStock, reservedStock, availableStock,
-               suppliers.length, lowStock, now],
+               fulfillers.length, lowStock, now],
     });
 
-    // Upsert each supplier into inventory_stock_by_supplier
-    for (const sup of suppliers) {
+    // Upsert each fulfiller into inventory_stock_by_fulfiller
+    for (const sup of fulfillers) {
       const supAvailable = sup.total_stock - sup.reserved_stock;
-      supplierBatch.push({
-        query: `INSERT INTO inventory_stock_by_supplier (
-          supplier_id, blank_sku, supplier_name, total_stock,
+      fulfillerBatch.push({
+        query: `INSERT INTO inventory_stock_by_fulfiller (
+          fulfiller_id, blank_sku, fulfiller_name, total_stock,
           reserved_stock, available_stock, cost, city, state,
           country, last_projected_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [sup.supplier_id, blankSku, sup.supplier_name,
+        params: [sup.fulfiller_id, blankSku, sup.fulfiller_name,
                  sup.total_stock, sup.reserved_stock, supAvailable,
                  sup.cost, sup.city, sup.state, sup.country, now],
       });
@@ -129,12 +129,12 @@ export async function projectStockSummaries(): Promise<void> {
   for (let i = 0; i < summaryBatch.length; i += BATCH_SIZE) {
     await executeBatch(summaryBatch.slice(i, i + BATCH_SIZE));
   }
-  for (let i = 0; i < supplierBatch.length; i += BATCH_SIZE) {
-    await executeBatch(supplierBatch.slice(i, i + BATCH_SIZE));
+  for (let i = 0; i < fulfillerBatch.length; i += BATCH_SIZE) {
+    await executeBatch(fulfillerBatch.slice(i, i + BATCH_SIZE));
   }
 
   logger.info(
-    { skuCount: bySkuMap.size, supplierRows: supplierBatch.length },
+    { skuCount: bySkuMap.size, fulfillerRows: fulfillerBatch.length },
     'Projected stock summaries'
   );
 }
@@ -160,10 +160,10 @@ export async function projectReservationViews(): Promise<void> {
     batch.push({
       query: `INSERT INTO inventory_reservations_by_sku (
         blank_sku, reservation_id, cart_id, variant_id, quantity,
-        status, supplier_id, expires_at, created_at
+        status, fulfiller_id, expires_at, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [r.blank_sku, r.reservation_id, r.cart_id, r.variant_id,
-               r.quantity, r.status, r.supplier_id, r.expires_at, r.created_at],
+               r.quantity, r.status, r.fulfiller_id, r.expires_at, r.created_at],
     });
   }
 
@@ -225,14 +225,14 @@ export async function projectLowStockAlerts(): Promise<void> {
 // Elasticsearch Sync
 // ============================================================
 
-/** Build one SKU's ES inventory document from its supplier stock rows + active reservations. */
+/** Build one SKU's ES inventory document from its fulfiller stock rows + active reservations. */
 function buildInventoryDoc(
   blankSku: string,
-  suppliers: StockWriteRow[],
+  fulfillers: StockWriteRow[],
   reservations: ReservationWriteRow[],
 ): InventoryDocument {
-  const totalStock = suppliers.reduce((s, r) => s + r.total_stock, 0);
-  const reservedStock = suppliers.reduce((s, r) => s + r.reserved_stock, 0);
+  const totalStock = fulfillers.reduce((s, r) => s + r.total_stock, 0);
+  const reservedStock = fulfillers.reduce((s, r) => s + r.reserved_stock, 0);
 
   const toReservationDoc = (r: ReservationWriteRow): InventoryReservationDocument => ({
     reservationId: r.reservation_id,
@@ -243,9 +243,9 @@ function buildInventoryDoc(
     expiresAt: r.expires_at ? r.expires_at.getTime() : null,
   });
 
-  const supplierLocations: InventorySupplierLocationDocument[] = suppliers.map((sup) => ({
-    supplierId: sup.supplier_id,
-    supplierName: sup.supplier_name,
+  const fulfillerLocations: InventoryFulfillerLocationDocument[] = fulfillers.map((sup) => ({
+    fulfillerId: sup.fulfiller_id,
+    fulfillerName: sup.fulfiller_name,
     totalStock: sup.total_stock,
     reservedStock: sup.reserved_stock,
     orderedStock: sup.ordered_stock,
@@ -253,7 +253,7 @@ function buildInventoryDoc(
     state: sup.state,
     country: sup.country,
     reservations: reservations
-      .filter((r) => r.supplier_id === sup.supplier_id)
+      .filter((r) => r.fulfiller_id === sup.fulfiller_id)
       .map(toReservationDoc),
   }));
 
@@ -262,9 +262,9 @@ function buildInventoryDoc(
     totalStock,
     reservedStock,
     availableStock: totalStock - reservedStock,
-    supplierCount: suppliers.length,
-    supplierLocations,
-    reservations: reservations.filter((r) => !r.supplier_id).map(toReservationDoc),
+    fulfillerCount: fulfillers.length,
+    fulfillerLocations,
+    reservations: reservations.filter((r) => !r.fulfiller_id).map(toReservationDoc),
     reservationIds: reservations.map((r) => r.reservation_id),
     cartIds: [...new Set(reservations.map((r) => r.cart_id))],
   };
@@ -302,10 +302,10 @@ export async function syncInventoryToES(): Promise<void> {
   const client = getElasticsearchClient();
   const operations: unknown[] = [];
 
-  for (const [blankSku, suppliers] of stockBySku) {
+  for (const [blankSku, fulfillers] of stockBySku) {
     const reservations = resBySkuMap.get(blankSku) ?? [];
     operations.push({ index: { _index: ES_INDICES.inventory, _id: blankSku } });
-    operations.push(buildInventoryDoc(blankSku, suppliers, reservations));
+    operations.push(buildInventoryDoc(blankSku, fulfillers, reservations));
   }
 
   if (operations.length > 0) {
@@ -330,16 +330,16 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
 
   const now = new Date();
   const summaryBatch: Array<{ query: string; params: unknown[] }> = [];
-  const supplierBatch: Array<{ query: string; params: unknown[] }> = [];
+  const fulfillerBatch: Array<{ query: string; params: unknown[] }> = [];
   const lowStockBatch: Array<{ query: string; params: unknown[] }> = [];
 
   for (const blankSku of blankSkus) {
-    const suppliers = await executeCql<StockWriteRow>(
+    const fulfillers = await executeCql<StockWriteRow>(
       `SELECT * FROM inventory_stock_w WHERE blank_sku = ?`,
       [blankSku]
     );
 
-    if (suppliers.length === 0) {
+    if (fulfillers.length === 0) {
       // SKU deleted — remove from read tables
       summaryBatch.push({
         query: `DELETE FROM inventory_stock_summary WHERE blank_sku = ?`,
@@ -348,29 +348,29 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
       continue;
     }
 
-    const totalStock = suppliers.reduce((s, r) => s + r.total_stock, 0);
-    const reservedStock = suppliers.reduce((s, r) => s + r.reserved_stock, 0);
+    const totalStock = fulfillers.reduce((s, r) => s + r.total_stock, 0);
+    const reservedStock = fulfillers.reduce((s, r) => s + r.reserved_stock, 0);
     const availableStock = totalStock - reservedStock;
     const lowStock = availableStock < LOW_STOCK_THRESHOLD;
 
     summaryBatch.push({
       query: `INSERT INTO inventory_stock_summary (
         blank_sku, total_stock, reserved_stock, available_stock,
-        supplier_count, low_stock, last_projected_at
+        fulfiller_count, low_stock, last_projected_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       params: [blankSku, totalStock, reservedStock, availableStock,
-               suppliers.length, lowStock, now],
+               fulfillers.length, lowStock, now],
     });
 
-    for (const sup of suppliers) {
+    for (const sup of fulfillers) {
       const supAvailable = sup.total_stock - sup.reserved_stock;
-      supplierBatch.push({
-        query: `INSERT INTO inventory_stock_by_supplier (
-          supplier_id, blank_sku, supplier_name, total_stock,
+      fulfillerBatch.push({
+        query: `INSERT INTO inventory_stock_by_fulfiller (
+          fulfiller_id, blank_sku, fulfiller_name, total_stock,
           reserved_stock, available_stock, cost, city, state,
           country, last_projected_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [sup.supplier_id, blankSku, sup.supplier_name,
+        params: [sup.fulfiller_id, blankSku, sup.fulfiller_name,
                  sup.total_stock, sup.reserved_stock, supAvailable,
                  sup.cost, sup.city, sup.state, sup.country, now],
       });
@@ -404,7 +404,7 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
   }
 
   const BATCH_SIZE = 20;
-  for (const batch of [summaryBatch, supplierBatch, lowStockBatch]) {
+  for (const batch of [summaryBatch, fulfillerBatch, lowStockBatch]) {
     for (let i = 0; i < batch.length; i += BATCH_SIZE) {
       await executeBatch(batch.slice(i, i + BATCH_SIZE));
     }
@@ -443,10 +443,10 @@ export async function projectReservationsForSkus(blankSkus: string[]): Promise<v
       batch.push({
         query: `INSERT INTO inventory_reservations_by_sku (
           blank_sku, reservation_id, cart_id, variant_id, quantity,
-          status, supplier_id, expires_at, created_at
+          status, fulfiller_id, expires_at, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params: [r.blank_sku, r.reservation_id, r.cart_id, r.variant_id,
-                 r.quantity, r.status, r.supplier_id, r.expires_at, r.created_at],
+                 r.quantity, r.status, r.fulfiller_id, r.expires_at, r.created_at],
       });
     }
   }
@@ -472,12 +472,12 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
   const operations: unknown[] = [];
 
   for (const blankSku of blankSkus) {
-    const suppliers = await executeCql<StockWriteRow>(
+    const fulfillers = await executeCql<StockWriteRow>(
       `SELECT * FROM inventory_stock_w WHERE blank_sku = ?`,
       [blankSku]
     );
 
-    if (suppliers.length === 0) {
+    if (fulfillers.length === 0) {
       // SKU deleted — remove from ES
       operations.push({ delete: { _index: ES_INDICES.inventory, _id: blankSku } });
       continue;
@@ -490,7 +490,7 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
     );
 
     operations.push({ index: { _index: ES_INDICES.inventory, _id: blankSku } });
-    operations.push(buildInventoryDoc(blankSku, suppliers, reservations));
+    operations.push(buildInventoryDoc(blankSku, fulfillers, reservations));
   }
 
   if (operations.length > 0) {

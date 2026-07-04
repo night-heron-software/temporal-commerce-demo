@@ -11,16 +11,35 @@
  * `State` is the whole `CheckoutContext` (checkout state + pricing + reservations + parent link).
  */
 
-import type { CheckoutContext, CheckoutState, Order, PaymentMethod, ShippingAddress } from './types';
+import type {
+  CheckoutContext,
+  CheckoutState,
+  Order,
+  PaymentMethod,
+  QueriedCart,
+  ShippingAddress,
+} from './types';
 import type { ReservationInfo } from './activities';
 
 // ── Prepared payloads (shell → core) ────────────────────────────────────────
 
-/** Result of renewing reservations on checkout entry. */
+/** Result of pulling the live cart + renewing reservations on checkout entry. */
 export interface ValidatingPrepared {
   success: boolean;
   reservations: ReservationInfo[];
   error?: string;
+  /** Live cart contents (queryCart) — folded into the context on success. */
+  cart: QueriedCart;
+}
+
+/**
+ * Result of a recompute nudge: the re-pulled cart, plus re-priced shipping/tax when a
+ * shipping address was already set (otherwise pricing waits for setShipping).
+ */
+export interface RecomputePrepared {
+  cart: QueriedCart;
+  shippingCost?: number;
+  tax?: number;
 }
 
 /** Result of pricing a shipping address (+ creating the PaymentIntent). */
@@ -45,11 +64,13 @@ export type CheckoutCommand =
   | { type: 'submitOrder'; prepared: SubmitOrderPrepared }
   | { type: 'cancelCheckout' }
   | { type: 'acknowledgeCartChange'; cartVersion: number }
-  | { type: 'retargetParent'; newParentCartWorkflowId: string };
+  | { type: 'retargetParent'; newParentCartWorkflowId: string }
+  | { type: 'recompute'; prepared: RecomputePrepared };
 
 export type CheckoutFact =
-  | { type: 'ValidationSucceeded'; reservations: ReservationInfo[] }
+  | { type: 'ValidationSucceeded'; reservations: ReservationInfo[]; cart: QueriedCart }
   | { type: 'ValidationFailed'; error: string }
+  | { type: 'CartRecomputed'; cart: QueriedCart; shippingCost?: number; tax?: number }
   | {
       type: 'ShippingPriced';
       shippingAddress: ShippingAddress;
@@ -71,7 +92,13 @@ export function decide(command: CheckoutCommand, _state: CheckoutContext): Check
   switch (command.type) {
     case 'validated':
       return command.prepared.success
-        ? [{ type: 'ValidationSucceeded', reservations: command.prepared.reservations }]
+        ? [
+            {
+              type: 'ValidationSucceeded',
+              reservations: command.prepared.reservations,
+              cart: command.prepared.cart,
+            },
+          ]
         : [
             {
               type: 'ValidationFailed',
@@ -108,6 +135,16 @@ export function decide(command: CheckoutCommand, _state: CheckoutContext): Check
     case 'retargetParent':
       return [{ type: 'ParentRetargeted', newParentCartWorkflowId: command.newParentCartWorkflowId }];
 
+    case 'recompute':
+      return [
+        {
+          type: 'CartRecomputed',
+          cart: command.prepared.cart,
+          shippingCost: command.prepared.shippingCost,
+          tax: command.prepared.tax,
+        },
+      ];
+
     default:
       return [];
   }
@@ -125,7 +162,39 @@ export function evolve(ctx: CheckoutContext, fact: CheckoutFact): CheckoutContex
       return {
         ...withState(ctx, { ...ctx.state, step: 'shipping' }),
         reservations: fact.reservations,
+        items: fact.cart.items,
+        subtotalPrice: fact.cart.subtotalPrice,
+        totalDiscounts: fact.cart.totalDiscounts,
+        appliedCoupons: fact.cart.appliedCoupons,
+        cartVersion: fact.cart.cartVersion,
+        totalPrice: fact.cart.subtotalPrice - fact.cart.totalDiscounts,
       };
+
+    case 'CartRecomputed': {
+      // Cart changed mid-checkout: fold the fresh contents, re-price when the shipping
+      // address was already set, and un-check the payment method so the shopper
+      // re-confirms against the new total.
+      const shippingCost = fact.shippingCost ?? ctx.shippingCost;
+      const tax = fact.tax ?? ctx.totalTax;
+      const priced = fact.shippingCost !== undefined;
+      return {
+        ...withState(ctx, {
+          ...ctx.state,
+          paymentMethod: undefined,
+          shippingCost: priced ? shippingCost : ctx.state.shippingCost,
+          tax: priced ? tax : ctx.state.tax,
+          error: undefined,
+        }),
+        items: fact.cart.items,
+        subtotalPrice: fact.cart.subtotalPrice,
+        totalDiscounts: fact.cart.totalDiscounts,
+        appliedCoupons: fact.cart.appliedCoupons,
+        cartVersion: fact.cart.cartVersion,
+        shippingCost,
+        totalTax: tax,
+        totalPrice: fact.cart.subtotalPrice - fact.cart.totalDiscounts + shippingCost + tax,
+      };
+    }
 
     case 'ValidationFailed':
       return withState(ctx, { ...ctx.state, step: 'failed', error: fact.error });

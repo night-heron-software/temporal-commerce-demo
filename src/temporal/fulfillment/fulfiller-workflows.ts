@@ -1,7 +1,7 @@
 import * as wf from '@temporalio/workflow';
-import { Fulfillment, Suppliers } from '../contracts';
+import { Fulfillment, Fulfillers } from '../contracts';
 import { buildWorkflowId, DEMO_STORE_ID } from '../contracts/constants';
-import type { FulfillmentSupplierOrderState, FulfillmentLineItemState } from './types';
+import type { FulfillmentFulfillerOrderState, FulfillmentLineItemState } from './types';
 import {
   sendShippedEmail,
   sendDeliveredEmail,
@@ -12,15 +12,15 @@ import {
 } from './activities';
 
 import { runStateMachine, StateMachineConfig, SignalRegistration, isTerminal } from '../framework';
-import { buildSupplierOrderStates } from './supplier-states';
+import { buildFulfillerOrderStates } from './fulfiller-states';
 
-export type SupplierOrderStateName = 'received' | 'submitting' | 'in_production' | 'shipped';
+export type FulfillerOrderStateName = 'received' | 'submitting' | 'in_production' | 'shipped';
 
-export type SupplierOrderSignal =
-  | { kind: 'supplierStatus'; update: Suppliers.SupplierStatusUpdate }
+export type FulfillerOrderSignal =
+  | { kind: 'fulfillerStatus'; update: Fulfillers.FulfillerStatusUpdate }
   | { kind: 'cancel' };
 
-export interface SupplierOrderWorkflowInput {
+export interface FulfillerOrderWorkflowInput {
   orderId: string;
   cartId: string;
   customerId: string;
@@ -28,10 +28,10 @@ export interface SupplierOrderWorkflowInput {
   confirmationNumber?: string;
   shippingAddress: Fulfillment.ShippingAddress;
   shippingMethod?: 'standard' | 'express' | 'economy';
-  supplierOrder: FulfillmentSupplierOrderState;
+  fulfillerOrder: FulfillmentFulfillerOrderState;
 }
 
-export interface SupplierOrderWorkflowContext {
+export interface FulfillerOrderWorkflowContext {
   orderId: string;
   cartId: string;
   customerId: string;
@@ -39,17 +39,17 @@ export interface SupplierOrderWorkflowContext {
   confirmationNumber?: string;
   shippingAddress: Fulfillment.ShippingAddress;
   shippingMethod?: 'standard' | 'express' | 'economy';
-  so: FulfillmentSupplierOrderState;
+  so: FulfillmentFulfillerOrderState;
   manualMode: boolean;
 }
 
 // Signals and Queries defined locally for the child workflow
-export const childSupplierStatusSignal = wf.defineSignal<[Suppliers.SupplierStatusUpdate]>('supplierStatusUpdate');
+export const childFulfillerStatusSignal = wf.defineSignal<[Fulfillers.FulfillerStatusUpdate]>('fulfillerStatusUpdate');
 export const childCancelSignal = wf.defineSignal('cancel');
-export const getSupplierOrderStateQuery = wf.defineQuery<FulfillmentSupplierOrderState>('getSupplierOrderState');
+export const getFulfillerOrderStateQuery = wf.defineQuery<FulfillmentFulfillerOrderState>('getFulfillerOrderState');
 
 async function notifyParent(
-  so: FulfillmentSupplierOrderState,
+  so: FulfillmentFulfillerOrderState,
   orderId: string,
 ) {
   try {
@@ -61,13 +61,13 @@ async function notifyParent(
   }
 }
 
-// Supplier Order Workflow Implementation
-export async function supplierOrderWorkflow(
-  input: SupplierOrderWorkflowInput,
-): Promise<FulfillmentSupplierOrderState> {
+// Fulfiller Order Workflow Implementation
+export async function fulfillerOrderWorkflow(
+  input: FulfillerOrderWorkflowInput,
+): Promise<FulfillmentFulfillerOrderState> {
   const manualMode = await getFeatureFlag('MANUAL_FULFILLMENT');
 
-  const context: SupplierOrderWorkflowContext = {
+  const context: FulfillerOrderWorkflowContext = {
     orderId: input.orderId,
     cartId: input.cartId,
     customerId: input.customerId,
@@ -76,18 +76,18 @@ export async function supplierOrderWorkflow(
     shippingAddress: input.shippingAddress,
     shippingMethod: input.shippingMethod,
     so: {
-      ...input.supplierOrder,
-      items: input.supplierOrder.items.map((i) => ({ ...i })),
+      ...input.fulfillerOrder,
+      items: input.fulfillerOrder.items.map((i) => ({ ...i })),
     },
     manualMode,
   };
 
-  wf.setHandler(getSupplierOrderStateQuery, () => context.so);
+  wf.setHandler(getFulfillerOrderStateQuery, () => context.so);
 
-  const signals: SignalRegistration<SupplierOrderSignal>[] = [
+  const signals: SignalRegistration<FulfillerOrderSignal>[] = [
     {
-      definition: childSupplierStatusSignal,
-      toSignal: (update: Suppliers.SupplierStatusUpdate) => ({ kind: 'supplierStatus' as const, update }),
+      definition: childFulfillerStatusSignal,
+      toSignal: (update: Fulfillers.FulfillerStatusUpdate) => ({ kind: 'fulfillerStatus' as const, update }),
     },
     {
       definition: childCancelSignal,
@@ -109,18 +109,18 @@ export async function supplierOrderWorkflow(
   );
 
   const config: StateMachineConfig<
-    SupplierOrderStateName,
+    FulfillerOrderStateName,
     never,
-    SupplierOrderWorkflowContext,
+    FulfillerOrderWorkflowContext,
     void,
-    SupplierOrderSignal
+    FulfillerOrderSignal
   > = {
-    states: buildSupplierOrderStates({ processingDelayMs, shippingDelayMs, deliveryDelayMs }),
+    states: buildFulfillerOrderStates({ processingDelayMs, shippingDelayMs, deliveryDelayMs }),
     initialState: 'received',
-    onContextUpdate: (newCtx: SupplierOrderWorkflowContext) => {
+    onContextUpdate: (newCtx: FulfillerOrderWorkflowContext) => {
       Object.assign(context, newCtx);
     },
-    onTransition: async (from: SupplierOrderStateName, to: SupplierOrderStateName | `__terminal:${string}`, event: 'timeout' | 'signal', currentCtx: SupplierOrderWorkflowContext) => {
+    onTransition: async (from: FulfillerOrderStateName, to: FulfillerOrderStateName | `__terminal:${string}`, event: 'timeout' | 'signal', currentCtx: FulfillerOrderWorkflowContext) => {
       await notifyParent(currentCtx.so, currentCtx.orderId);
 
       if (to === 'shipped') {
@@ -156,7 +156,7 @@ export async function supplierOrderWorkflow(
         }
       }
     },
-    onCancellation: async (cancelCtx: SupplierOrderWorkflowContext) => {
+    onCancellation: async (cancelCtx: FulfillerOrderWorkflowContext) => {
       cancelCtx.so.status = 'cancelled';
       cancelCtx.so.items.forEach((i: FulfillmentLineItemState) => (i.status = 'cancelled'));
       try {
@@ -169,7 +169,7 @@ export async function supplierOrderWorkflow(
       }
       await notifyParent(cancelCtx.so, cancelCtx.orderId);
     },
-    onTerminal: async (finalCtx: SupplierOrderWorkflowContext) => {
+    onTerminal: async (finalCtx: FulfillerOrderWorkflowContext) => {
       if (finalCtx.so.status === 'delivered') {
         try {
           await fulfillInventoryReservations(
@@ -194,11 +194,11 @@ export async function supplierOrderWorkflow(
   };
 
   await runStateMachine<
-    SupplierOrderStateName,
+    FulfillerOrderStateName,
     never,
-    SupplierOrderWorkflowContext,
+    FulfillerOrderWorkflowContext,
     void,
-    SupplierOrderSignal
+    FulfillerOrderSignal
   >(config, context, [], signals);
 
   return context.so;

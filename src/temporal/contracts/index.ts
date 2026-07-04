@@ -5,7 +5,7 @@ export * as OMS from './oms';
 export * as Fulfillment from './fulfillment';
 export * as Inventory from './inventory';
 export * as Catalog from './catalog';
-export * as Suppliers from './suppliers';
+export * as Fulfillers from './fulfillers';
 export * as Identity from './identity';
 
 export * from './product-type';

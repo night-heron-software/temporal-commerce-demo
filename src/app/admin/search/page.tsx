@@ -14,9 +14,9 @@ const ALL_INDICES: { key: SearchableIndex; label: string; icon: string }[] = [
   { key: 'collections', label: 'Collections', icon: '📂' },
   { key: 'orders', label: 'Orders', icon: '🧾' },
   { key: 'customers', label: 'Customers', icon: '👤' },
-  { key: 'suppliers', label: 'Suppliers', icon: '🏭' },
+  { key: 'fulfillers', label: 'Fulfillers', icon: '🏭' },
   { key: 'inventory', label: 'Inventory', icon: '📊' },
-  { key: 'supplier_orders', label: 'Supplier Orders', icon: '🚚' },
+  { key: 'fulfiller_orders', label: 'Fulfiller Orders', icon: '🚚' },
   { key: 'carts', label: 'Carts', icon: '🛒' },
   { key: 'reservations', label: 'Reservations', icon: '🔒' },
   { key: 'fulfillments', label: 'Fulfillments', icon: '✅' },
@@ -119,12 +119,12 @@ export default function AdminSearchPage() {
         return `${s.confirmationNumber || s.orderId} — ${s.customerEmail || ''} — ${s.status || ''}`;
       case 'customers':
         return `${s.email} — ${s.orderCount ?? 0} orders — $${((s.totalSpent ?? 0) / 100).toFixed(2)}`;
-      case 'suppliers':
-        return `${s.name || s.supplierId} — ${(s.locations ?? []).length} location(s)`;
+      case 'fulfillers':
+        return `${s.name || s.fulfillerId} — ${(s.locations ?? []).length} location(s)`;
       case 'inventory':
         return `${s.variantId} — ${s.availableStock ?? 0} available / ${s.totalStock ?? 0} total`;
-      case 'supplier_orders':
-        return `${s.supplierOrderId} → ${s.supplierName || s.supplierId} — ${s.status || ''}`;
+      case 'fulfiller_orders':
+        return `${s.fulfillerOrderId} → ${s.fulfillerName || s.fulfillerId} — ${s.status || ''}`;
       case 'carts':
         return `${s.cartId} — ${s.itemCount ?? 0} items — ${s.status || ''}`;
       case 'reservations':

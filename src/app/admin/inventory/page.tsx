@@ -173,7 +173,7 @@ export default function AdminInventoryPage() {
               <thead>
                 <tr className="bg-zinc-100 dark:bg-zinc-700 border-b-2 border-zinc-200 dark:border-zinc-600">
                   <th className="px-4 py-3 text-left font-semibold text-zinc-700 dark:text-zinc-300 text-sm">Blank SKU</th>
-                  <th className="px-4 py-3 text-left font-semibold text-zinc-700 dark:text-zinc-300 text-sm">Supplier</th>
+                  <th className="px-4 py-3 text-left font-semibold text-zinc-700 dark:text-zinc-300 text-sm">Fulfiller</th>
                   <th className="px-4 py-3 text-right font-semibold text-zinc-700 dark:text-zinc-300 text-sm">Total</th>
                   <th className="px-4 py-3 text-right font-semibold text-zinc-700 dark:text-zinc-300 text-sm">Reserved</th>
                   <th className="px-4 py-3 text-right font-semibold text-zinc-700 dark:text-zinc-300 text-sm">Available</th>
@@ -185,13 +185,13 @@ export default function AdminInventoryPage() {
                   const pct = row.totalStock > 0 ? ((row.totalStock - row.availableStock) / row.totalStock) * 100 : 0;
                   return (
                     <tr
-                      key={`${row.blankSku}-${row.supplierId}`}
+                      key={`${row.blankSku}-${row.fulfillerId}`}
                       className="border-b border-zinc-100 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-750 transition-colors"
                     >
                       <td className="px-4 py-3">
                         <code className="text-sm font-mono text-zinc-800 dark:text-zinc-200">{row.blankSku}</code>
                       </td>
-                      <td className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">{row.supplierName}</td>
+                      <td className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">{row.fulfillerName}</td>
                       <td className="px-4 py-3 text-right font-medium text-zinc-900 dark:text-zinc-100 tabular-nums">{row.totalStock}</td>
                       <td className="px-4 py-3 text-right tabular-nums">
                         <span className={row.reservedStock > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-zinc-400'}>

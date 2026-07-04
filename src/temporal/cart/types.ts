@@ -9,6 +9,7 @@ export type {
   CartDetails,
   CartEvent,
   CartUpdateResponse,
+  CartInboundSignal,
   CheckoutWorkflowInput,
   CheckoutWorkflowResult
 } from '../contracts/cart';
@@ -21,4 +22,6 @@ export interface CartWorkflowContext {
   cart: CartDetails;
   checkoutWorkflowId: string | null;
   checkoutVersion: number;
+  /** Set while the checkout child is placing the order — cart edits are rejected. */
+  submitting?: boolean;
 }

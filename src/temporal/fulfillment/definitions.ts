@@ -8,25 +8,25 @@ import type {
   FulfillmentWorkflowState,
   FulfillmentOrderStatus,
   ShipmentInfo,
-  SupplierStatusUpdate,
-  FulfillmentSupplierOrderState
+  FulfillerStatusUpdate,
+  FulfillmentFulfillerOrderState
 } from './types';
 
 /** Query: get current workflow state */
 export const getStatusQuery = wf.defineQuery<FulfillmentWorkflowState>('getStatus');
 
-/** Signal: supplier status update (from webhook or polling) */
-export const supplierStatusSignal = wf.defineSignal<[SupplierStatusUpdate]>('supplierStatusUpdate');
+/** Signal: fulfiller status update (from webhook or polling) */
+export const fulfillerStatusSignal = wf.defineSignal<[FulfillerStatusUpdate]>('fulfillerStatusUpdate');
 
 /** Signal: child workflow status update */
-export const childStatusSignal = wf.defineSignal<[FulfillmentSupplierOrderState]>('childStatusUpdate');
+export const childStatusSignal = wf.defineSignal<[FulfillmentFulfillerOrderState]>('childStatusUpdate');
 
 /** Signal: cancel fulfillment */
 export const cancelSignal = wf.defineSignal('cancel');
 
-/** Per-supplier outcome in the result */
-export interface FulfillmentSupplierOrderResult {
-  supplierOrderId: string;
+/** Per-fulfiller outcome in the result */
+export interface FulfillmentFulfillerOrderResult {
+  fulfillerOrderId: string;
   status: FulfillmentOrderStatus;
   carrier?: string;
   trackingNumber?: string;
@@ -37,6 +37,6 @@ export interface FulfillmentSupplierOrderResult {
 /** Workflow result type */
 export interface FulfillmentResult {
   status: FulfillmentOrderStatus;
-  supplierOrders: FulfillmentSupplierOrderResult[];
+  fulfillerOrders: FulfillmentFulfillerOrderResult[];
   error?: string;
 }

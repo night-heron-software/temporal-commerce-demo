@@ -1,11 +1,11 @@
-import { getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
+import { defineSignal, getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
 import { releaseCartItem, indexCart } from './activities';
 import { buildCartDocument } from './document-builder';
 import type {
   CartDetails,
   CartEvent,
   CartUpdateResponse,
-  CheckoutWorkflowResult,
+  CartInboundSignal,
   CartStateName,
   CartWorkflowContext,
 } from './types';
@@ -39,6 +39,11 @@ export {
 
 const CONTINUE_AS_NEW_THRESHOLD = 100;
 
+// Outbound nudge to the checkout child when the cart changes during checkout.
+// Defined locally with the same name the checkout workflow listens on.
+const recomputeSignal = defineSignal<[{ cartVersion: number }]>('recompute');
+const ITEM_EDIT_EVENTS = ['addItem', 'updateQuantity', 'removeItem', 'applyCoupon'];
+
 interface CartWorkflowInput {
   cartId: string;
   initialCart?: CartDetails;
@@ -47,7 +52,7 @@ interface CartWorkflowInput {
   checkoutWorkflowId?: string;
   checkoutInProgress?: boolean;
   checkoutVersion?: number;
-  currentState?: 'active' | 'awaitingCheckout';
+  submitting?: boolean;
 }
 
 /** Bump version/timestamps on a cart and sync the ES projection. `at` is the driver-supplied
@@ -63,7 +68,7 @@ async function flushCart(cart: CartDetails, at: string): Promise<CartDetails> {
   return updated;
 }
 
-export async function cartWorkflow(input: CartWorkflowInput | string): Promise<CartDetails> {
+export async function cartWorkflow(input: CartWorkflowInput): Promise<CartDetails> {
   const {
     cartId,
     initialCart,
@@ -71,18 +76,8 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
     checkoutWorkflowId: inputCheckoutWfId,
     checkoutInProgress: inputCheckoutInProgress,
     checkoutVersion: inputCheckoutVersion,
-    currentState: legacyStateName,
-  } = typeof input === 'string'
-    ? {
-        cartId: input,
-        initialCart: undefined,
-        createdAt: undefined,
-        checkoutWorkflowId: null,
-        checkoutInProgress: false,
-        checkoutVersion: 0,
-        currentState: undefined,
-      }
-    : input;
+    submitting: inputSubmitting,
+  } = input;
 
   const now = new Date().toISOString();
 
@@ -106,10 +101,11 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
     },
     checkoutWorkflowId: inputCheckoutWfId || null,
     checkoutVersion: inputCheckoutVersion || 0,
+    submitting: inputSubmitting,
   };
 
   // ── Track current status (single source of truth: the driver's state) ──
-  let currentStatus = ((inputCheckoutInProgress || legacyStateName === 'awaitingCheckout') ? 'checkout' : 'active') as CartDetails['status'];
+  let currentStatus = (inputCheckoutInProgress ? 'checkout' : 'active') as CartDetails['status'];
 
   // Query Handlers — synthesize status from driver state
   setHandler(getCartQuery, () => ({ ...workflowContext.cart, status: currentStatus }));
@@ -123,26 +119,35 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
     CartEvent,
     CartWorkflowContext,
     CartUpdateResponse,
-    CheckoutWorkflowResult
+    CartInboundSignal
   > = {
     states: CART_STATES,
-    initialState: (inputCheckoutInProgress || legacyStateName === 'awaitingCheckout') ? 'checkout' : 'active',
-    onContextUpdate: (newCtx: CartWorkflowContext, state: CartStateName | `__terminal:${string}`) => {
+    initialState: inputCheckoutInProgress ? 'checkout' : 'active',
+    onContextUpdate: (newCtx, state) => {
       workflowContext = newCtx;
       currentStatus = deriveDisplayStatus<CartDetails['status']>(state);
     },
-    onTransition: async (
-      from: CartStateName,
-      to: CartStateName | `__terminal:${string}`,
-      event: CartEvent | 'timeout' | 'signal',
-      currentCtx: CartWorkflowContext,
-      at: string,
-    ) => {
+    onTransition: async (from, to, event, currentCtx, at) => {
       const flushedCart = await flushCart(currentCtx.cart, at);
       workflowContext.cart = flushedCart;
+
+      // Cart edited mid-checkout → nudge the checkout child to recompute. The nudge is
+      // a trigger only (carries the new cartVersion); checkout re-pulls via queryCart.
+      // Emptying the cart routes to terminal (not 'checkout'), where onTerminal cancels
+      // the child instead — so no nudge there.
+      const isItemEdit =
+        typeof event === 'object' && event !== null && ITEM_EDIT_EVENTS.includes(event.type);
+      if (to === 'checkout' && currentCtx.checkoutWorkflowId && isItemEdit) {
+        try {
+          const handle = getExternalWorkflowHandle(currentCtx.checkoutWorkflowId);
+          await handle.signal(recomputeSignal, { cartVersion: flushedCart.cartVersion });
+        } catch (e) {
+          log.warn('Failed to send recompute nudge to checkout child', { error: String(e) });
+        }
+      }
     },
     continueAsNewThreshold: CONTINUE_AS_NEW_THRESHOLD,
-    serializeForContinueAsNew: (currentCtx: CartWorkflowContext, currentState: CartStateName) => {
+    serializeForContinueAsNew: (currentCtx, currentState) => {
       return {
         cartId,
         initialCart: currentCtx.cart,
@@ -151,9 +156,10 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
         checkoutWorkflowId: currentCtx.checkoutWorkflowId ?? undefined,
         checkoutInProgress: currentState === 'checkout',
         checkoutVersion: currentCtx.checkoutVersion,
+        submitting: currentCtx.submitting,
       };
     },
-    onCancellation: async (cancelCtx: CartWorkflowContext) => {
+    onCancellation: async (cancelCtx) => {
       log.info('Cart workflow cancelled via Temporal cancellation', { cartId });
       if (cancelCtx.checkoutWorkflowId) {
         try {
@@ -173,7 +179,7 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
       cancelCtx.cart.status = 'abandoned';
       await indexCart(buildCartDocument(cancelCtx.cart, cancelCtx.cart.createdAt));
     },
-    onTerminal: async (finalCtx: CartWorkflowContext) => {
+    onTerminal: async (finalCtx) => {
       if (finalCtx.checkoutWorkflowId) {
         try {
           const checkoutHandle = getExternalWorkflowHandle(finalCtx.checkoutWorkflowId);
@@ -195,7 +201,7 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
     CartEvent,
     CartWorkflowContext,
     CartUpdateResponse,
-    CheckoutWorkflowResult
+    CartInboundSignal
   >(config, workflowContext, cartUpdate, checkoutCompletedSignal);
 
   return workflowContext.cart;
