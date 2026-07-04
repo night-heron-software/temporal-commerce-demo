@@ -46,3 +46,137 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── Rendered markdown docs (/docs) ─────────────────────────────────────── */
+
+.doc-prose {
+  color: var(--color-zinc-700);
+  line-height: 1.7;
+  font-size: 0.9375rem;
+}
+
+.doc-prose h1,
+.doc-prose h2,
+.doc-prose h3,
+.doc-prose h4 {
+  color: var(--color-zinc-900);
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 1.75em 0 0.6em;
+  scroll-margin-top: 4.5rem; /* keep anchor targets clear of the sticky nav */
+}
+
+.doc-prose h1 { font-size: 1.875rem; margin-top: 0; }
+.doc-prose h2 { font-size: 1.4rem; border-bottom: 1px solid var(--color-zinc-200); padding-bottom: 0.3em; }
+.doc-prose h3 { font-size: 1.15rem; }
+.doc-prose h4 { font-size: 1rem; }
+
+.doc-prose p,
+.doc-prose ul,
+.doc-prose ol {
+  margin: 0.75em 0;
+}
+
+.doc-prose ul { list-style: disc; padding-left: 1.5em; }
+.doc-prose ol { list-style: decimal; padding-left: 1.5em; }
+.doc-prose li { margin: 0.3em 0; }
+.doc-prose li > ul,
+.doc-prose li > ol { margin: 0.2em 0; }
+
+.doc-prose a {
+  color: var(--color-sky-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.doc-prose a:hover { color: var(--color-sky-800); }
+
+.doc-prose .doc-deadlink { font-family: var(--font-mono); font-size: 0.875em; }
+
+.doc-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--color-zinc-100);
+  border-radius: 4px;
+  padding: 0.125em 0.375em;
+}
+
+.doc-prose pre {
+  background: var(--color-zinc-900);
+  color: var(--color-zinc-100);
+  border-radius: 8px;
+  padding: 1em 1.25em;
+  overflow-x: auto;
+  margin: 1em 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.doc-prose pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+}
+
+.doc-prose pre.mermaid {
+  background: transparent;
+  color: inherit;
+  display: flex;
+  justify-content: center;
+  border: 1px dashed var(--color-zinc-300);
+}
+
+.doc-prose blockquote {
+  border-left: 3px solid var(--color-zinc-300);
+  color: var(--color-zinc-500);
+  padding-left: 1em;
+  margin: 1em 0;
+}
+
+.doc-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.875rem;
+  display: block;
+  overflow-x: auto;
+}
+
+.doc-prose th,
+.doc-prose td {
+  border: 1px solid var(--color-zinc-200);
+  padding: 0.5em 0.75em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.doc-prose th {
+  background: var(--color-zinc-100);
+  font-weight: 600;
+  color: var(--color-zinc-900);
+}
+
+.doc-prose hr {
+  border: none;
+  border-top: 1px solid var(--color-zinc-200);
+  margin: 2em 0;
+}
+
+.doc-prose img { max-width: 100%; border-radius: 8px; }
+
+@media (prefers-color-scheme: dark) {
+  .doc-prose { color: var(--color-zinc-300); }
+  .doc-prose h1,
+  .doc-prose h2,
+  .doc-prose h3,
+  .doc-prose h4 { color: var(--color-zinc-100); }
+  .doc-prose h2 { border-bottom-color: var(--color-zinc-700); }
+  .doc-prose a { color: var(--color-sky-400); }
+  .doc-prose a:hover { color: var(--color-sky-300); }
+  .doc-prose code { background: var(--color-zinc-700); }
+  .doc-prose pre { background: var(--color-zinc-950); }
+  .doc-prose pre.mermaid { border-color: var(--color-zinc-600); }
+  .doc-prose blockquote { border-left-color: var(--color-zinc-600); color: var(--color-zinc-400); }
+  .doc-prose th, .doc-prose td { border-color: var(--color-zinc-700); }
+  .doc-prose th { background: var(--color-zinc-700); }
+  .doc-prose hr { border-top-color: var(--color-zinc-700); }
+}

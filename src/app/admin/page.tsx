@@ -83,6 +83,21 @@ export default function AdminDashboardPage() {
           </p>
         </Link>
 
+        {/* Docs */}
+        <Link
+          href="/docs"
+          className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-sky-400 dark:hover:border-sky-500 transition-all hover:shadow-lg"
+        >
+          <div className="text-3xl mb-3">📚</div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">
+            Docs
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            Project documentation rendered in-app — guides, demo scripts, and state machine
+            diagrams.
+          </p>
+        </Link>
+
         {/* Temporal UI */}
         <a
           href="http://localhost:8233"
