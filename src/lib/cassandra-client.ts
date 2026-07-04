@@ -82,12 +82,14 @@ export async function executeCqlAll<T = Record<string, unknown>>(
 }
 
 /**
- * Execute a batch of CQL queries atomically.
+ * Execute a batch of CQL queries — logged (atomic) by default; pass `{ logged: false }` for
+ * cheap single-partition batches (e.g. the transition-recorder projection).
  */
 export async function executeBatch(
   queries: Array<{ query: string; params?: unknown[] }>,
+  opts?: { logged?: boolean },
 ): Promise<void> {
   const client = getCassandraClient();
-  await client.batch(queries, { prepare: true });
+  await client.batch(queries, { prepare: true, logged: opts?.logged ?? true });
 }
 

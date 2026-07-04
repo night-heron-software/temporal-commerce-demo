@@ -2,7 +2,7 @@ import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
 import path from 'path';
 
 import * as activities from './activities-impl';
-
+import { transitionRecorderActivities } from '../transition-recorder';
 
 import { CHECKOUT_TASK_QUEUE } from '../contracts';
 
@@ -15,7 +15,7 @@ async function start(
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
-    activities,
+    activities: { ...activities, ...transitionRecorderActivities },
     taskQueue: CHECKOUT_TASK_QUEUE,
     ...otelConfig,
   });
