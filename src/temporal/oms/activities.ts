@@ -5,7 +5,7 @@
 
 import { proxyActivities } from '@temporalio/workflow';
 import type { Order, OrderState, OrderStatus } from './types';
-import { OrderLineItem, SupplierResolutionContext, SupplierAssignment, Elasticsearch } from '../contracts';
+import { OrderLineItem, FulfillerResolutionContext, FulfillerAssignment, Elasticsearch } from '../contracts';
 
 export interface OmsActivities {
   saveOrderToDatabase(order: Order): Promise<void>;
@@ -19,13 +19,13 @@ export interface OmsActivities {
   sendFeedbackThankYouEmail(email: string, orderId: string): Promise<void>;
   getOrdersByEmail(email: string): Promise<Order[]>;
   getOrderById(orderId: string): Promise<Order | null>;
-  resolveSupplierAssignments(items: OrderLineItem[], context: SupplierResolutionContext): Promise<SupplierAssignment[]>;
+  resolveFulfillerAssignments(items: OrderLineItem[], context: FulfillerResolutionContext): Promise<FulfillerAssignment[]>;
   insertStatusHistoryEntry(
     orderId: string,
     entry: { status: string; timestamp: string; note?: string; updatedBy: string }
   ): Promise<void>;
   indexOrder(doc: Elasticsearch.OrderDocument): Promise<void>;
-  indexSupplierOrder(doc: Elasticsearch.SupplierOrderDocument): Promise<void>;
+  indexFulfillerOrder(doc: Elasticsearch.FulfillerOrderDocument): Promise<void>;
   indexCustomer(doc: Elasticsearch.CustomerDocument): Promise<void>;
   startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string>;
 }
@@ -47,7 +47,7 @@ export const {
 // Elasticsearch projection activities
 export const {
   indexOrder,
-  indexSupplierOrder,
+  indexFulfillerOrder,
   indexCustomer
 } = proxyActivities<OmsActivities>({
   startToCloseTimeout: '30s',
@@ -76,7 +76,7 @@ export const {
 export const {
   getOrdersByEmail,
   getOrderById,
-  resolveSupplierAssignments,
+  resolveFulfillerAssignments,
   startFulfillmentWorkflow
 } = proxyActivities<OmsActivities>({
   startToCloseTimeout: '1m',

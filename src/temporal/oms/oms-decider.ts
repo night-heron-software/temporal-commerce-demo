@@ -8,7 +8,7 @@
  * Pure and infrastructure-free: timestamps arrive on the command (the shell passes the
  * driver's deterministic `meta.timestamp`), never from the clock. The fulfillment-signal
  * decision also emits the aggregated order-level status change (all-shipped /
- * all-delivered) as its own fact, computed against the post-mirror supplier statuses.
+ * all-delivered) as its own fact, computed against the post-mirror fulfiller statuses.
  */
 import type {
   OrderState,
@@ -39,14 +39,14 @@ export type OmsFact =
       at: string;
     }
   | { type: 'FeedbackRecorded'; rating: CustomerFeedback['rating']; comment?: string; at: string }
-  | { type: 'SupplierOrderStatusMirrored'; update: FulfillmentStatusUpdate; at: string };
+  | { type: 'FulfillerOrderStatusMirrored'; update: FulfillmentStatusUpdate; at: string };
 
 function copyState(state: Readonly<OrderState>): OrderState {
   return {
     ...state,
     statusHistory: [...state.statusHistory],
     assignments: state.assignments.map((a) => ({ ...a })),
-    supplierOrders: state.supplierOrders.map((so) => ({
+    fulfillerOrders: state.fulfillerOrders.map((so) => ({
       ...so,
       items: so.items.map((i) => ({ ...i })),
       statusHistory: [...so.statusHistory],
@@ -92,17 +92,17 @@ export function decide(command: OmsCommand, state: OrderState): OmsFact[] {
 
     case 'fulfillmentStatusReported': {
       const { update, at } = command;
-      const supplierOrder = state.supplierOrders.find(
-        (so) => so.supplierOrderId === update.supplierOrderId,
+      const fulfillerOrder = state.fulfillerOrders.find(
+        (so) => so.fulfillerOrderId === update.fulfillerOrderId,
       );
-      // Unknown supplier order — no facts (the shell logs and stays put).
-      if (!supplierOrder) return [];
+      // Unknown fulfiller order — no facts (the shell logs and stays put).
+      if (!fulfillerOrder) return [];
 
-      const facts: OmsFact[] = [{ type: 'SupplierOrderStatusMirrored', update, at }];
+      const facts: OmsFact[] = [{ type: 'FulfillerOrderStatusMirrored', update, at }];
 
-      // Aggregate the order-level status against the post-mirror supplier statuses.
-      const postStatuses = state.supplierOrders.map((so) =>
-        so.supplierOrderId === update.supplierOrderId ? update.status : so.status,
+      // Aggregate the order-level status against the post-mirror fulfiller statuses.
+      const postStatuses = state.fulfillerOrders.map((so) =>
+        so.fulfillerOrderId === update.fulfillerOrderId ? update.status : so.status,
       );
       if (update.status === 'shipped' && state.status === 'processing') {
         const allShipped = postStatuses.every(
@@ -112,7 +112,7 @@ export function decide(command: OmsCommand, state: OrderState): OmsFact[] {
           facts.push({
             type: 'StatusChanged',
             status: 'shipped',
-            note: 'All supplier orders shipped',
+            note: 'All fulfiller orders shipped',
             updatedBy: 'system',
             at,
           });
@@ -126,7 +126,7 @@ export function decide(command: OmsCommand, state: OrderState): OmsFact[] {
           facts.push({
             type: 'StatusChanged',
             status: 'delivered',
-            note: 'All supplier orders delivered',
+            note: 'All fulfiller orders delivered',
             updatedBy: 'system',
             at,
           });
@@ -165,26 +165,26 @@ export function evolve(state: OrderState, fact: OmsFact): OrderState {
       };
       return next;
 
-    case 'SupplierOrderStatusMirrored': {
+    case 'FulfillerOrderStatusMirrored': {
       const { update, at } = fact;
-      const supplierOrder = next.supplierOrders.find(
-        (so) => so.supplierOrderId === update.supplierOrderId,
+      const fulfillerOrder = next.fulfillerOrders.find(
+        (so) => so.fulfillerOrderId === update.fulfillerOrderId,
       );
-      if (!supplierOrder) return next;
+      if (!fulfillerOrder) return next;
 
-      supplierOrder.status = update.status;
-      supplierOrder.updatedAt = at;
-      if (update.carrier) supplierOrder.carrier = update.carrier;
-      if (update.trackingNumber) supplierOrder.trackingNumber = update.trackingNumber;
-      if (update.trackingUrl) supplierOrder.trackingUrl = update.trackingUrl;
-      supplierOrder.statusHistory.push({
+      fulfillerOrder.status = update.status;
+      fulfillerOrder.updatedAt = at;
+      if (update.carrier) fulfillerOrder.carrier = update.carrier;
+      if (update.trackingNumber) fulfillerOrder.trackingNumber = update.trackingNumber;
+      if (update.trackingUrl) fulfillerOrder.trackingUrl = update.trackingUrl;
+      fulfillerOrder.statusHistory.push({
         status: update.status,
         timestamp: at,
         note: update.error || 'Status updated from fulfillment workflow',
       });
 
       // Mirror onto the corresponding assignments.
-      for (const item of supplierOrder.items) {
+      for (const item of fulfillerOrder.items) {
         const assignment = next.assignments.find((a) => a.assignmentId === item.assignmentId);
         if (assignment) {
           if (update.status === 'shipped') {

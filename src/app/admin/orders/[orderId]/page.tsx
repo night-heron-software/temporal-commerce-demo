@@ -104,7 +104,7 @@ export default function AdminOrderDetailPage() {
 
   if (!orderState) return null;
 
-  const { order, status, statusHistory, supplierOrders = [], assignments = [] } = orderState;
+  const { order, status, statusHistory, fulfillerOrders = [], assignments = [] } = orderState;
 
   // Determine which fulfillment step buttons to show
   const isTerminal = ['cancelled', 'refunded', 'complete', 'delivered'].includes(status);
@@ -226,7 +226,7 @@ export default function AdminOrderDetailPage() {
                   <div className="mt-2 space-y-1">
                     {itemAssignments.map((asg) => (
                       <div key={asg.assignmentId} className="flex items-center gap-2 text-xs">
-                        <span className="text-zinc-500">→ {asg.supplierName}</span>
+                        <span className="text-zinc-500">→ {asg.fulfillerName}</span>
                         <span className={`px-2 py-0.5 rounded ${getStatusClasses(asg.status)}`}>
                           {asg.status}
                         </span>
@@ -240,19 +240,19 @@ export default function AdminOrderDetailPage() {
         </div>
       </div>
 
-      {/* Supplier Orders */}
-      {supplierOrders.length > 0 && (
+      {/* Fulfiller Orders */}
+      {fulfillerOrders.length > 0 && (
         <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 mb-8">
           <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">
-            Supplier Orders
+            Fulfiller Orders
           </h2>
           <div className="space-y-3">
-            {supplierOrders.map((so) => (
-              <div key={so.supplierOrderId} className="p-4 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700">
+            {fulfillerOrders.map((so) => (
+              <div key={so.fulfillerOrderId} className="p-4 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700">
                 <div className="flex justify-between items-start mb-2">
                   <div>
-                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">{so.supplierName}</span>
-                    <span className="ml-2 text-xs text-zinc-500 font-mono">{so.supplierOrderId}</span>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">{so.fulfillerName}</span>
+                    <span className="ml-2 text-xs text-zinc-500 font-mono">{so.fulfillerOrderId}</span>
                   </div>
                   <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusClasses(so.status)}`}>
                     {so.status.replace(/_/g, ' ')}

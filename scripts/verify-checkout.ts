@@ -143,12 +143,12 @@ async function run() {
     const omsHandle = client.workflow.getHandle(omsWorkflowId);
 
     // Poll OMS status
-    let supplierOrderId = '';
+    let fulfillerOrderId = '';
     for (let i = 0; i < 30; i++) {
       try {
         const omsState = await omsHandle.query(OMS.getOrderStateQuery);
-        if (omsState.supplierOrders && omsState.supplierOrders.length > 0) {
-          supplierOrderId = omsState.supplierOrders[0].supplierOrderId;
+        if (omsState.fulfillerOrders && omsState.fulfillerOrders.length > 0) {
+          fulfillerOrderId = omsState.fulfillerOrders[0].fulfillerOrderId;
           break;
         }
       } catch {
@@ -156,10 +156,10 @@ async function run() {
       }
       await delay(1000);
     }
-    if (!supplierOrderId) {
-      throw new Error(`OMS workflow did not generate supplier order in time.`);
+    if (!fulfillerOrderId) {
+      throw new Error(`OMS workflow did not generate fulfiller order in time.`);
     }
-    console.log(`✅ Found Supplier Order ID: ${supplierOrderId}\n`);
+    console.log(`✅ Found Fulfiller Order ID: ${fulfillerOrderId}\n`);
 
     const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
     const fulfillmentHandle = client.workflow.getHandle(fulfillmentWorkflowId);

@@ -51,14 +51,14 @@ function makeActivities() {
     updateOrderInDatabase: vi.fn(async () => undefined),
     sendOrderStatusEmail: vi.fn(async () => undefined),
     sendFeedbackThankYouEmail: vi.fn(async () => undefined),
-    resolveSupplierAssignments: vi.fn(async () =>
-      order.items.map(() => ({ supplierId: 'simulated', supplierName: 'Simulated' })),
+    resolveFulfillerAssignments: vi.fn(async () =>
+      order.items.map(() => ({ fulfillerId: 'simulated', fulfillerName: 'Simulated' })),
     ),
     insertStatusHistoryEntry: vi.fn(async () => undefined),
     getOrdersByEmail: vi.fn(async () => []),
     getOrderById: vi.fn(async () => null),
     indexOrder: vi.fn(async () => undefined),
-    indexSupplierOrder: vi.fn(async () => undefined),
+    indexFulfillerOrder: vi.fn(async () => undefined),
     indexCustomer: vi.fn(async () => undefined),
     startFulfillmentWorkflow: vi.fn(async () => 'demo.fulfillment.o-test-1'),
   };
@@ -92,27 +92,27 @@ describe('orderWorkflow (Temporal test env)', () => {
           expect(state.status).toBe('processing');
         });
         expect(activities.saveOrderToDatabase).toHaveBeenCalled();
-        expect(activities.resolveSupplierAssignments).toHaveBeenCalled();
+        expect(activities.resolveFulfillerAssignments).toHaveBeenCalled();
         expect(activities.startFulfillmentWorkflow).toHaveBeenCalled();
 
         const state = await handle.query(getOrderStateQuery);
-        expect(state.supplierOrders).toHaveLength(1);
-        const supplierOrderId = state.supplierOrders[0].supplierOrderId;
-        expect(state.assignments[0].supplierOrderId).toBe(supplierOrderId);
+        expect(state.fulfillerOrders).toHaveLength(1);
+        const fulfillerOrderId = state.fulfillerOrders[0].fulfillerOrderId;
+        expect(state.assignments[0].fulfillerOrderId).toBe(fulfillerOrderId);
 
         // Fulfillment reports shipped, then delivered → order aggregates to terminal
         await handle.signal(fulfillmentStatusSignal, {
-          supplierOrderId,
+          fulfillerOrderId,
           status: 'shipped',
           carrier: 'Simulated Carrier',
           trackingNumber: 'SIM1',
         });
-        await handle.signal(fulfillmentStatusSignal, { supplierOrderId, status: 'delivered' });
+        await handle.signal(fulfillmentStatusSignal, { fulfillerOrderId, status: 'delivered' });
 
         const result = await handle.result();
         expect(result.status).toBe('delivered');
         expect(result.deliveredAt).toBeTruthy();
-        expect(result.supplierOrders[0].status).toBe('delivered');
+        expect(result.fulfillerOrders[0].status).toBe('delivered');
         expect(result.statusHistory.map((h) => h.status)).toContain('shipped');
       },
     );

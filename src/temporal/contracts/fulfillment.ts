@@ -3,20 +3,20 @@
  * Core data structures for the fulfillment workflow
  */
 
-// Re-export ShippingAddress from suppliers (single source of truth)
+// Re-export ShippingAddress from fulfillers (single source of truth)
 export type {
   ShippingAddress,
-  SupplierStatusUpdate,
-  SupplierOrderResult
-} from './suppliers';
-import type { ShippingAddress, SupplierStatusUpdate } from './suppliers';
-import type { SupplierOrderStatus } from './oms';
+  FulfillerStatusUpdate,
+  FulfillerOrderResult
+} from './fulfillers';
+import type { ShippingAddress, FulfillerStatusUpdate } from './fulfillers';
+import type { FulfillerOrderStatus } from './oms';
 
 // ============================================================================
 // OMS → Fulfillment Request
 // ============================================================================
 
-/** Sent from OMS to start fulfillment with pre-decided supplier orders */
+/** Sent from OMS to start fulfillment with pre-decided fulfiller orders */
 export interface FulfillmentOrderRequest {
   orderId: string;
   cartId: string; // Needed for inventory reservation IDs
@@ -25,14 +25,14 @@ export interface FulfillmentOrderRequest {
   confirmationNumber?: string; // Order confirmation # for email subject
   shippingAddress: ShippingAddress;
   shippingMethod?: 'standard' | 'express' | 'economy';
-  supplierOrders: FulfillmentSupplierOrderInput[];
+  fulfillerOrders: FulfillmentFulfillerOrderInput[];
 }
 
-/** One supplier's portion of the order, pre-decided by the OMS */
-export interface FulfillmentSupplierOrderInput {
-  supplierOrderId: string; // OMS-generated ID
-  supplierId: string;
-  supplierType: 'simulated';
+/** One fulfiller's portion of the order, pre-decided by the OMS */
+export interface FulfillmentFulfillerOrderInput {
+  fulfillerOrderId: string; // OMS-generated ID
+  fulfillerId: string;
+  fulfillerType: 'simulated';
   items: FulfillmentItem[];
 }
 
@@ -80,22 +80,22 @@ export interface FulfillmentWorkflowState {
   customerEmail?: string;
   confirmationNumber?: string;
   status: FulfillmentOrderStatus;
-  supplierOrders: FulfillmentSupplierOrderState[];
+  fulfillerOrders: FulfillmentFulfillerOrderState[];
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
   errorMessage?: string;
 }
 
-/** Per-supplier-order execution state */
-export interface FulfillmentSupplierOrderState {
-  supplierOrderId: string; // OMS ID for signal matching
-  supplierId: string;
-  supplierType: 'simulated';
+/** Per-fulfiller-order execution state */
+export interface FulfillmentFulfillerOrderState {
+  fulfillerOrderId: string; // OMS ID for signal matching
+  fulfillerId: string;
+  fulfillerType: 'simulated';
   items: FulfillmentLineItemState[];
   status: FulfillmentOrderStatus;
-  omsStatus?: SupplierOrderStatus; // Mapped status for OMS signaling
-  supplierExternalId?: string; // External supplier's order ID (e.g., SIM-xxx)
+  omsStatus?: FulfillerOrderStatus; // Mapped status for OMS signaling
+  fulfillerExternalId?: string; // External fulfiller's order ID (e.g., SIM-xxx)
   shipments?: ShipmentInfo[];
   carrier?: string;
   trackingNumber?: string;
@@ -111,7 +111,7 @@ export interface FulfillmentLineItemState {
   productId: string;
   quantity: number;
   status: FulfillmentLineItemStatus;
-  supplierLineItemId?: string;
+  fulfillerLineItemId?: string;
 }
 
 // ============================================================================
@@ -145,15 +145,15 @@ import * as wf from '@temporalio/workflow';
 /** Query: get current workflow state */
 export const getStatusQuery = wf.defineQuery<FulfillmentWorkflowState>('getStatus');
 
-/** Signal: supplier status update (from webhook or polling) */
-export const supplierStatusSignal = wf.defineSignal<[SupplierStatusUpdate]>('supplierStatusUpdate');
+/** Signal: fulfiller status update (from webhook or polling) */
+export const fulfillerStatusSignal = wf.defineSignal<[FulfillerStatusUpdate]>('fulfillerStatusUpdate');
 
 /** Signal: cancel fulfillment */
 export const cancelSignal = wf.defineSignal('cancel');
 
-/** Per-supplier outcome in the result */
-export interface FulfillmentSupplierOrderResult {
-  supplierOrderId: string;
+/** Per-fulfiller outcome in the result */
+export interface FulfillmentFulfillerOrderResult {
+  fulfillerOrderId: string;
   status: FulfillmentOrderStatus;
   carrier?: string;
   trackingNumber?: string;
@@ -164,7 +164,7 @@ export interface FulfillmentSupplierOrderResult {
 /** Workflow result type */
 export interface FulfillmentResult {
   status: FulfillmentOrderStatus;
-  supplierOrders: FulfillmentSupplierOrderResult[];
+  fulfillerOrders: FulfillmentFulfillerOrderResult[];
   error?: string;
 }
 

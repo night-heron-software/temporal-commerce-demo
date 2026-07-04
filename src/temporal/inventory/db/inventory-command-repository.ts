@@ -28,8 +28,8 @@ function isUnlimited(totalStock: number): boolean {
 export const MIN_HOLD_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
- * Sum available stock (total − reserved) across a SKU's supplier rows.
- * Any supplier with UNLIMITED_STOCK makes the SKU effectively infinite.
+ * Sum available stock (total − reserved) across a SKU's fulfiller rows.
+ * Any fulfiller with UNLIMITED_STOCK makes the SKU effectively infinite.
  * Pure — shared by getStockLevel() and both aggregation points in reserve().
  */
 export function computeTotalAvailable(
@@ -78,9 +78,9 @@ export interface StockLevel {
   available: number;
 }
 
-export interface SetSupplierStockArgs {
-  supplierId: string;
-  supplierName: string;
+export interface SetFulfillerStockArgs {
+  fulfillerId: string;
+  fulfillerName: string;
   cost: number;
   totalStock: number;
   orderedStock?: number;
@@ -92,8 +92,8 @@ export interface SetSupplierStockArgs {
   country: string;
 }
 
-export interface SetSupplierStockResult {
-  supplierId: string;
+export interface SetFulfillerStockResult {
+  fulfillerId: string;
   previousStock: number;
   newStock: number;
   available: number;
@@ -126,7 +126,7 @@ export interface ReservationRecord {
   blankSku: string;
   cartId: string;
   variantId: string;
-  supplierId: string | null;
+  fulfillerId: string | null;
   quantity: number;
   referenceId: string;
   status: string;
@@ -141,8 +141,8 @@ export interface ReservationRecord {
 
 interface StockRow {
   blank_sku: string;
-  supplier_id: string;
-  supplier_name: string;
+  fulfiller_id: string;
+  fulfiller_name: string;
   total_stock: number;
   reserved_stock: number;
   ordered_stock: number;
@@ -155,7 +155,7 @@ interface ReservationRow {
   blank_sku: string;
   cart_id: string;
   variant_id: string;
-  supplier_id: string | null;
+  fulfiller_id: string | null;
   quantity: number;
   reference_id: string;
   status: string;
@@ -183,7 +183,7 @@ function rowToReservation(row: ReservationRow): ReservationRecord {
     blankSku: row.blank_sku,
     cartId: row.cart_id,
     variantId: row.variant_id,
-    supplierId: row.supplier_id,
+    fulfillerId: row.fulfiller_id,
     quantity: row.quantity,
     referenceId: row.reference_id,
     status: row.status,
@@ -202,30 +202,30 @@ export const InventoryCommandRepository = {
   // --- Stock Operations ---
 
   /**
-   * Set (upsert) supplier stock for a SKU.
+   * Set (upsert) fulfiller stock for a SKU.
    */
-  async setSupplierStock(
+  async setFulfillerStock(
     blankSku: string,
-    args: SetSupplierStockArgs
-  ): Promise<SetSupplierStockResult> {
+    args: SetFulfillerStockArgs
+  ): Promise<SetFulfillerStockResult> {
     // Read current stock for the return value
     const existing = await executeCql<StockRow>(
       `SELECT total_stock, reserved_stock FROM inventory_stock_w
-       WHERE blank_sku = ? AND supplier_id = ?`,
-      [blankSku, args.supplierId]
+       WHERE blank_sku = ? AND fulfiller_id = ?`,
+      [blankSku, args.fulfillerId]
     );
     const previousStock = existing.length > 0 ? existing[0].total_stock : 0;
 
     await executeCql(
       `INSERT INTO inventory_stock_w (
-        blank_sku, supplier_id, supplier_name, total_stock, reserved_stock,
+        blank_sku, fulfiller_id, fulfiller_name, total_stock, reserved_stock,
         ordered_stock, cost, address1, address2, city, state, postal_code,
         country, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, toTimestamp(now()))`,
       [
         blankSku,
-        args.supplierId,
-        args.supplierName,
+        args.fulfillerId,
+        args.fulfillerName,
         args.totalStock,
         existing.length > 0 ? existing[0].reserved_stock : 0,
         args.orderedStock ?? 0,
@@ -241,7 +241,7 @@ export const InventoryCommandRepository = {
 
     const reservedStock = existing.length > 0 ? existing[0].reserved_stock : 0;
     const result = {
-      supplierId: args.supplierId,
+      fulfillerId: args.fulfillerId,
       previousStock,
       newStock: args.totalStock,
       available: args.totalStock - reservedStock,
@@ -252,7 +252,7 @@ export const InventoryCommandRepository = {
   },
 
   /**
-   * Get stock level for a SKU across all suppliers (from write tables).
+   * Get stock level for a SKU across all fulfillers (from write tables).
    * Used internally by mutations that need current state.
    */
   async getStockLevel(blankSku: string): Promise<Inventory.StockLevel> {
@@ -280,9 +280,9 @@ export const InventoryCommandRepository = {
    * (oldest first) until enough stock is freed, then reserves.
    */
   async reserve(args: ReserveArgs): Promise<ReserveResult> {
-    // Find the supplier with the most available stock for this SKU
+    // Find the fulfiller with the most available stock for this SKU
     const stockRows = await executeCql<StockRow>(
-      `SELECT supplier_id, total_stock, reserved_stock FROM inventory_stock_w
+      `SELECT fulfiller_id, total_stock, reserved_stock FROM inventory_stock_w
        WHERE blank_sku = ?`,
       [args.blankSku]
     );
@@ -291,7 +291,7 @@ export const InventoryCommandRepository = {
       return { success: false, error: `No stock found for SKU: ${args.blankSku}` };
     }
 
-    // Calculate total available across all suppliers
+    // Calculate total available across all fulfillers
     let totalAvailable = computeTotalAvailable(stockRows);
 
     // If not enough available, attempt preemption of stale TEMPORARY reservations
@@ -322,7 +322,7 @@ export const InventoryCommandRepository = {
 
         // Re-read stock after preemption
         const freshRows = await executeCql<StockRow>(
-          `SELECT supplier_id, total_stock, reserved_stock FROM inventory_stock_w
+          `SELECT fulfiller_id, total_stock, reserved_stock FROM inventory_stock_w
            WHERE blank_sku = ?`,
           [args.blankSku]
         );
@@ -332,12 +332,12 @@ export const InventoryCommandRepository = {
       }
     }
 
-    // Find a supplier with enough available stock
-    const supplier = stockRows.find(
+    // Find a fulfiller with enough available stock
+    const fulfiller = stockRows.find(
       r => isUnlimited(r.total_stock) || (r.total_stock - r.reserved_stock) >= args.quantity
     );
 
-    if (!supplier) {
+    if (!fulfiller) {
       return {
         success: false,
         error: `Insufficient stock. Requested: ${args.quantity}, Available: ${totalAvailable}`,
@@ -346,13 +346,13 @@ export const InventoryCommandRepository = {
 
     // LWT: atomically increment reserved_stock only if stock is sufficient
     const client = await getCassandraClient();
-    const newReserved = supplier.reserved_stock + args.quantity;
+    const newReserved = fulfiller.reserved_stock + args.quantity;
     const result = await client.execute(
       `UPDATE inventory_stock_w
        SET reserved_stock = ?, updated_at = toTimestamp(now())
-       WHERE blank_sku = ? AND supplier_id = ?
+       WHERE blank_sku = ? AND fulfiller_id = ?
        IF reserved_stock = ?`,
-      [newReserved, args.blankSku, supplier.supplier_id, supplier.reserved_stock],
+      [newReserved, args.blankSku, fulfiller.fulfiller_id, fulfiller.reserved_stock],
       { prepare: true }
     );
 
@@ -360,7 +360,7 @@ export const InventoryCommandRepository = {
     const applied = result.rows[0]['[applied]'];
     if (!applied) {
       logger.warn(
-        { blankSku: args.blankSku, supplierId: supplier.supplier_id },
+        { blankSku: args.blankSku, fulfillerId: fulfiller.fulfiller_id },
         'LWT not applied for reserve, concurrent modification detected'
       );
       return { success: false, error: 'Concurrent modification, retry needed' };
@@ -373,7 +373,7 @@ export const InventoryCommandRepository = {
     await executeBatch([
       {
         query: `INSERT INTO inventory_reservations_w (
-          reservation_id, blank_sku, cart_id, variant_id, supplier_id,
+          reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
           quantity, reference_id, status, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'TEMPORARY', ?, ?, ?)`,
         params: [
@@ -425,20 +425,20 @@ export const InventoryCommandRepository = {
 
     // Decrement reserved_stock via LWT
     const stockRows = await executeCql<StockRow>(
-      `SELECT supplier_id, reserved_stock FROM inventory_stock_w WHERE blank_sku = ?`,
+      `SELECT fulfiller_id, reserved_stock FROM inventory_stock_w WHERE blank_sku = ?`,
       [reservation.blank_sku]
     );
 
-    // Find which supplier holds this reservation's stock
-    // For now, decrement from the first supplier (pre-assignment reservations)
+    // Find which fulfiller holds this reservation's stock
+    // For now, decrement from the first fulfiller (pre-assignment reservations)
     if (stockRows.length > 0) {
-      const supplier = stockRows[0];
-      const newReserved = Math.max(0, supplier.reserved_stock - reservation.quantity);
+      const fulfiller = stockRows[0];
+      const newReserved = Math.max(0, fulfiller.reserved_stock - reservation.quantity);
       await executeCql(
         `UPDATE inventory_stock_w
          SET reserved_stock = ?, updated_at = toTimestamp(now())
-         WHERE blank_sku = ? AND supplier_id = ?`,
-        [newReserved, reservation.blank_sku, supplier.supplier_id]
+         WHERE blank_sku = ? AND fulfiller_id = ?`,
+        [newReserved, reservation.blank_sku, fulfiller.fulfiller_id]
       );
     } else {
       throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} on release`);
@@ -499,7 +499,7 @@ export const InventoryCommandRepository = {
 
   /**
    * Cancel a CONFIRMED reservation (order cancelled).
-   * Decrements reserved_stock from the assigned supplier and sets status to CANCELLED.
+   * Decrements reserved_stock from the assigned fulfiller and sets status to CANCELLED.
    */
   async cancel(reservationId: string): Promise<void> {
     const rows = await executeCql<ReservationRow>(
@@ -518,16 +518,16 @@ export const InventoryCommandRepository = {
       return;
     }
 
-    // Decrement reserved_stock from the assigned supplier
-    const supplierId = reservation.supplier_id;
-    if (!supplierId) {
-      throw new Error(`Reservation ${reservationId} has no assigned supplier ID on cancel`);
+    // Decrement reserved_stock from the assigned fulfiller
+    const fulfillerId = reservation.fulfiller_id;
+    if (!fulfillerId) {
+      throw new Error(`Reservation ${reservationId} has no assigned fulfiller ID on cancel`);
     }
 
     const stockRows = await executeCql<StockRow>(
       `SELECT reserved_stock FROM inventory_stock_w
-       WHERE blank_sku = ? AND supplier_id = ?`,
-      [reservation.blank_sku, supplierId]
+       WHERE blank_sku = ? AND fulfiller_id = ?`,
+      [reservation.blank_sku, fulfillerId]
     );
 
     if (stockRows.length > 0) {
@@ -535,11 +535,11 @@ export const InventoryCommandRepository = {
       await executeCql(
         `UPDATE inventory_stock_w
          SET reserved_stock = ?, updated_at = toTimestamp(now())
-         WHERE blank_sku = ? AND supplier_id = ?`,
-        [newReserved, reservation.blank_sku, supplierId]
+         WHERE blank_sku = ? AND fulfiller_id = ?`,
+        [newReserved, reservation.blank_sku, fulfillerId]
       );
     } else {
-      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and supplier: ${supplierId} on cancel`);
+      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on cancel`);
     }
 
     // Update reservation status and remove from cart lookup
@@ -557,7 +557,7 @@ export const InventoryCommandRepository = {
       },
     ]);
 
-    logger.info({ reservationId, blankSku: reservation.blank_sku, supplierId }, 'Cancelled reservation');
+    logger.info({ reservationId, blankSku: reservation.blank_sku, fulfillerId }, 'Cancelled reservation');
     await signalInventoryChanged([reservation.blank_sku]);
   },
 
@@ -614,17 +614,17 @@ export const InventoryCommandRepository = {
       logger.warn({ reservationId, status: reservation.status }, 'Reservation already terminal');
       return;
     }
-    const supplierId = reservation.supplier_id;
+    const fulfillerId = reservation.fulfiller_id;
 
-    if (!supplierId) {
-      throw new Error(`Reservation ${reservationId} has no assigned supplier ID on fulfill`);
+    if (!fulfillerId) {
+      throw new Error(`Reservation ${reservationId} has no assigned fulfiller ID on fulfill`);
     }
 
-    // Decrement both total_stock and reserved_stock from the assigned supplier
+    // Decrement both total_stock and reserved_stock from the assigned fulfiller
     const stockRows = await executeCql<StockRow>(
       `SELECT total_stock, reserved_stock FROM inventory_stock_w
-       WHERE blank_sku = ? AND supplier_id = ?`,
-      [reservation.blank_sku, supplierId]
+       WHERE blank_sku = ? AND fulfiller_id = ?`,
+      [reservation.blank_sku, fulfillerId]
     );
 
     if (stockRows.length > 0) {
@@ -635,16 +635,16 @@ export const InventoryCommandRepository = {
       await executeCql(
         `UPDATE inventory_stock_w
          SET total_stock = ?, reserved_stock = ?, updated_at = toTimestamp(now())
-         WHERE blank_sku = ? AND supplier_id = ?`,
+         WHERE blank_sku = ? AND fulfiller_id = ?`,
         [
           newTotal,
           stock.reserved_stock - reservation.quantity,
           reservation.blank_sku,
-          supplierId,
+          fulfillerId,
         ]
       );
     } else {
-      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and supplier: ${supplierId} on fulfill`);
+      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on fulfill`);
     }
 
     await executeBatch([
@@ -661,23 +661,23 @@ export const InventoryCommandRepository = {
       },
     ]);
 
-    logger.info({ reservationId, supplierId }, 'Fulfilled reservation');
+    logger.info({ reservationId, fulfillerId }, 'Fulfilled reservation');
     await signalInventoryChanged([reservation.blank_sku]);
   },
 
   /**
-   * Transfer a reservation to a specific supplier (for fulfillment routing).
+   * Transfer a reservation to a specific fulfiller (for fulfillment routing).
    */
-  async transferToSupplier(
+  async transferToFulfiller(
     reservationId: string,
-    supplierId: string,
+    fulfillerId: string,
     quantity: number
   ): Promise<void> {
     await executeCql(
       `UPDATE inventory_reservations_w
-       SET supplier_id = ?, quantity = ?, updated_at = toTimestamp(now())
+       SET fulfiller_id = ?, quantity = ?, updated_at = toTimestamp(now())
        WHERE reservation_id = ?`,
-      [supplierId, quantity, reservationId]
+      [fulfillerId, quantity, reservationId]
     );
 
     // Look up blank_sku for the signal
@@ -685,7 +685,7 @@ export const InventoryCommandRepository = {
       `SELECT blank_sku FROM inventory_reservations_w WHERE reservation_id = ?`,
       [reservationId]
     );
-    logger.info({ reservationId, supplierId, quantity }, 'Transferred reservation to supplier');
+    logger.info({ reservationId, fulfillerId, quantity }, 'Transferred reservation to fulfiller');
     if (transferRows.length > 0) {
       await signalInventoryChanged([transferRows[0].blank_sku]);
     }

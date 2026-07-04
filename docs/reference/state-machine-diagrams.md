@@ -169,6 +169,92 @@ stateDiagram-v2
 
 ---
 
+## Fulfillment — `FULFILLER_ORDER_STATES`
+
+Source: [src/temporal/fulfillment/fulfiller-states.ts](../../src/temporal/fulfillment/fulfiller-states.ts)
+
+The fulfiller-order state registry. `in_production`/`shipped` timeouts are placeholders
+here — {@link buildFulfillerOrderStates} overrides them with the memo-driven simulation
+delays at workflow start. Exported as a const so the state-diagram generator (static
+AST analysis over `*_STATES` registries) can discover the machine.
+
+```mermaid
+stateDiagram-v2
+  received
+  submitting
+  in_production
+  shipped
+  [*] --> received
+  received --> submitting: timeout
+  received --> [*]: cancel → cancelled
+  submitting --> in_production: timeout
+  submitting --> [*]: cancel → cancelled
+  in_production --> in_production: timeout / fulfillerStatus
+  in_production --> shipped: timeout / fulfillerStatus
+  in_production --> [*]: cancel → cancelled
+  in_production --> [*]: fulfillerStatus → delivered
+  in_production --> [*]: fulfillerStatus → failed
+  shipped --> shipped: timeout / fulfillerStatus
+  shipped --> [*]: timeout / fulfillerStatus → delivered
+  shipped --> [*]: cancel → cancelled
+  shipped --> [*]: fulfillerStatus → failed
+  shipped --> in_production: fulfillerStatus
+  note right of received: timeout 1 millisecond
+  note right of submitting: timeout 1 millisecond
+```
+
+### State: `received`
+
+received — book-keeping hop; marks the order as submitting.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `submitting` |  |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+
+**Timeout:** 1 millisecond
+
+### State: `submitting`
+
+submitting — submits the order to the (simulated) fulfiller.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `in_production` | prepare: `submitFulfillerOrder` |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+
+**Timeout:** 1 millisecond
+
+### State: `in_production`
+
+in_production — auto-ships on timeout (unless manual mode); accepts fulfiller updates.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `in_production` | if: `ctx.manualMode` |
+| `timeout` | `shipped` | if: `ctx.manualMode` |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+
+### State: `shipped`
+
+shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller updates.
+
+| Trigger | Next | Notes |
+|---------|------|-------|
+| `timeout` | `shipped` | if: `ctx.manualMode` |
+| `timeout` | ⇒ delivered | if: `ctx.manualMode` |
+| `signal` | ⇒ cancelled | signal kinds: `cancel` |
+| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `fulfillerStatus` |
+
+---
+
 ## Fulfillment — `FULFILLMENT_STATES`
 
 Source: [src/temporal/fulfillment/states.ts](../../src/temporal/fulfillment/states.ts)
@@ -203,92 +289,6 @@ stateDiagram-v2
 | `signal` | `in_production` | if: `context.status === 'delivered'`; `context.status === 'failed'`; `context.status === 'cancelled'` · signal kinds: `childStatus` |
 
 **Timeout:** 365 days
-
----
-
-## Fulfillment — `SUPPLIER_ORDER_STATES`
-
-Source: [src/temporal/fulfillment/supplier-states.ts](../../src/temporal/fulfillment/supplier-states.ts)
-
-The supplier-order state registry. `in_production`/`shipped` timeouts are placeholders
-here — {@link buildSupplierOrderStates} overrides them with the memo-driven simulation
-delays at workflow start. Exported as a const so the state-diagram generator (static
-AST analysis over `*_STATES` registries) can discover the machine.
-
-```mermaid
-stateDiagram-v2
-  received
-  submitting
-  in_production
-  shipped
-  [*] --> received
-  received --> submitting: timeout
-  received --> [*]: cancel → cancelled
-  submitting --> in_production: timeout
-  submitting --> [*]: cancel → cancelled
-  in_production --> in_production: timeout / supplierStatus
-  in_production --> shipped: timeout / supplierStatus
-  in_production --> [*]: cancel → cancelled
-  in_production --> [*]: supplierStatus → delivered
-  in_production --> [*]: supplierStatus → failed
-  shipped --> shipped: timeout / supplierStatus
-  shipped --> [*]: timeout / supplierStatus → delivered
-  shipped --> [*]: cancel → cancelled
-  shipped --> [*]: supplierStatus → failed
-  shipped --> in_production: supplierStatus
-  note right of received: timeout 1 millisecond
-  note right of submitting: timeout 1 millisecond
-```
-
-### State: `received`
-
-received — book-keeping hop; marks the order as submitting.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `submitting` |  |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-
-**Timeout:** 1 millisecond
-
-### State: `submitting`
-
-submitting — submits the order to the (simulated) supplier.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `in_production` | prepare: `submitSupplierOrder` |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-
-**Timeout:** 1 millisecond
-
-### State: `in_production`
-
-in_production — auto-ships on timeout (unless manual mode); accepts supplier updates.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `in_production` | if: `ctx.manualMode` |
-| `timeout` | `shipped` | if: `ctx.manualMode` |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-
-### State: `shipped`
-
-shipped — auto-delivers on timeout (unless manual mode); accepts supplier updates.
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `timeout` | `shipped` | if: `ctx.manualMode` |
-| `timeout` | ⇒ delivered | if: `ctx.manualMode` |
-| `signal` | ⇒ cancelled | signal kinds: `cancel` |
-| `signal` | `shipped` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ delivered | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | ⇒ failed | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
-| `signal` | `in_production` | finalize: `indexNewestShipment` · signal kinds: `supplierStatus` |
 
 ---
 

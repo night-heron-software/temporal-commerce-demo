@@ -13,6 +13,14 @@ Bring the demo's 6 shared-domain workflows structurally closer to their mono cou
 
 ## Open Questions
 
+> [!NOTE]
+> **Decisions (2026-07-04):** Q1 = **(A)** full state graph (return/refund update handlers included so
+> `return_requested` and the shipping states are reachable; accounting/Twisp finalize actions and
+> payment-capture activities excluded). Q2 = **(A)** rename only, keep the simple timer chain.
+> Additionally: the demo **keeps** its deterministic `flushCart(cart, at)` — mono aligns to the demo
+> here instead (tracked as nightheron-mono TODO #24), so WS3's "simplify onTransition / drop `at`"
+> bullet is dropped.
+
 > [!IMPORTANT]
 > **Q1: OMS state graph expansion.** The mono OMS has 9 states (`pending_assignment` → `assigning_fulfillers` → `requesting_fulfillment` → `ready_to_fulfill` → `processing` → `partially_shipped` → `shipped` → `delivered` → `return_requested`) plus 5 terminals. The demo has 1 state (`processing`) with inline `onStart` orchestration. Adopting the mono's multi-state graph gives the demo a richer order lifecycle (partial shipments, returns), but is a **significant** expansion of the state machine. Do you want:
 >

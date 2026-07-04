@@ -56,24 +56,24 @@ export interface OrderState {
   customerFeedback?: CustomerFeedback;
   statusHistory: StatusHistoryEntry[];
   assignments: OrderAssignment[];
-  supplierOrders: SupplierOrder[];
+  fulfillerOrders: FulfillerOrder[];
 }
 
-// Assignment of a line item quantity to a supplier
+// Assignment of a line item quantity to a fulfiller
 export interface OrderAssignment {
   assignmentId: string;
   lineItemId: string;
   variantId: string;
-  supplierId: string;
-  supplierName?: string;
+  fulfillerId: string;
+  fulfillerName?: string;
   quantity: number;
   status: 'pending' | 'assigned' | 'fulfilled' | 'shipped' | 'delivered' | 'rejected';
-  supplierOrderId?: string; // Set when order is fulfilled
+  fulfillerOrderId?: string; // Set when order is fulfilled
   carrier?: string; // Shipping carrier (e.g., 'USPS', 'FedEx')
 }
 
-// Supplier order status type
-export type SupplierOrderStatus =
+// Fulfiller order status type
+export type FulfillerOrderStatus =
   | 'pending'
   | 'processing'
   | 'awaiting_tracking'
@@ -86,8 +86,8 @@ export type SupplierOrderStatus =
  * Used to propagate status changes back to the parent OMS workflow.
  */
 export interface FulfillmentStatusUpdate {
-  supplierOrderId: string;
-  status: SupplierOrderStatus;
+  fulfillerOrderId: string;
+  status: FulfillerOrderStatus;
   carrier?: string;
   trackingNumber?: string;
   trackingUrl?: string;
@@ -95,30 +95,30 @@ export interface FulfillmentStatusUpdate {
   error?: string;
 }
 
-// Represents a group of assignments sent to one supplier
-export interface SupplierOrder {
-  supplierOrderId: string;
+// Represents a group of assignments sent to one fulfiller
+export interface FulfillerOrder {
+  fulfillerOrderId: string;
   orderId: string;
-  supplierId: string;
-  supplierName: string;
-  status: SupplierOrderStatus;
-  items: SupplierOrderItem[];
+  fulfillerId: string;
+  fulfillerName: string;
+  status: FulfillerOrderStatus;
+  items: FulfillerOrderItem[];
   carrier?: string;
   trackingNumber?: string;
   trackingUrl?: string;
   createdAt: string;
   updatedAt: string;
   rejectionReason?: string;
-  statusHistory: SupplierOrderHistoryEntry[];
+  statusHistory: FulfillerOrderHistoryEntry[];
 }
 
-export interface SupplierOrderHistoryEntry {
-  status: SupplierOrderStatus;
+export interface FulfillerOrderHistoryEntry {
+  status: FulfillerOrderStatus;
   timestamp: string;
   note?: string;
 }
 
-export interface SupplierOrderItem {
+export interface FulfillerOrderItem {
   assignmentId: string;
   variantId: string;
   quantity: number;

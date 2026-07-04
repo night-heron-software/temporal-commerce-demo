@@ -7,7 +7,7 @@ import {
 } from './inventory-command-repository';
 
 describe('computeTotalAvailable', () => {
-  it('sums available stock (total − reserved) across suppliers', () => {
+  it('sums available stock (total − reserved) across fulfillers', () => {
     expect(
       computeTotalAvailable([
         { total_stock: 10, reserved_stock: 3 },
@@ -16,7 +16,7 @@ describe('computeTotalAvailable', () => {
     ).toBe(7);
   });
 
-  it('returns effectively-infinite when any supplier is UNLIMITED_STOCK', () => {
+  it('returns effectively-infinite when any fulfiller is UNLIMITED_STOCK', () => {
     expect(
       computeTotalAvailable([
         { total_stock: UNLIMITED_STOCK, reserved_stock: 2 },
@@ -25,7 +25,7 @@ describe('computeTotalAvailable', () => {
     ).toBe(Number.MAX_SAFE_INTEGER);
   });
 
-  it('is zero for no suppliers', () => {
+  it('is zero for no fulfillers', () => {
     expect(computeTotalAvailable([])).toBe(0);
   });
 });

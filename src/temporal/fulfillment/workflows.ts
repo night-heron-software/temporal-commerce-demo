@@ -4,19 +4,19 @@ import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../co
 import type {
   FulfillmentOrderRequest,
   FulfillmentWorkflowState,
-  FulfillmentSupplierOrderState,
+  FulfillmentFulfillerOrderState,
   FulfillmentLineItemState,
-  SupplierStatusUpdate,
+  FulfillerStatusUpdate,
   FulfillmentStateName,
   FulfillmentSignal,
 } from './types';
 import {
   getStatusQuery,
-  supplierStatusSignal,
+  fulfillerStatusSignal,
   cancelSignal,
   childStatusSignal,
   type FulfillmentResult,
-  type FulfillmentSupplierOrderResult,
+  type FulfillmentFulfillerOrderResult,
 } from './definitions';
 import {
   transferInventoryReservations,
@@ -34,25 +34,25 @@ import {
 } from '../framework';
 import { FULFILLMENT_STATES } from './states';
 import {
-  supplierOrderWorkflow,
+  fulfillerOrderWorkflow,
   childCancelSignal,
-  childSupplierStatusSignal,
-} from './supplier-workflows';
+  childFulfillerStatusSignal,
+} from './fulfiller-workflows';
 
-// Re-export supplierOrderWorkflow so it is registered by the Temporal worker
-export { supplierOrderWorkflow };
+// Re-export fulfillerOrderWorkflow so it is registered by the Temporal worker
+export { fulfillerOrderWorkflow };
 
 export type FulfillmentStatusUpdate = OMS.FulfillmentStatusUpdate;
 // Internal alias for the OMS-facing status vocabulary (no external importers).
-type SupplierOrderStatus = OMS.SupplierOrderStatus;
+type FulfillerOrderStatus = OMS.FulfillerOrderStatus;
 
 // ============================================================================
 // Status Mapping
 // ============================================================================
 
-function mapToSupplierOrderStatus(
-  status: FulfillmentSupplierOrderState['status'],
-): SupplierOrderStatus | null {
+function mapToFulfillerOrderStatus(
+  status: FulfillmentFulfillerOrderState['status'],
+): FulfillerOrderStatus | null {
   switch (status) {
     case 'in_production':
       return 'processing';
@@ -75,21 +75,21 @@ function mapToSupplierOrderStatus(
 
 export async function signalParentOMSWorkflow(
   state: FulfillmentWorkflowState,
-  supplierOrder: FulfillmentSupplierOrderState,
+  fulfillerOrder: FulfillmentFulfillerOrderState,
 ): Promise<void> {
-  const omsStatus = mapToSupplierOrderStatus(supplierOrder.status);
+  const omsStatus = mapToFulfillerOrderStatus(fulfillerOrder.status);
   if (!omsStatus) return;
 
-  const latestShipment = supplierOrder.shipments?.[supplierOrder.shipments.length - 1];
+  const latestShipment = fulfillerOrder.shipments?.[fulfillerOrder.shipments.length - 1];
 
   const update: FulfillmentStatusUpdate = {
-    supplierOrderId: supplierOrder.supplierOrderId,
+    fulfillerOrderId: fulfillerOrder.fulfillerOrderId,
     status: omsStatus,
     carrier: latestShipment?.carrier,
     trackingNumber: latestShipment?.trackingNumber,
     trackingUrl: latestShipment?.trackingUrl,
     shipmentDate: latestShipment?.shippedAt,
-    error: supplierOrder.errorMessage,
+    error: fulfillerOrder.errorMessage,
   };
 
   try {
@@ -115,7 +115,7 @@ async function syncProjections(state: FulfillmentWorkflowState) {
 export async function fulfillmentWorkflow(
   request: FulfillmentOrderRequest,
 ): Promise<FulfillmentResult> {
-  // Initialize multi-supplier state
+  // Initialize multi-fulfiller state
   const state: FulfillmentWorkflowState = {
     orderId: request.orderId,
     cartId: request.cartId,
@@ -123,11 +123,11 @@ export async function fulfillmentWorkflow(
     customerEmail: request.customerEmail,
     confirmationNumber: request.confirmationNumber,
     status: 'received',
-    supplierOrders: request.supplierOrders.map(
-      (so): FulfillmentSupplierOrderState => ({
-        supplierOrderId: so.supplierOrderId,
-        supplierId: so.supplierId,
-        supplierType: so.supplierType,
+    fulfillerOrders: request.fulfillerOrders.map(
+      (so): FulfillmentFulfillerOrderState => ({
+        fulfillerOrderId: so.fulfillerOrderId,
+        fulfillerId: so.fulfillerId,
+        fulfillerType: so.fulfillerType,
         items: so.items.map(
           (item): FulfillmentLineItemState => ({
             sku: item.sku,
@@ -144,8 +144,8 @@ export async function fulfillmentWorkflow(
     updatedAt: new Date().toISOString(),
   };
 
-  // Map to store child handles by supplierOrderId
-  const childHandles = new Map<string, wf.ChildWorkflowHandle<typeof supplierOrderWorkflow>>();
+  // Map to store child handles by fulfillerOrderId
+  const childHandles = new Map<string, wf.ChildWorkflowHandle<typeof fulfillerOrderWorkflow>>();
 
   // Wire Query
   wf.setHandler(getStatusQuery, () => state);
@@ -154,7 +154,7 @@ export async function fulfillmentWorkflow(
   const signals: SignalRegistration<FulfillmentSignal>[] = [
     {
       definition: childStatusSignal,
-      toSignal: (update: FulfillmentSupplierOrderState) => ({ kind: 'childStatus' as const, update }),
+      toSignal: (update: FulfillmentFulfillerOrderState) => ({ kind: 'childStatus' as const, update }),
     },
     {
       definition: cancelSignal,
@@ -162,12 +162,12 @@ export async function fulfillmentWorkflow(
     },
   ];
 
-  // Route webhook supplierStatusUpdate signals to the appropriate child workflow
-  wf.setHandler(supplierStatusSignal, (update: SupplierStatusUpdate) => {
-    const childHandle = childHandles.get(update.supplierOrderId);
+  // Route webhook fulfillerStatusUpdate signals to the appropriate child workflow
+  wf.setHandler(fulfillerStatusSignal, (update: FulfillerStatusUpdate) => {
+    const childHandle = childHandles.get(update.fulfillerOrderId);
     if (childHandle) {
-      childHandle.signal(childSupplierStatusSignal, update).catch((err) => {
-        wf.log.warn('Failed to forward supplier status signal to child', { error: String(err) });
+      childHandle.signal(childFulfillerStatusSignal, update).catch((err) => {
+        wf.log.warn('Failed to forward fulfiller status signal to child', { error: String(err) });
       });
     }
   });
@@ -188,32 +188,32 @@ export async function fulfillmentWorkflow(
       state.status = deriveDisplayStatus<FulfillmentWorkflowState['status']>(currentState);
     },
     onStart: async (startCtx: FulfillmentWorkflowState) => {
-      // 1. Transfer inventory reservations to supplier locations
+      // 1. Transfer inventory reservations to fulfiller locations
       wf.log.info('Transferring inventory reservations', {
         cartId: startCtx.cartId,
-        supplierOrderCount: startCtx.supplierOrders.length,
+        fulfillerOrderCount: startCtx.fulfillerOrders.length,
       });
-      const transferItems = startCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
+      const transferItems = startCtx.fulfillerOrders.flatMap((so: FulfillmentFulfillerOrderState) =>
         so.items.map((item: FulfillmentLineItemState) => ({
           variantId: item.variantId,
-          supplierId: so.supplierId,
+          fulfillerId: so.fulfillerId,
           quantity: item.quantity,
         })),
       );
       await transferInventoryReservations(startCtx.cartId, transferItems);
 
-      // 2. Spawn supplier order child workflows
+      // 2. Spawn fulfiller order child workflows
       startCtx.status = 'in_production';
       startCtx.updatedAt = new Date().toISOString();
       await syncProjections(startCtx);
 
-      for (const supplierOrder of startCtx.supplierOrders) {
+      for (const fulfillerOrder of startCtx.fulfillerOrders) {
         try {
-          const childHandle = await wf.startChild(supplierOrderWorkflow, {
+          const childHandle = await wf.startChild(fulfillerOrderWorkflow, {
             ...buildWorkflowStartOptions({
               storeId: DEMO_STORE_ID,
               domain: 'fulfiller-order',
-              entityId: supplierOrder.supplierOrderId,
+              entityId: fulfillerOrder.fulfillerOrderId,
               orderId: startCtx.orderId,
               cartId: startCtx.cartId,
             }),
@@ -225,13 +225,13 @@ export async function fulfillmentWorkflow(
               confirmationNumber: startCtx.confirmationNumber,
               shippingAddress: request.shippingAddress,
               shippingMethod: request.shippingMethod,
-              supplierOrder,
+              fulfillerOrder,
             }],
           });
-          childHandles.set(supplierOrder.supplierOrderId, childHandle);
+          childHandles.set(fulfillerOrder.fulfillerOrderId, childHandle);
         } catch (err) {
-          wf.log.error('Failed to start supplier order child workflow', {
-            supplierOrderId: supplierOrder.supplierOrderId,
+          wf.log.error('Failed to start fulfiller order child workflow', {
+            fulfillerOrderId: fulfillerOrder.fulfillerOrderId,
             error: String(err),
           });
         }
@@ -246,14 +246,14 @@ export async function fulfillmentWorkflow(
       currentCtx: FulfillmentWorkflowState
     ) => {
       await syncProjections(currentCtx);
-      for (const so of currentCtx.supplierOrders) {
+      for (const so of currentCtx.fulfillerOrders) {
         await signalParentOMSWorkflow(currentCtx, so);
       }
     },
     onCancellation: async (cancelCtx: FulfillmentWorkflowState) => {
       cancelCtx.status = 'cancelled';
       cancelCtx.updatedAt = new Date().toISOString();
-      for (const so of cancelCtx.supplierOrders) {
+      for (const so of cancelCtx.fulfillerOrders) {
         so.status = 'cancelled';
         so.items.forEach((i) => (i.status = 'cancelled'));
       }
@@ -267,7 +267,7 @@ export async function fulfillmentWorkflow(
         }
       }
 
-      const allItems = cancelCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
+      const allItems = cancelCtx.fulfillerOrders.flatMap((so: FulfillmentFulfillerOrderState) =>
         so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
       );
       try {
@@ -293,7 +293,7 @@ export async function fulfillmentWorkflow(
       // Fulfill inventory reservations on delivery — transitions CONFIRMED→FULFILLED,
       // decrementing both total_stock and reserved_stock in the inventory system.
       if (isTerminal(finalState, 'delivered')) {
-        const allItems = finalCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
+        const allItems = finalCtx.fulfillerOrders.flatMap((so: FulfillmentFulfillerOrderState) =>
           so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
         );
         try {
@@ -323,9 +323,9 @@ export async function fulfillmentWorkflow(
 function buildResult(state: FulfillmentWorkflowState): FulfillmentResult {
   return {
     status: state.status,
-    supplierOrders: state.supplierOrders.map(
-      (so): FulfillmentSupplierOrderResult => ({
-        supplierOrderId: so.supplierOrderId,
+    fulfillerOrders: state.fulfillerOrders.map(
+      (so): FulfillmentFulfillerOrderResult => ({
+        fulfillerOrderId: so.fulfillerOrderId,
         status: so.status,
         carrier: so.carrier,
         trackingNumber: so.trackingNumber,

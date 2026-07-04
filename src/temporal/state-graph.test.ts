@@ -41,7 +41,7 @@ const EXPECTED_REGISTRIES = [
   'CHECKOUT_STATES',
   'OMS_STATES',
   'FULFILLMENT_STATES',
-  'SUPPLIER_ORDER_STATES',
+  'FULFILLER_ORDER_STATES',
 ];
 
 describe('state-graph.json', () => {

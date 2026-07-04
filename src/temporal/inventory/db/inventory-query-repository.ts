@@ -19,7 +19,7 @@ export interface StockSummary {
   totalStock: number;
   reservedStock: number;
   availableStock: number;
-  supplierCount: number;
+  fulfillerCount: number;
   lowStock: boolean;
   lastProjectedAt: Date | null;
 }
@@ -30,10 +30,10 @@ export interface StockLevel {
   available: number;
 }
 
-export interface SupplierStock {
-  supplierId: string;
+export interface FulfillerStock {
+  fulfillerId: string;
   blankSku: string;
-  supplierName: string;
+  fulfillerName: string;
   totalStock: number;
   reservedStock: number;
   availableStock: number;
@@ -51,7 +51,7 @@ export interface SkuReservation {
   variantId: string;
   quantity: number;
   status: string;
-  supplierId: string | null;
+  fulfillerId: string | null;
   expiresAt: Date | null;
   createdAt: Date;
 }
@@ -73,15 +73,15 @@ interface StockSummaryRow {
   total_stock: number;
   reserved_stock: number;
   available_stock: number;
-  supplier_count: number;
+  fulfiller_count: number;
   low_stock: boolean;
   last_projected_at: Date | null;
 }
 
-interface SupplierStockRow {
-  supplier_id: string;
+interface FulfillerStockRow {
+  fulfiller_id: string;
   blank_sku: string;
-  supplier_name: string;
+  fulfiller_name: string;
   total_stock: number;
   reserved_stock: number;
   available_stock: number;
@@ -99,7 +99,7 @@ interface SkuReservationRow {
   variant_id: string;
   quantity: number;
   status: string;
-  supplier_id: string | null;
+  fulfiller_id: string | null;
   expires_at: Date | null;
   created_at: Date;
 }
@@ -122,17 +122,17 @@ function rowToStockSummary(row: StockSummaryRow): StockSummary {
     totalStock: row.total_stock,
     reservedStock: row.reserved_stock,
     availableStock: row.available_stock,
-    supplierCount: row.supplier_count,
+    fulfillerCount: row.fulfiller_count,
     lowStock: row.low_stock,
     lastProjectedAt: row.last_projected_at,
   };
 }
 
-function rowToSupplierStock(row: SupplierStockRow): SupplierStock {
+function rowToFulfillerStock(row: FulfillerStockRow): FulfillerStock {
   return {
-    supplierId: row.supplier_id,
+    fulfillerId: row.fulfiller_id,
     blankSku: row.blank_sku,
-    supplierName: row.supplier_name,
+    fulfillerName: row.fulfiller_name,
     totalStock: row.total_stock,
     reservedStock: row.reserved_stock,
     availableStock: row.available_stock,
@@ -152,7 +152,7 @@ function rowToSkuReservation(row: SkuReservationRow): SkuReservation {
     variantId: row.variant_id,
     quantity: row.quantity,
     status: row.status,
-    supplierId: row.supplier_id,
+    fulfillerId: row.fulfiller_id,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
   };
@@ -214,29 +214,29 @@ export const InventoryQueryRepository = {
   },
 
   /**
-   * Get all stock for a specific supplier.
+   * Get all stock for a specific fulfiller.
    */
-  async getStockBySupplier(supplierId: string): Promise<SupplierStock[]> {
-    const rows = await executeCql<SupplierStockRow>(
-      `SELECT * FROM inventory_stock_by_supplier WHERE supplier_id = ?`,
-      [supplierId]
+  async getStockByFulfiller(fulfillerId: string): Promise<FulfillerStock[]> {
+    const rows = await executeCql<FulfillerStockRow>(
+      `SELECT * FROM inventory_stock_by_fulfiller WHERE fulfiller_id = ?`,
+      [fulfillerId]
     );
-    return rows.map(rowToSupplierStock);
+    return rows.map(rowToFulfillerStock);
   },
 
   /**
-   * Get stock for a specific SKU from a specific supplier.
+   * Get stock for a specific SKU from a specific fulfiller.
    */
-  async getSupplierForSku(
-    supplierId: string,
+  async getFulfillerForSku(
+    fulfillerId: string,
     blankSku: string
-  ): Promise<SupplierStock | null> {
-    const rows = await executeCql<SupplierStockRow>(
-      `SELECT * FROM inventory_stock_by_supplier
-       WHERE supplier_id = ? AND blank_sku = ?`,
-      [supplierId, blankSku]
+  ): Promise<FulfillerStock | null> {
+    const rows = await executeCql<FulfillerStockRow>(
+      `SELECT * FROM inventory_stock_by_fulfiller
+       WHERE fulfiller_id = ? AND blank_sku = ?`,
+      [fulfillerId, blankSku]
     );
-    return rows.length > 0 ? rowToSupplierStock(rows[0]) : null;
+    return rows.length > 0 ? rowToFulfillerStock(rows[0]) : null;
   },
 
   /**

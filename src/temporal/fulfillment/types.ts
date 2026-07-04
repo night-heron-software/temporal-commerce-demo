@@ -3,19 +3,19 @@
  * Core data structures for the fulfillment workflow
  */
 
-// Re-export ShippingAddress from suppliers (single source of truth)
-import { Fulfillment, Suppliers, OMS } from '../contracts';
+// Re-export ShippingAddress from fulfillers (single source of truth)
+import { Fulfillment, Fulfillers, OMS } from '../contracts';
 export type ShippingAddress = Fulfillment.ShippingAddress;
-export type SupplierStatusUpdate = Suppliers.SupplierStatusUpdate;
-export type SupplierOrderResult = Suppliers.SupplierOrderResult;
+export type FulfillerStatusUpdate = Fulfillers.FulfillerStatusUpdate;
+export type FulfillerOrderResult = Fulfillers.FulfillerOrderResult;
 
-type SupplierOrderStatus = OMS.SupplierOrderStatus;
+type FulfillerOrderStatus = OMS.FulfillerOrderStatus;
 
 // ============================================================================
 // OMS → Fulfillment Request
 // ============================================================================
 
-/** Sent from OMS to start fulfillment with pre-decided supplier orders */
+/** Sent from OMS to start fulfillment with pre-decided fulfiller orders */
 export interface FulfillmentOrderRequest {
   orderId: string;
   cartId: string; // Needed for inventory reservation IDs
@@ -24,14 +24,14 @@ export interface FulfillmentOrderRequest {
   confirmationNumber?: string; // Order confirmation # for email subject
   shippingAddress: ShippingAddress;
   shippingMethod?: 'standard' | 'express' | 'economy';
-  supplierOrders: FulfillmentSupplierOrderInput[];
+  fulfillerOrders: FulfillmentFulfillerOrderInput[];
 }
 
-/** One supplier's portion of the order, pre-decided by the OMS */
-export interface FulfillmentSupplierOrderInput {
-  supplierOrderId: string; // OMS-generated ID
-  supplierId: string;
-  supplierType: 'simulated';
+/** One fulfiller's portion of the order, pre-decided by the OMS */
+export interface FulfillmentFulfillerOrderInput {
+  fulfillerOrderId: string; // OMS-generated ID
+  fulfillerId: string;
+  fulfillerType: 'simulated';
   items: FulfillmentItem[];
 }
 
@@ -79,22 +79,22 @@ export interface FulfillmentWorkflowState {
   customerEmail?: string;
   confirmationNumber?: string;
   status: FulfillmentOrderStatus;
-  supplierOrders: FulfillmentSupplierOrderState[];
+  fulfillerOrders: FulfillmentFulfillerOrderState[];
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
   errorMessage?: string;
 }
 
-/** Per-supplier-order execution state */
-export interface FulfillmentSupplierOrderState {
-  supplierOrderId: string; // OMS ID for signal matching
-  supplierId: string;
-  supplierType: 'simulated';
+/** Per-fulfiller-order execution state */
+export interface FulfillmentFulfillerOrderState {
+  fulfillerOrderId: string; // OMS ID for signal matching
+  fulfillerId: string;
+  fulfillerType: 'simulated';
   items: FulfillmentLineItemState[];
   status: FulfillmentOrderStatus;
-  omsStatus?: SupplierOrderStatus; // Mapped status for OMS signaling
-  supplierExternalId?: string; // External supplier's order ID (e.g., SIM-xxx)
+  omsStatus?: FulfillerOrderStatus; // Mapped status for OMS signaling
+  fulfillerExternalId?: string; // External fulfiller's order ID (e.g., SIM-xxx)
   shipments?: ShipmentInfo[];
   carrier?: string;
   trackingNumber?: string;
@@ -111,7 +111,7 @@ export interface FulfillmentLineItemState {
   variantId: string;
   quantity: number;
   status: FulfillmentLineItemStatus;
-  supplierLineItemId?: string;
+  fulfillerLineItemId?: string;
 }
 
 // ============================================================================
@@ -136,6 +136,6 @@ export interface ShipmentItemRef {
 export type FulfillmentStateName = 'received' | 'in_production';
 
 export type FulfillmentSignal =
-  | { kind: 'supplierStatus'; update: SupplierStatusUpdate }
+  | { kind: 'fulfillerStatus'; update: FulfillerStatusUpdate }
   | { kind: 'cancel' }
-  | { kind: 'childStatus'; update: FulfillmentSupplierOrderState };
+  | { kind: 'childStatus'; update: FulfillmentFulfillerOrderState };

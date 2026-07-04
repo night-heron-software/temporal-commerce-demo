@@ -1,7 +1,7 @@
 /**
  * POST /api/dev/reindex
  * Reindex Cassandra data into Elasticsearch.
- * Body: { index: 'products' | 'collections' | 'orders' | 'customers' | 'suppliers' | 'inventory' | 'supplier_orders' | 'carts' | 'fulfillments' | 'reservations' | 'shipments' | 'all' }
+ * Body: { index: 'products' | 'collections' | 'orders' | 'customers' | 'fulfillers' | 'inventory' | 'fulfiller_orders' | 'carts' | 'fulfillments' | 'reservations' | 'shipments' | 'all' }
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
@@ -56,15 +56,15 @@ export async function POST(request: NextRequest) {
           case 'customers':
             result.indexed = await reindexCustomers(esClient, result.errors);
             break;
-          case 'suppliers':
-            result.indexed = await reindexSuppliers(esClient, result.errors);
+          case 'fulfillers':
+            result.indexed = await reindexFulfillers(esClient, result.errors);
             break;
           case 'inventory':
             result.indexed = await reindexInventory(esClient, result.errors);
             break;
-          case 'supplier_orders':
-            // Supplier orders are embedded in orders — reindex from the orders table
-            result.indexed = await reindexSupplierOrders(esClient, result.errors);
+          case 'fulfiller_orders':
+            // Fulfiller orders are embedded in orders — reindex from the orders table
+            result.indexed = await reindexFulfillerOrders(esClient, result.errors);
             break;
           case 'carts':
             // Carts are ephemeral Temporal workflow state — no Cassandra source to reindex from
@@ -218,7 +218,7 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     assignments: any[] | null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    supplier_orders: any[] | null;
+    fulfiller_orders: any[] | null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     shipping_address: any | null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -278,21 +278,21 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
         items,
         itemCount: items.length,
         variantIds: items.map((i: { variantId: string }) => i.variantId),
-        assignments: (row.assignments ?? []).map((a: { assignment_id: string; line_item_id: string; variant_id: string; supplier_id: string; supplier_name: string; quantity: number; status: string; supplier_order_id: string; carrier: string }) => ({
+        assignments: (row.assignments ?? []).map((a: { assignment_id: string; line_item_id: string; variant_id: string; fulfiller_id: string; fulfiller_name: string; quantity: number; status: string; fulfiller_order_id: string; carrier: string }) => ({
           assignmentId: a.assignment_id,
           lineItemId: a.line_item_id,
           variantId: a.variant_id,
-          supplierId: a.supplier_id,
-          supplierName: a.supplier_name,
+          fulfillerId: a.fulfiller_id,
+          fulfillerName: a.fulfiller_name,
           quantity: a.quantity,
           status: a.status,
-          supplierOrderId: a.supplier_order_id,
+          fulfillerOrderId: a.fulfiller_order_id,
           carrier: a.carrier
         })),
-        supplierOrders: (row.supplier_orders ?? []).map((so: { supplier_order_id: string; supplier_id: string; supplier_name: string; status: string; items: { assignment_id: string; variant_id: string; quantity: number }[]; carrier: string; tracking_number: string; rejection_reason: string; created_at: Date; updated_at: Date }) => ({
-          supplierOrderId: so.supplier_order_id,
-          supplierId: so.supplier_id,
-          supplierName: so.supplier_name,
+        fulfillerOrders: (row.fulfiller_orders ?? []).map((so: { fulfiller_order_id: string; fulfiller_id: string; fulfiller_name: string; status: string; items: { assignment_id: string; variant_id: string; quantity: number }[]; carrier: string; tracking_number: string; rejection_reason: string; created_at: Date; updated_at: Date }) => ({
+          fulfillerOrderId: so.fulfiller_order_id,
+          fulfillerId: so.fulfiller_id,
+          fulfillerName: so.fulfiller_name,
           status: so.status,
           itemCount: (so.items ?? []).length,
           carrier: so.carrier,
@@ -367,14 +367,14 @@ async function reindexCustomers(esClient: EsClient, errors: string[]): Promise<n
   return indexed;
 }
 
-async function reindexSuppliers(esClient: EsClient, errors: string[]): Promise<number> {
-  interface SupplierRow {
+async function reindexFulfillers(esClient: EsClient, errors: string[]): Promise<number> {
+  interface FulfillerRow {
     id: string;
     name: string;
   }
 
-  interface SupplierLocationRow {
-    supplier_id: string;
+  interface FulfillerLocationRow {
+    fulfiller_id: string;
     location_id: string;
     name: string;
     cost: number;
@@ -387,23 +387,23 @@ async function reindexSuppliers(esClient: EsClient, errors: string[]): Promise<n
     is_primary: boolean;
   }
 
-  const supplierRows = await executeCql<SupplierRow>('SELECT * FROM suppliers');
-  const locationRows = await executeCql<SupplierLocationRow>('SELECT * FROM supplier_locations');
+  const fulfillerRows = await executeCql<FulfillerRow>('SELECT * FROM fulfillers');
+  const locationRows = await executeCql<FulfillerLocationRow>('SELECT * FROM fulfiller_locations');
 
-  // Group locations by supplier
-  const locationsBySupplier = new Map<string, SupplierLocationRow[]>();
+  // Group locations by fulfiller
+  const locationsByFulfiller = new Map<string, FulfillerLocationRow[]>();
   for (const loc of locationRows) {
-    if (!locationsBySupplier.has(loc.supplier_id)) locationsBySupplier.set(loc.supplier_id, []);
-    locationsBySupplier.get(loc.supplier_id)!.push(loc);
+    if (!locationsByFulfiller.has(loc.fulfiller_id)) locationsByFulfiller.set(loc.fulfiller_id, []);
+    locationsByFulfiller.get(loc.fulfiller_id)!.push(loc);
   }
 
   let indexed = 0;
-  for (const row of supplierRows) {
+  for (const row of fulfillerRows) {
     try {
       const doc = {
-        supplierId: row.id,
+        fulfillerId: row.id,
         name: row.name,
-        locations: (locationsBySupplier.get(row.id) ?? []).map(loc => ({
+        locations: (locationsByFulfiller.get(row.id) ?? []).map(loc => ({
           locationId: loc.location_id,
           name: loc.name,
           cost: loc.cost,
@@ -416,10 +416,10 @@ async function reindexSuppliers(esClient: EsClient, errors: string[]): Promise<n
           isPrimary: loc.is_primary
         }))
       };
-      await esClient.index({ index: 'suppliers', id: row.id, document: doc });
+      await esClient.index({ index: 'fulfillers', id: row.id, document: doc });
       indexed++;
     } catch (err) {
-      errors.push(`Supplier ${row.id}: ${err}`);
+      errors.push(`Fulfiller ${row.id}: ${err}`);
     }
   }
   return indexed;
@@ -428,8 +428,8 @@ async function reindexSuppliers(esClient: EsClient, errors: string[]): Promise<n
 async function reindexInventory(esClient: EsClient, errors: string[]): Promise<number> {
   interface StockRow {
     blank_sku: string;
-    supplier_id: string;
-    supplier_name: string;
+    fulfiller_id: string;
+    fulfiller_name: string;
     total_stock: number;
     reserved_stock: number;
     ordered_stock: number;
@@ -445,20 +445,20 @@ async function reindexInventory(esClient: EsClient, errors: string[]): Promise<n
   }
 
   let indexed = 0;
-  for (const [blankSku, suppliers] of inventoryByBlankSku) {
+  for (const [blankSku, fulfillers] of inventoryByBlankSku) {
     try {
-      const totalStock = suppliers.reduce((sum, s) => sum + (s.total_stock ?? 0), 0);
-      const reservedStock = suppliers.reduce((sum, s) => sum + (s.reserved_stock ?? 0), 0);
+      const totalStock = fulfillers.reduce((sum, s) => sum + (s.total_stock ?? 0), 0);
+      const reservedStock = fulfillers.reduce((sum, s) => sum + (s.reserved_stock ?? 0), 0);
 
       const doc = {
         variantId: blankSku,
         totalStock,
         reservedStock,
         availableStock: totalStock - reservedStock,
-        supplierCount: suppliers.length,
-        supplierLocations: suppliers.map(s => ({
-          supplierId: s.supplier_id,
-          supplierName: s.supplier_name,
+        fulfillerCount: fulfillers.length,
+        fulfillerLocations: fulfillers.map(s => ({
+          fulfillerId: s.fulfiller_id,
+          fulfillerName: s.fulfiller_name,
           totalStock: s.total_stock,
           reservedStock: s.reserved_stock,
           orderedStock: s.ordered_stock ?? 0,
@@ -480,25 +480,25 @@ async function reindexInventory(esClient: EsClient, errors: string[]): Promise<n
   return indexed;
 }
 
-async function reindexSupplierOrders(esClient: EsClient, errors: string[]): Promise<number> {
+async function reindexFulfillerOrders(esClient: EsClient, errors: string[]): Promise<number> {
   interface OrderRow {
     order_id: CqlUuid;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    supplier_orders: any[] | null;
+    fulfiller_orders: any[] | null;
   }
 
-  const rows = await executeCql<OrderRow>('SELECT order_id, supplier_orders FROM orders');
+  const rows = await executeCql<OrderRow>('SELECT order_id, fulfiller_orders FROM orders');
   let indexed = 0;
 
   for (const row of rows) {
     const orderId = row.order_id.toString();
-    for (const so of row.supplier_orders ?? []) {
+    for (const so of row.fulfiller_orders ?? []) {
       try {
         const doc = {
-          supplierOrderId: so.supplier_order_id,
+          fulfillerOrderId: so.fulfiller_order_id,
           orderId,
-          supplierId: so.supplier_id,
-          supplierName: so.supplier_name,
+          fulfillerId: so.fulfiller_id,
+          fulfillerName: so.fulfiller_name,
           status: so.status,
           items: (so.items ?? []).map((i: { assignment_id: string; variant_id: string; quantity: number }) => ({
             assignmentId: i.assignment_id,
@@ -517,10 +517,10 @@ async function reindexSupplierOrders(esClient: EsClient, errors: string[]): Prom
             note: h.note
           }))
         };
-        await esClient.index({ index: 'supplier_orders', id: so.supplier_order_id, document: doc });
+        await esClient.index({ index: 'fulfiller_orders', id: so.fulfiller_order_id, document: doc });
         indexed++;
       } catch (err) {
-        errors.push(`SupplierOrder ${so.supplier_order_id}: ${err}`);
+        errors.push(`FulfillerOrder ${so.fulfiller_order_id}: ${err}`);
       }
     }
   }

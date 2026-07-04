@@ -2,7 +2,7 @@
  * POST /api/seed-inventory
  *
  * Seed inventory stock for every unique blank_sku in the variants table.
- * Uses InventoryCommandRepository.setSupplierStock() so each write flows
+ * Uses InventoryCommandRepository.setFulfillerStock() so each write flows
  * through the inventory service workflow (CQRS projections + ES sync).
  */
 
@@ -11,8 +11,8 @@ import { executeCql, executeCqlAll } from '@/lib';
 import { InventoryCommandRepository } from '@/temporal/inventory/db/inventory-command-repository';
 
 const DEFAULT_STOCK = 100;
-const SUPPLIER_ID = 'default-supplier';
-const SUPPLIER_NAME = 'Default Supplier';
+const FULFILLER_ID = 'default-fulfiller';
+const FULFILLER_NAME = 'Default Fulfiller';
 
 interface VariantSkuRow {
   blank_sku: string;
@@ -35,7 +35,7 @@ export async function POST() {
       }, { status: 400 });
     }
 
-    // Get the supplier location for default address info
+    // Get the fulfiller location for default address info
     const locations = await executeCql<{
       address1: string;
       city: string;
@@ -44,9 +44,9 @@ export async function POST() {
       country: string;
       cost: number;
     }>(
-      `SELECT address1, city, state, postal_code, country, cost FROM supplier_locations
-       WHERE supplier_id = ? AND location_id = ?`,
-      [SUPPLIER_ID, 'default-warehouse']
+      `SELECT address1, city, state, postal_code, country, cost FROM fulfiller_locations
+       WHERE fulfiller_id = ? AND location_id = ?`,
+      [FULFILLER_ID, 'default-warehouse']
     );
 
     const loc = locations[0] ?? {
@@ -59,13 +59,13 @@ export async function POST() {
     };
 
     // Set stock for each SKU via the command repository.
-    // setSupplierStock writes to inventory_stock_w and signals the
+    // setFulfillerStock writes to inventory_stock_w and signals the
     // inventory-service workflow for CQRS projection + ES sync.
     let seeded = 0;
     for (const blankSku of uniqueSkus) {
-      await InventoryCommandRepository.setSupplierStock(blankSku, {
-        supplierId: SUPPLIER_ID,
-        supplierName: SUPPLIER_NAME,
+      await InventoryCommandRepository.setFulfillerStock(blankSku, {
+        fulfillerId: FULFILLER_ID,
+        fulfillerName: FULFILLER_NAME,
         totalStock: DEFAULT_STOCK,
         cost: loc.cost,
         address1: loc.address1,
@@ -83,7 +83,7 @@ export async function POST() {
       results: {
         uniqueSkus: seeded,
         stockPerSku: DEFAULT_STOCK,
-        supplier: SUPPLIER_ID,
+        fulfiller: FULFILLER_ID,
       },
     });
   } catch (error) {

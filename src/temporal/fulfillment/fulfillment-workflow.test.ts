@@ -1,5 +1,5 @@
 /**
- * Workflow-level tests — parent fulfillment + supplier-order child on one task queue in a
+ * Workflow-level tests — parent fulfillment + fulfiller-order child on one task queue in a
  * time-skipping Temporal test environment via {@link withWorkflowEnv}, activities mocked.
  *
  * Exercises the timer-driven simulation end-to-end: received → submitting →
@@ -23,7 +23,7 @@ const WORKFLOWS_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '
 function makeActivities() {
   return {
     getFeatureFlag: vi.fn(async () => false), // automatic (timer-driven) fulfillment
-    submitSupplierOrder: vi.fn(async () => ({ success: true, supplierOrderId: 'SIM-1' })),
+    submitFulfillerOrder: vi.fn(async () => ({ success: true, fulfillerOrderId: 'SIM-1' })),
     sendShippedEmail: vi.fn(async () => undefined),
     sendDeliveredEmail: vi.fn(async () => undefined),
     transferInventoryReservations: vi.fn(async () => undefined),
@@ -53,11 +53,11 @@ const request: FulfillmentOrderRequest = {
     country: 'US',
   },
   shippingMethod: 'standard',
-  supplierOrders: [
+  fulfillerOrders: [
     {
-      supplierOrderId: 'so-test-1',
-      supplierId: 'simulated',
-      supplierType: 'simulated',
+      fulfillerOrderId: 'so-test-1',
+      fulfillerId: 'simulated',
+      fulfillerType: 'simulated',
       items: [
         { sku: 'SKU-1', productId: 'p1', variantId: 'v1', quantity: 2, unitPrice: 10, title: 'T' },
       ],
@@ -66,14 +66,14 @@ const request: FulfillmentOrderRequest = {
 };
 
 describe('fulfillmentWorkflow (Temporal test env)', () => {
-  it('auto-progresses parent + supplier child to delivered via time-skipped timers', async () => {
+  it('auto-progresses parent + fulfiller child to delivered via time-skipped timers', async () => {
     const activities = makeActivities();
     await withWorkflowEnv(
       [{ taskQueue: FULFILLMENT_TASK_QUEUE, workflowsPath: WORKFLOWS_PATH, activities }],
       async (env) => {
         const handle = await env.client.workflow.start(fulfillmentWorkflow, {
           taskQueue: FULFILLMENT_TASK_QUEUE,
-          // Deterministic ID: the supplier child signals its parent via
+          // Deterministic ID: the fulfiller child signals its parent via
           // buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId).
           ...buildWorkflowStartOptions({
             storeId: DEMO_STORE_ID,
@@ -88,12 +88,12 @@ describe('fulfillmentWorkflow (Temporal test env)', () => {
         // The 15s+15s+15s simulation timers are fast-forwarded by the time-skipping env.
         const result = await handle.result();
         expect(result.status).toBe('delivered');
-        expect(result.supplierOrders).toHaveLength(1);
-        expect(result.supplierOrders[0].status).toBe('delivered');
+        expect(result.fulfillerOrders).toHaveLength(1);
+        expect(result.fulfillerOrders[0].status).toBe('delivered');
 
         // Full pipeline side effects fired
         expect(activities.transferInventoryReservations).toHaveBeenCalled();
-        expect(activities.submitSupplierOrder).toHaveBeenCalled();
+        expect(activities.submitFulfillerOrder).toHaveBeenCalled();
         expect(activities.sendShippedEmail).toHaveBeenCalled();
         expect(activities.sendDeliveredEmail).toHaveBeenCalled();
         expect(activities.fulfillInventoryReservations).toHaveBeenCalled();

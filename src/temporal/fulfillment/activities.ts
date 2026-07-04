@@ -8,7 +8,7 @@
  */
 
 import { proxyActivities } from '@temporalio/workflow';
-import type { Suppliers } from '../contracts';
+import type { Fulfillers } from '../contracts';
 import { Elasticsearch } from '../contracts';
 
 /** Shipment tracking details forwarded to the customer's shipped email. */
@@ -20,7 +20,7 @@ export interface TrackingInfo {
 
 export interface FulfillmentActivities {
   getFeatureFlag(name: string): Promise<boolean>;
-  submitSupplierOrder(request: Suppliers.SupplierOrderInput): Promise<Suppliers.SupplierOrderResult>;
+  submitFulfillerOrder(request: Fulfillers.FulfillerOrderInput): Promise<Fulfillers.FulfillerOrderResult>;
   sendShippedEmail(
     email: string,
     orderId: string,
@@ -30,7 +30,7 @@ export interface FulfillmentActivities {
   sendDeliveredEmail(email: string, orderId: string, confirmationNumber: string): Promise<void>;
   transferInventoryReservations(
     cartId: string,
-    items: Array<{ variantId: string; supplierId: string; quantity: number }>,
+    items: Array<{ variantId: string; fulfillerId: string; quantity: number }>,
   ): Promise<void>;
   fulfillInventoryReservations(cartId: string, items: Array<{ variantId: string }>): Promise<void>;
   releaseInventoryReservations(cartId: string, items: Array<{ variantId: string }>): Promise<void>;
@@ -40,7 +40,7 @@ export interface FulfillmentActivities {
 
 export const {
   getFeatureFlag,
-  submitSupplierOrder,
+  submitFulfillerOrder,
   sendShippedEmail,
   sendDeliveredEmail,
   transferInventoryReservations,

@@ -129,7 +129,7 @@ type TemporalClient = Awaited<ReturnType<typeof getTemporalClient>>;
 /**
  * A query the trace issues: either a contract `QueryDefinition` or a raw query name for
  * defs that live only in a domain module (the fulfiller-order child's
- * `getSupplierOrderState`).
+ * `getFulfillerOrderState`).
  */
 type TraceQuery =
   | typeof OMS.getOrderStateQuery
@@ -345,8 +345,8 @@ const DOMAIN_TRACE: Record<string, { domain: TraceDomain; query: TraceQuery }> =
   checkout: { domain: 'checkout', query: Checkout.getCheckoutStateQuery },
   order: { domain: 'oms', query: OMS.getOrderStateQuery },
   fulfillment: { domain: 'fulfillment', query: Fulfillment.getStatusQuery },
-  // The supplier-order query def lives only in the fulfillment workflow module, so query by name.
-  'fulfiller-order': { domain: 'fulfiller-order', query: 'getSupplierOrderState' },
+  // The fulfiller-order query def lives only in the fulfillment workflow module, so query by name.
+  'fulfiller-order': { domain: 'fulfiller-order', query: 'getFulfillerOrderState' },
 };
 
 /** Journey order for presenting the assembled nodes top-to-bottom. */
@@ -402,7 +402,7 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
   }
 
   // Primary: one visibility query returns every workflow in the journey — including the
-  // checkout and per-supplier children that previously required state hops to discover.
+  // checkout and per-fulfiller children that previously required state hops to discover.
   const correlationId = cartId;
   const listQuery = correlationId
     ? `${SEARCH_ATTRIBUTE_KEYS.correlationId} = '${correlationId}'`

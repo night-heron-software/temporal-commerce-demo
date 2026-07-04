@@ -198,7 +198,7 @@ const processing = oms.transitions(
     onSignal: {
       decide(ctx, update, meta) {
         log.info('[OMS] Received fulfillment status signal', {
-          supplierOrderId: update.supplierOrderId,
+          fulfillerOrderId: update.fulfillerOrderId,
           status: update.status,
           carrier: update.carrier,
           trackingNumber: update.trackingNumber,
@@ -209,8 +209,8 @@ const processing = oms.transitions(
           at: meta.timestamp,
         });
         if (facts.length === 0) {
-          log.warn('[OMS] Received fulfillment status for unknown supplier order', {
-            supplierOrderId: update.supplierOrderId,
+          log.warn('[OMS] Received fulfillment status for unknown fulfiller order', {
+            fulfillerOrderId: update.fulfillerOrderId,
           });
           return { context, next: 'processing' as const };
         }
@@ -235,7 +235,7 @@ const processing = oms.transitions(
           status: state.status,
           statusHistory: state.statusHistory,
           assignments: state.assignments,
-          supplierOrders: state.supplierOrders,
+          fulfillerOrders: state.fulfillerOrders,
         });
       },
     },

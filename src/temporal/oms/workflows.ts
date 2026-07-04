@@ -4,10 +4,10 @@ type CartItem = Cart.CartItem;
 import {
   saveOrderToDatabase,
   updateOrderInDatabase,
-  resolveSupplierAssignments,
+  resolveFulfillerAssignments,
   insertStatusHistoryEntry,
   indexOrder,
-  indexSupplierOrder,
+  indexFulfillerOrder,
   indexCustomer,
   startFulfillmentWorkflow
 } from './activities';
@@ -18,15 +18,15 @@ import {
   OmsStateName,
   OmsWorkflowContext,
   StatusHistoryEntry,
-  SupplierOrder,
+  FulfillerOrder,
   FulfillmentStatusUpdate,
   UpdateStatusSignal,
   CancelOrderSignal,
   SubmitFeedbackSignal
 } from './types';
-import { buildOrderDocument, buildSupplierOrderDocument } from './document-builder';
+import { buildOrderDocument, buildFulfillerOrderDocument } from './document-builder';
 
-import type { FulfillmentSupplierOrderInput, FulfillmentItem } from '../contracts/fulfillment';
+import type { FulfillmentFulfillerOrderInput, FulfillmentItem } from '../contracts/fulfillment';
 
 // Import definitions from the dedicated definitions file
 import {
@@ -74,7 +74,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         }
       ],
       assignments: [],
-      supplierOrders: []
+      fulfillerOrders: []
     }
   };
 
@@ -119,7 +119,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         lastOrderAt: new Date().toISOString()
       });
 
-      // ── AUTO-ASSIGNMENT: Resolve supplier assignments via plugins ──
+      // ── AUTO-ASSIGNMENT: Resolve fulfiller assignments via plugins ──
       const lineItems: OrderLineItem[] = input.order.items.map((item) => {
         // CartItem may carry extra fields at runtime (productId, title) from checkout
         const ext = item as CartItem & { productId?: string; title?: string; variantTitle?: string };
@@ -135,8 +135,8 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         } as OrderLineItem;
       });
 
-      log.info('[OMS] Resolving supplier assignments', { itemCount: lineItems.length });
-      const assignments = await resolveSupplierAssignments(lineItems, { preferredSuppliers: [] });
+      log.info('[OMS] Resolving fulfiller assignments', { itemCount: lineItems.length });
+      const assignments = await resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
 
       // Auto-assign all items based on plugin resolution
       for (let i = 0; i < input.order.items.length; i++) {
@@ -147,15 +147,15 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
           assignmentId: `asg-${uuid4().slice(0, 8)}`,
           lineItemId: item.lineItemId,
           variantId: item.variantId,
-          supplierId: assignment.supplierId,
-          supplierName: assignment.supplierName,
+          fulfillerId: assignment.fulfillerId,
+          fulfillerName: assignment.fulfillerName,
           quantity: item.quantity,
           status: 'assigned'
         });
       }
 
       const simulatedCount = state.assignments.filter(
-        (a) => a.supplierId === 'default-supplier' || a.supplierId === 'simulated'
+        (a) => a.fulfillerId === 'default-fulfiller' || a.fulfillerId === 'simulated'
       ).length;
       log.info('[OMS] Auto-assignment complete', {
         totalAssignments: state.assignments.length,
@@ -185,7 +185,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       await triggerFulfillment(state, input, 'system');
       log.info('[OMS] Fulfillment triggered, entering main loop', {
         status: state.status,
-        supplierOrderCount: state.supplierOrders.length
+        fulfillerOrderCount: state.fulfillerOrders.length
       });
 
       return { context: startCtx, nextState: 'processing' as const };
@@ -196,15 +196,15 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     // Projection sync after every transition (replaces the old dirty-flag loop).
     onTransition: async (_from, _to, _event, currentCtx: OmsWorkflowContext) => {
       await indexOrder(getOrderDocument(currentCtx.state));
-      for (const so of currentCtx.state.supplierOrders) {
-        await indexSupplierOrder(buildSupplierOrderDocument(so));
+      for (const so of currentCtx.state.fulfillerOrders) {
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so));
       }
     },
     onTerminal: async (finalCtx: OmsWorkflowContext) => {
       log.info('[OMS] Reached terminal state', { finalStatus: finalCtx.state.status });
       await indexOrder(getOrderDocument(finalCtx.state));
-      for (const so of finalCtx.state.supplierOrders) {
-        await indexSupplierOrder(buildSupplierOrderDocument(so));
+      for (const so of finalCtx.state.fulfillerOrders) {
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so));
       }
     }
   };
@@ -241,7 +241,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
 /**
  * Trigger fulfillment for all assigned items.
- * Groups assignments by supplier, builds SupplierOrder records,
+ * Groups assignments by fulfiller, builds FulfillerOrder records,
  * then starts a standalone fulfillment workflow via activity.
  */
 async function triggerFulfillment(
@@ -249,31 +249,31 @@ async function triggerFulfillment(
   input: OrderWorkflowInput,
   updatedBy: 'admin' | 'system'
 ): Promise<void> {
-  // Group assignments by supplierId
-  const bySupplier: Record<string, typeof state.assignments> = {};
+  // Group assignments by fulfillerId
+  const byFulfiller: Record<string, typeof state.assignments> = {};
   for (const assignment of state.assignments) {
-    if (!bySupplier[assignment.supplierId]) {
-      bySupplier[assignment.supplierId] = [];
+    if (!byFulfiller[assignment.fulfillerId]) {
+      byFulfiller[assignment.fulfillerId] = [];
     }
-    bySupplier[assignment.supplierId].push(assignment);
+    byFulfiller[assignment.fulfillerId].push(assignment);
   }
 
-  log.info('[OMS] triggerFulfillment grouping', { supplierIds: Object.keys(bySupplier) });
+  log.info('[OMS] triggerFulfillment grouping', { fulfillerIds: Object.keys(byFulfiller) });
 
-  // Build SupplierOrder records and fulfillment inputs
-  const fulfillmentSupplierOrders: FulfillmentSupplierOrderInput[] = [];
+  // Build FulfillerOrder records and fulfillment inputs
+  const fulfillmentFulfillerOrders: FulfillmentFulfillerOrderInput[] = [];
 
-  for (const [supplierId, assignments] of Object.entries(bySupplier)) {
-    const supplierOrderId = `so-${uuid4().slice(0, 8)}`;
-    const isSimulated = supplierId === 'default-supplier' || supplierId === 'simulated';
-    log.info('[OMS] Creating supplier order', { supplierOrderId, supplierId, itemCount: assignments.length, isSimulated });
+  for (const [fulfillerId, assignments] of Object.entries(byFulfiller)) {
+    const fulfillerOrderId = `so-${uuid4().slice(0, 8)}`;
+    const isSimulated = fulfillerId === 'default-fulfiller' || fulfillerId === 'simulated';
+    log.info('[OMS] Creating fulfiller order', { fulfillerOrderId, fulfillerId, itemCount: assignments.length, isSimulated });
 
-    // Build OMS SupplierOrder (stays in OMS state)
-    const supplierOrder: SupplierOrder = {
-      supplierOrderId,
+    // Build OMS FulfillerOrder (stays in OMS state)
+    const fulfillerOrder: FulfillerOrder = {
+      fulfillerOrderId,
       orderId: input.order.orderId,
-      supplierId,
-      supplierName: assignments[0].supplierName || supplierId,
+      fulfillerId,
+      fulfillerName: assignments[0].fulfillerName || fulfillerId,
       status: 'pending',
       items: assignments.map((a) => ({
         assignmentId: a.assignmentId,
@@ -286,18 +286,18 @@ async function triggerFulfillment(
         {
           status: 'pending',
           timestamp: new Date().toISOString(),
-          note: 'Supplier order created'
+          note: 'Fulfiller order created'
         }
       ]
     };
-    state.supplierOrders.push(supplierOrder);
+    state.fulfillerOrders.push(fulfillerOrder);
 
-    // Index supplier order to Elasticsearch
-    await indexSupplierOrder(buildSupplierOrderDocument(supplierOrder));
+    // Index fulfiller order to Elasticsearch
+    await indexFulfillerOrder(buildFulfillerOrderDocument(fulfillerOrder));
 
     // Update assignment references
     for (const assignment of assignments) {
-      assignment.supplierOrderId = supplierOrderId;
+      assignment.fulfillerOrderId = fulfillerOrderId;
       assignment.status = 'fulfilled';
     }
 
@@ -314,10 +314,10 @@ async function triggerFulfillment(
       };
     });
 
-    fulfillmentSupplierOrders.push({
-      supplierOrderId,
-      supplierId,
-      supplierType: 'simulated',
+    fulfillmentFulfillerOrders.push({
+      fulfillerOrderId,
+      fulfillerId,
+      fulfillerType: 'simulated',
       items: fulfillmentItems
     });
   }
@@ -342,32 +342,32 @@ async function triggerFulfillment(
       country: input.order.shippingAddress.country
     },
     shippingMethod: 'standard',
-    supplierOrders: fulfillmentSupplierOrders
+    fulfillerOrders: fulfillmentFulfillerOrders
   };
 
   log.info('[OMS] Starting fulfillment workflow via activity', {
     orderId: input.order.orderId,
-    supplierOrderCount: fulfillmentSupplierOrders.length
+    fulfillerOrderCount: fulfillmentFulfillerOrders.length
   });
 
   await startFulfillmentWorkflow(fulfillmentInput);
 
-  // Mark all supplier orders as processing
-  for (const supplierOrder of state.supplierOrders) {
-    supplierOrder.status = 'processing';
-    supplierOrder.statusHistory.push({
+  // Mark all fulfiller orders as processing
+  for (const fulfillerOrder of state.fulfillerOrders) {
+    fulfillerOrder.status = 'processing';
+    fulfillerOrder.statusHistory.push({
       status: 'processing',
       timestamp: new Date().toISOString(),
       note: 'Submitted to fulfillment workflow'
     });
-    await indexSupplierOrder(buildSupplierOrderDocument(supplierOrder));
+    await indexFulfillerOrder(buildFulfillerOrderDocument(fulfillerOrder));
   }
 
   state.status = 'processing';
   const processingEntry: StatusHistoryEntry = {
     status: 'processing',
     timestamp: new Date().toISOString(),
-    note: `Fulfilled via ${Object.keys(bySupplier).length} supplier(s)`,
+    note: `Fulfilled via ${Object.keys(byFulfiller).length} fulfiller(s)`,
     updatedBy
   };
   state.statusHistory.push(processingEntry);
@@ -377,7 +377,7 @@ async function triggerFulfillment(
     status: state.status,
     statusHistory: state.statusHistory,
     assignments: state.assignments,
-    supplierOrders: state.supplierOrders
+    fulfillerOrders: state.fulfillerOrders
   });
 
   await indexOrder(buildOrderDocument(input.order, state, input.customerEmail));

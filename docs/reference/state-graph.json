@@ -430,6 +430,222 @@
     },
     {
       "domain": "fulfillment",
+      "registry": "FULFILLER_ORDER_STATES",
+      "source": "src/temporal/fulfillment/fulfiller-states.ts",
+      "initialState": "received",
+      "terminals": [
+        "cancelled",
+        "delivered",
+        "failed"
+      ],
+      "states": [
+        {
+          "name": "received",
+          "doc": "received — book-keeping hop; marks the order as submitting.",
+          "timeout": "1 millisecond",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "submitting"
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "submitting",
+          "doc": "submitting — submits the order to the (simulated) fulfiller.",
+          "timeout": "1 millisecond",
+          "transitional": false,
+          "hasPrepare": true,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "in_production",
+              "prepareActivities": [
+                "submitFulfillerOrder"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "in_production",
+          "doc": "in_production — auto-ships on timeout (unless manual mode); accepts fulfiller updates.",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "in_production",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "shipped",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "shipped",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:delivered",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:failed",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "in_production",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "shipped",
+          "doc": "shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller updates.",
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": true,
+          "transitions": [
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "shipped",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:delivered",
+              "conditions": [
+                "ctx.manualMode"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:cancelled",
+              "signalKinds": [
+                "cancel"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "shipped",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:delivered",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "__terminal:failed",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            },
+            {
+              "on": "signal",
+              "kind": "signal",
+              "to": "in_production",
+              "finalizeActivities": [
+                "indexNewestShipment"
+              ],
+              "signalKinds": [
+                "fulfillerStatus"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "domain": "fulfillment",
       "registry": "FULFILLMENT_STATES",
       "source": "src/temporal/fulfillment/states.ts",
       "initialState": "received",
@@ -509,222 +725,6 @@
               ],
               "signalKinds": [
                 "childStatus"
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "domain": "fulfillment",
-      "registry": "SUPPLIER_ORDER_STATES",
-      "source": "src/temporal/fulfillment/supplier-states.ts",
-      "initialState": "received",
-      "terminals": [
-        "cancelled",
-        "delivered",
-        "failed"
-      ],
-      "states": [
-        {
-          "name": "received",
-          "doc": "received — book-keeping hop; marks the order as submitting.",
-          "timeout": "1 millisecond",
-          "transitional": false,
-          "hasPrepare": false,
-          "hasFinalize": false,
-          "transitions": [
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "submitting"
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
-            }
-          ]
-        },
-        {
-          "name": "submitting",
-          "doc": "submitting — submits the order to the (simulated) supplier.",
-          "timeout": "1 millisecond",
-          "transitional": false,
-          "hasPrepare": true,
-          "hasFinalize": false,
-          "transitions": [
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "in_production",
-              "prepareActivities": [
-                "submitSupplierOrder"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
-            }
-          ]
-        },
-        {
-          "name": "in_production",
-          "doc": "in_production — auto-ships on timeout (unless manual mode); accepts supplier updates.",
-          "transitional": false,
-          "hasPrepare": false,
-          "hasFinalize": true,
-          "transitions": [
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "in_production",
-              "conditions": [
-                "ctx.manualMode"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "shipped",
-              "conditions": [
-                "ctx.manualMode"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipped",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:delivered",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:failed",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "in_production",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
-              ]
-            }
-          ]
-        },
-        {
-          "name": "shipped",
-          "doc": "shipped — auto-delivers on timeout (unless manual mode); accepts supplier updates.",
-          "transitional": false,
-          "hasPrepare": false,
-          "hasFinalize": true,
-          "transitions": [
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "shipped",
-              "conditions": [
-                "ctx.manualMode"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "__terminal:delivered",
-              "conditions": [
-                "ctx.manualMode"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipped",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:delivered",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:failed",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "in_production",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "supplierStatus"
               ]
             }
           ]

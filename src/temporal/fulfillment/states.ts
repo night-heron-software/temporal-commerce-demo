@@ -1,7 +1,7 @@
 /**
  * Fulfillment states — the shell around the pure fulfillment Decider.
  *
- * The parent fulfillment workflow is entirely signal-driven: child supplier-order
+ * The parent fulfillment workflow is entirely signal-driven: child fulfiller-order
  * workflows report status via the `childStatus` signal; OMS can `cancel`. Routing to
  * a terminal happens here from the decider-aggregated status.
  */

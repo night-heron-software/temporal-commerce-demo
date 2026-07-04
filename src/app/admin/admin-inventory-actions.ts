@@ -6,8 +6,8 @@ import { executeCql } from '@/lib';
 
 export interface StockSummaryRow {
   blankSku: string;
-  supplierId: string;
-  supplierName: string;
+  fulfillerId: string;
+  fulfillerName: string;
   totalStock: number;
   reservedStock: number;
   availableStock: number;
@@ -22,22 +22,22 @@ export async function getInventoryStock(): Promise<{
   try {
     interface DbRow {
       blank_sku: string;
-      supplier_id: string;
-      supplier_name: string;
+      fulfiller_id: string;
+      fulfiller_name: string;
       total_stock: number;
       reserved_stock: number;
       cost: number;
     }
 
     const rows = await executeCql<DbRow>(
-      `SELECT blank_sku, supplier_id, supplier_name, total_stock, reserved_stock, cost
+      `SELECT blank_sku, fulfiller_id, fulfiller_name, total_stock, reserved_stock, cost
        FROM inventory_stock_w`
     );
 
     const data: StockSummaryRow[] = rows.map(r => ({
       blankSku: r.blank_sku,
-      supplierId: r.supplier_id,
-      supplierName: r.supplier_name,
+      fulfillerId: r.fulfiller_id,
+      fulfillerName: r.fulfiller_name,
       totalStock: r.total_stock,
       reservedStock: r.reserved_stock,
       availableStock: r.total_stock - r.reserved_stock,
@@ -60,7 +60,7 @@ export interface ReservationRow {
   blankSku: string;
   cartId: string;
   variantId: string;
-  supplierId: string | null;
+  fulfillerId: string | null;
   quantity: number;
   status: string;
   expiresAt: string | null;
@@ -78,7 +78,7 @@ export async function getInventoryReservations(): Promise<{
       blank_sku: string;
       cart_id: string;
       variant_id: string;
-      supplier_id: string | null;
+      fulfiller_id: string | null;
       quantity: number;
       status: string;
       expires_at: Date | null;
@@ -86,7 +86,7 @@ export async function getInventoryReservations(): Promise<{
     }
 
     const rows = await executeCql<DbRow>(
-      `SELECT reservation_id, blank_sku, cart_id, variant_id, supplier_id,
+      `SELECT reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
               quantity, status, expires_at, created_at
        FROM inventory_reservations_w`
     );
@@ -96,7 +96,7 @@ export async function getInventoryReservations(): Promise<{
       blankSku: r.blank_sku,
       cartId: r.cart_id,
       variantId: r.variant_id,
-      supplierId: r.supplier_id,
+      fulfillerId: r.fulfiller_id,
       quantity: r.quantity,
       status: r.status,
       expiresAt: r.expires_at ? r.expires_at.toISOString() : null,

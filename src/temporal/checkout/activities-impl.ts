@@ -317,7 +317,7 @@ export async function releaseReservations(reservations: ReservationInfo[]): Prom
 
 /**
  * Cancel confirmed reservations (order cancelled after payment).
- * Decrements reserved_stock from the assigned supplier and sets status to CANCELLED.
+ * Decrements reserved_stock from the assigned fulfiller and sets status to CANCELLED.
  */
 export async function cancelReservations(reservations: ReservationInfo[]): Promise<void> {
   if (reservations.length === 0) return;

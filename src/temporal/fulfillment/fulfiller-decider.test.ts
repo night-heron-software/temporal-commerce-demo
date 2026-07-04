@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { decide, evolve } from './supplier-decider';
-import type { SupplierOrderCommand } from './supplier-decider';
-import type { SupplierOrderWorkflowContext } from './supplier-workflows';
-import type { FulfillmentSupplierOrderState } from './types';
+import { decide, evolve } from './fulfiller-decider';
+import type { FulfillerOrderCommand } from './fulfiller-decider';
+import type { FulfillerOrderWorkflowContext } from './fulfiller-workflows';
+import type { FulfillmentFulfillerOrderState } from './types';
 
 function makeCtx(
-  soOverrides: Partial<FulfillmentSupplierOrderState> = {},
-): SupplierOrderWorkflowContext {
+  soOverrides: Partial<FulfillmentFulfillerOrderState> = {},
+): FulfillerOrderWorkflowContext {
   return {
     orderId: 'o-1',
     cartId: 'c-1',
@@ -24,27 +24,27 @@ function makeCtx(
       country: 'US',
     },
     so: {
-      supplierOrderId: 'so-1',
-      supplierId: 'simulated',
-      supplierType: 'simulated',
+      fulfillerOrderId: 'so-1',
+      fulfillerId: 'simulated',
+      fulfillerType: 'simulated',
       status: 'received',
       items: [
         { sku: 'SKU-1', productId: 'p1', variantId: 'v1', quantity: 1, unitPrice: 10, title: 'T', status: 'pending' },
       ],
       statusHistory: [],
       ...soOverrides,
-    } as FulfillmentSupplierOrderState,
+    } as FulfillmentFulfillerOrderState,
     manualMode: false,
   };
 }
 
-const apply = (ctx: SupplierOrderWorkflowContext, cmd: SupplierOrderCommand) =>
+const apply = (ctx: FulfillerOrderWorkflowContext, cmd: FulfillerOrderCommand) =>
   decide(cmd, ctx).reduce(evolve, ctx);
 
-describe('supplier-order decide/evolve', () => {
+describe('fulfiller-order decide/evolve', () => {
   it('submitted records the external id and moves items to in_production', () => {
-    const ctx = apply(makeCtx(), { type: 'submitted', supplierExternalId: 'ext-1', at: 't1' });
-    expect(ctx.so.supplierExternalId).toBe('ext-1');
+    const ctx = apply(makeCtx(), { type: 'submitted', fulfillerExternalId: 'ext-1', at: 't1' });
+    expect(ctx.so.fulfillerExternalId).toBe('ext-1');
     expect(ctx.so.submittedAt).toBe('t1');
     expect(ctx.so.status).toBe('in_production');
     expect(ctx.so.items[0].status).toBe('in_production');
@@ -71,11 +71,11 @@ describe('supplier-order decide/evolve', () => {
     expect(ctx.so.items[0].status).toBe('delivered');
   });
 
-  it('supplierStatus shipped appends a shipment from the update payload', () => {
+  it('fulfillerStatus shipped appends a shipment from the update payload', () => {
     const ctx = apply(makeCtx({ status: 'in_production' }), {
-      type: 'supplierStatus',
+      type: 'fulfillerStatus',
       update: {
-        supplierOrderId: 'so-1',
+        fulfillerOrderId: 'so-1',
         status: 'shipped',
         timestamp: 't4',
         shipmentInfo: {
@@ -91,15 +91,15 @@ describe('supplier-order decide/evolve', () => {
     expect(ctx.so.carrier).toBe('UPS');
   });
 
-  it('supplierStatus delivered stamps the newest shipment', () => {
+  it('fulfillerStatus delivered stamps the newest shipment', () => {
     const shipped = apply(makeCtx({ status: 'in_production' }), {
       type: 'autoShipped',
       trackingNumber: 'SIM1',
       at: 't2',
     });
     const ctx = apply(shipped, {
-      type: 'supplierStatus',
-      update: { supplierOrderId: 'so-1', status: 'delivered', timestamp: 't5' } as never,
+      type: 'fulfillerStatus',
+      update: { fulfillerOrderId: 'so-1', status: 'delivered', timestamp: 't5' } as never,
     });
     expect(ctx.so.status).toBe('delivered');
     expect(ctx.so.shipments![0].deliveredAt).toBe('t5');

@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { decide, evolve } from './oms-decider';
 import type { OmsCommand } from './oms-decider';
-import type { OrderState, SupplierOrder, FulfillmentStatusUpdate } from './types';
+import type { OrderState, FulfillerOrder, FulfillmentStatusUpdate } from './types';
 
-function makeSupplierOrder(overrides: Partial<SupplierOrder> = {}): SupplierOrder {
+function makeFulfillerOrder(overrides: Partial<FulfillerOrder> = {}): FulfillerOrder {
   return {
-    supplierOrderId: 'so-1',
+    fulfillerOrderId: 'so-1',
     orderId: 'o-1',
-    supplierId: 'simulated',
-    supplierName: 'Simulated',
+    fulfillerId: 'simulated',
+    fulfillerName: 'Simulated',
     status: 'processing',
     items: [{ assignmentId: 'asg-1', variantId: 'v1', quantity: 1 }],
     createdAt: 't0',
@@ -28,13 +28,13 @@ function makeState(overrides: Partial<OrderState> = {}): OrderState {
         assignmentId: 'asg-1',
         lineItemId: 'li-1',
         variantId: 'v1',
-        supplierId: 'simulated',
+        fulfillerId: 'simulated',
         quantity: 1,
         status: 'fulfilled',
-        supplierOrderId: 'so-1',
+        fulfillerOrderId: 'so-1',
       },
     ],
-    supplierOrders: [makeSupplierOrder()],
+    fulfillerOrders: [makeFulfillerOrder()],
     ...overrides,
   };
 }
@@ -43,7 +43,7 @@ const apply = (state: OrderState, cmd: OmsCommand): OrderState =>
   decide(cmd, state).reduce(evolve, state);
 
 const fulfillmentUpdate = (over: Partial<FulfillmentStatusUpdate> = {}): FulfillmentStatusUpdate => ({
-  supplierOrderId: 'so-1',
+  fulfillerOrderId: 'so-1',
   status: 'shipped',
   carrier: 'UPS',
   trackingNumber: '1Z999',
@@ -85,13 +85,13 @@ describe('oms decide/evolve — admin/customer commands', () => {
 });
 
 describe('oms decide/evolve — fulfillment status aggregation', () => {
-  it('mirrors the supplier order and its assignments', () => {
+  it('mirrors the fulfiller order and its assignments', () => {
     const state = apply(makeState(), {
       type: 'fulfillmentStatusReported',
       update: fulfillmentUpdate(),
       at: 't1',
     });
-    const so = state.supplierOrders[0];
+    const so = state.fulfillerOrders[0];
     expect(so.status).toBe('shipped');
     expect(so.carrier).toBe('UPS');
     expect(so.trackingNumber).toBe('1Z999');
@@ -100,43 +100,43 @@ describe('oms decide/evolve — fulfillment status aggregation', () => {
     expect(state.assignments[0].carrier).toBe('UPS');
   });
 
-  it('an unknown supplier order produces no facts', () => {
+  it('an unknown fulfiller order produces no facts', () => {
     expect(
       decide(
-        { type: 'fulfillmentStatusReported', update: fulfillmentUpdate({ supplierOrderId: 'nope' }), at: 't1' },
+        { type: 'fulfillmentStatusReported', update: fulfillmentUpdate({ fulfillerOrderId: 'nope' }), at: 't1' },
         makeState(),
       ),
     ).toEqual([]);
   });
 
-  it('all supplier orders shipped promotes the order to shipped', () => {
+  it('all fulfiller orders shipped promotes the order to shipped', () => {
     const state = apply(makeState(), {
       type: 'fulfillmentStatusReported',
       update: fulfillmentUpdate({ status: 'shipped' }),
       at: 't1',
     });
     expect(state.status).toBe('shipped');
-    expect(state.statusHistory.at(-1)).toMatchObject({ status: 'shipped', note: 'All supplier orders shipped' });
+    expect(state.statusHistory.at(-1)).toMatchObject({ status: 'shipped', note: 'All fulfiller orders shipped' });
   });
 
-  it('a shipped supplier order does NOT promote while another is still processing', () => {
+  it('a shipped fulfiller order does NOT promote while another is still processing', () => {
     const state = apply(
       makeState({
-        supplierOrders: [makeSupplierOrder(), makeSupplierOrder({ supplierOrderId: 'so-2', status: 'processing' })],
+        fulfillerOrders: [makeFulfillerOrder(), makeFulfillerOrder({ fulfillerOrderId: 'so-2', status: 'processing' })],
       }),
       { type: 'fulfillmentStatusReported', update: fulfillmentUpdate({ status: 'shipped' }), at: 't1' },
     );
     expect(state.status).toBe('processing');
   });
 
-  it('all supplier orders delivered promotes the order to delivered', () => {
+  it('all fulfiller orders delivered promotes the order to delivered', () => {
     const state = apply(
-      makeState({ status: 'shipped', supplierOrders: [makeSupplierOrder({ status: 'shipped' })] }),
+      makeState({ status: 'shipped', fulfillerOrders: [makeFulfillerOrder({ status: 'shipped' })] }),
       { type: 'fulfillmentStatusReported', update: fulfillmentUpdate({ status: 'delivered' }), at: 't2' },
     );
     expect(state.status).toBe('delivered');
     expect(state.deliveredAt).toBe('t2');
-    expect(state.supplierOrders[0].status).toBe('delivered');
+    expect(state.fulfillerOrders[0].status).toBe('delivered');
     expect(state.assignments[0].status).toBe('delivered');
   });
 });

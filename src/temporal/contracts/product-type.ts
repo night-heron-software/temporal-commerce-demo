@@ -25,27 +25,27 @@ export interface VariantIdentity {
   productType: string;
 }
 
-/** Supplier metadata passed to plugin methods. */
-export interface SupplierInfo {
-  supplierId: string;
-  supplierName: string;
-  supplierType: string;
+/** Fulfiller metadata passed to plugin methods. */
+export interface FulfillerInfo {
+  fulfillerId: string;
+  fulfillerName: string;
+  fulfillerType: string;
 }
 
-/** Context for supplier assignment resolution. */
-export interface SupplierResolutionContext {
-  preferredSuppliers: string[];
+/** Context for fulfiller assignment resolution. */
+export interface FulfillerResolutionContext {
+  preferredFulfillers: string[];
 }
 
-/** Result of supplier assignment resolution. */
-export interface SupplierAssignment {
-  supplierId: string;
-  supplierType: string;
-  supplierName: string;
+/** Result of fulfiller assignment resolution. */
+export interface FulfillerAssignment {
+  fulfillerId: string;
+  fulfillerType: string;
+  fulfillerName: string;
   metadata?: Record<string, unknown>;
 }
 
-/** Line item representation for plugin supplier resolution. */
+/** Line item representation for plugin fulfiller resolution. */
 export interface OrderLineItem {
   lineItemId: string;
   variantId: string;
@@ -63,8 +63,8 @@ export interface FulfillmentPayloadContext {
   shippingMethod: string;
 }
 
-/** Opaque supplier order payload built by plugins. */
-export interface SupplierOrderPayload {
+/** Opaque fulfiller order payload built by plugins. */
+export interface FulfillerOrderPayload {
   [key: string]: unknown;
 }
 
@@ -124,13 +124,13 @@ export interface ProductTypePlugin {
   // ─── Fulfillment ─────────────────────────────────────────────
 
   /**
-   * Resolve which supplier(s) should fulfill a given item.
+   * Resolve which fulfiller(s) should fulfill a given item.
    * Called by OMS during auto-assignment.
    */
-  resolveSupplierAssignment(
+  resolveFulfillerAssignment(
     item: OrderLineItem,
-    context: SupplierResolutionContext
-  ): Promise<SupplierAssignment[]>;
+    context: FulfillerResolutionContext
+  ): Promise<FulfillerAssignment[]>;
 
   /**
    * The Temporal workflow type name for this product type's fulfillment strategy.
@@ -139,16 +139,16 @@ export interface ProductTypePlugin {
   readonly fulfillmentWorkflowType: string | null;
 
   /**
-   * Build the supplier-specific fulfillment request payload.
+   * Build the fulfiller-specific fulfillment request payload.
    * Handles things like:
    * - POD: design file resolution, geometric layout, blueprint mapping
-   * - Dropship: supplier PO construction
+   * - Dropship: fulfiller PO construction
    * - Digital: download link generation
    */
   buildFulfillmentPayload(
     item: FulfillmentItem,
     context: FulfillmentPayloadContext
-  ): Promise<SupplierOrderPayload>;
+  ): Promise<FulfillerOrderPayload>;
 
   // ─── Inventory ───────────────────────────────────────────────
 
@@ -156,20 +156,20 @@ export interface ProductTypePlugin {
    * Inventory strategy for this product type.
    *
    * - 'tracked': Real stock counts managed per-SKU (physical warehouse)
-   * - 'sentinel': High constant stock (POD — always available if supplier is active)
+   * - 'sentinel': High constant stock (POD — always available if fulfiller is active)
    * - 'unlimited': No inventory tracking (digital products)
-   * - 'external': Defer to external supplier API for availability
+   * - 'external': Defer to external fulfiller API for availability
    */
   readonly inventoryStrategy: 'tracked' | 'sentinel' | 'unlimited' | 'external';
 
   /**
    * Build the inventory workflow ID for a given variant.
-   * POD uses composite IDs like `inventory-supplier-GILDAN64000-navy-L`.
+   * POD uses composite IDs like `inventory-fulfiller-GILDAN64000-navy-L`.
    * Physical warehouse uses `inventory-warehouse-{warehouseId}-{sku}`.
    */
   buildInventoryWorkflowId(
     variant: VariantIdentity,
-    supplierInfo: SupplierInfo
+    fulfillerInfo: FulfillerInfo
   ): string;
 
   /**
@@ -178,7 +178,7 @@ export interface ProductTypePlugin {
    */
   getInitialStockLevel(
     variant: VariantIdentity,
-    supplierInfo: SupplierInfo
+    fulfillerInfo: FulfillerInfo
   ): Promise<StockSeedParams>;
 
   // ─── Catalog & Presentation ──────────────────────────────────
@@ -225,7 +225,7 @@ export interface ProductTypePlugin {
 
   /**
    * Calculate the landed cost for a fulfillment item.
-   * Includes base cost, shipping, and any supplier surcharges.
+   * Includes base cost, shipping, and any fulfiller surcharges.
    */
   calculateLandedCost(
     item: FulfillmentItem,
@@ -236,7 +236,7 @@ export interface ProductTypePlugin {
 
   /**
    * If this product type supports background catalog synchronization
-   * from an external source (e.g., supplier catalog import),
+   * from an external source (e.g., fulfiller catalog import),
    * return the workflow type and task queue for the sync process.
    */
   readonly catalogSyncWorkflow?: {

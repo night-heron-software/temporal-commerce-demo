@@ -7,21 +7,21 @@
  * Pure and infrastructure-free: timestamps arrive on the command (the shell passes the
  * driver's deterministic `meta.timestamp`), never from the clock.
  */
-import type { FulfillmentWorkflowState, FulfillmentSupplierOrderState } from './types';
+import type { FulfillmentWorkflowState, FulfillmentFulfillerOrderState } from './types';
 
 export type FulfillmentCommand =
   | { type: 'cancel'; at: string }
-  | { type: 'childStatusReported'; update: FulfillmentSupplierOrderState; at: string };
+  | { type: 'childStatusReported'; update: FulfillmentFulfillerOrderState; at: string };
 
 export type FulfillmentFact =
   | { type: 'FulfillmentCancelled'; at: string }
-  | { type: 'SupplierOrderReported'; update: FulfillmentSupplierOrderState; at: string };
+  | { type: 'FulfillerOrderReported'; update: FulfillmentFulfillerOrderState; at: string };
 
-/** Aggregate the parent status from the supplier orders' statuses. */
+/** Aggregate the parent status from the fulfiller orders' statuses. */
 export function aggregateStatus(
   state: FulfillmentWorkflowState,
 ): FulfillmentWorkflowState['status'] {
-  const statuses = state.supplierOrders.map((so) => so.status);
+  const statuses = state.fulfillerOrders.map((so) => so.status);
 
   if (statuses.every((s) => s === 'delivered')) return 'delivered';
   if (statuses.every((s) => s === 'cancelled' || s === 'failed')) return 'failed';
@@ -33,7 +33,7 @@ export function aggregateStatus(
 function copyState(state: Readonly<FulfillmentWorkflowState>): FulfillmentWorkflowState {
   return {
     ...state,
-    supplierOrders: state.supplierOrders.map((so) => ({
+    fulfillerOrders: state.fulfillerOrders.map((so) => ({
       ...so,
       items: so.items.map((i) => ({ ...i })),
       shipments: so.shipments ? so.shipments.map((s) => ({ ...s })) : undefined,
@@ -49,7 +49,7 @@ export function decide(
     case 'cancel':
       return [{ type: 'FulfillmentCancelled', at: command.at }];
     case 'childStatusReported':
-      return [{ type: 'SupplierOrderReported', update: command.update, at: command.at }];
+      return [{ type: 'FulfillerOrderReported', update: command.update, at: command.at }];
     default:
       return [];
   }
@@ -64,15 +64,15 @@ export function evolve(
     case 'FulfillmentCancelled':
       draft.status = 'cancelled';
       draft.updatedAt = fact.at;
-      for (const so of draft.supplierOrders) {
+      for (const so of draft.fulfillerOrders) {
         so.status = 'cancelled';
         so.items.forEach((i) => (i.status = 'cancelled'));
       }
       return draft;
 
-    case 'SupplierOrderReported':
-      draft.supplierOrders = draft.supplierOrders.map((so) =>
-        so.supplierOrderId === fact.update.supplierOrderId ? fact.update : so,
+    case 'FulfillerOrderReported':
+      draft.fulfillerOrders = draft.fulfillerOrders.map((so) =>
+        so.fulfillerOrderId === fact.update.fulfillerOrderId ? fact.update : so,
       );
       draft.status = aggregateStatus(draft);
       draft.updatedAt = fact.at;

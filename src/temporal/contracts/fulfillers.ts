@@ -1,11 +1,11 @@
 /**
- * Supplier Contracts
+ * Fulfiller Contracts
  *
- * Supplier-agnostic types for managing catalogs, designs, orders, inventory,
- * and webhooks across any supplier.
+ * Fulfiller-agnostic types for managing catalogs, designs, orders, inventory,
+ * and webhooks across any fulfiller.
  *
- * NOTE: POD-specific adapter interfaces (PODSupplierAdapter) have been removed
- * from contracts. Only the generic SupplierAdapter interface is defined here.
+ * NOTE: POD-specific adapter interfaces (PODFulfillerAdapter) have been removed
+ * from contracts. Only the generic FulfillerAdapter interface is defined here.
  */
 
 // ============================================================================
@@ -15,8 +15,8 @@
 export interface CatalogItem {
   catalogItemId: string;
   productId: string;
-  supplierType: string;
-  supplierItemId: string;
+  fulfillerType: string;
+  fulfillerItemId: string;
   sku: string;
   name: string;
   brand?: string;
@@ -24,7 +24,7 @@ export interface CatalogItem {
   options: CatalogOption[];
   imageUrl?: string;        // GCS URL
   localImageUrl?: string;   // local /images/... URL
-  originalImageUrl?: string;  // Supplier CDN URL before GCS rewrite
+  originalImageUrl?: string;  // Fulfiller CDN URL before GCS rewrite
   printAreas: PrintAreaSpec[];
   blankCost: number; // cents
   inStock: boolean;
@@ -90,20 +90,20 @@ export interface PrintAreaCost {
 // Orders
 // ============================================================================
 
-export interface SupplierOrderRequest {
+export interface FulfillerOrderRequest {
   externalOrderId: string;
-  lineItems: SupplierOrderLineItem[];
+  lineItems: FulfillerOrderLineItem[];
   shippingMethod: string;
-  shippingAddress: SupplierShippingAddress;
+  shippingAddress: FulfillerShippingAddress;
   testOrder?: boolean;
 }
 
-export interface SupplierOrderLineItem {
+export interface FulfillerOrderLineItem {
   sku: string;
   quantity: number;
   orderItemId: string;
   printFiles: PrintFile[];
-  supplierMetadata?: Record<string, unknown>;
+  fulfillerMetadata?: Record<string, unknown>;
 }
 
 export interface PrintFile {
@@ -115,7 +115,7 @@ export interface PrintFile {
   angle?: number; // degrees
 }
 
-export interface SupplierShippingAddress {
+export interface FulfillerShippingAddress {
   firstName: string;
   lastName: string;
   email: string;
@@ -137,9 +137,9 @@ export type DynamicOrderStatus =
   | 'cancelled'
   | 'failed';
 
-export interface SupplierOrderResult {
+export interface FulfillerOrderResult {
   success: boolean;
-  supplierOrderId?: string;
+  fulfillerOrderId?: string;
   lineItemIds?: Record<string, string>;
   errorCode?: string;
   errorMessage?: string;
@@ -169,7 +169,7 @@ export interface ShippedItem {
 // ============================================================================
 
 export interface StockUpdate {
-  supplierType: string;
+  fulfillerType: string;
   sku: string;
   stockCount: number;
   inStock: boolean;
@@ -189,8 +189,8 @@ export type WebhookEventType =
 
 export interface WebhookEvent {
   eventType: WebhookEventType;
-  supplierType: string;
-  supplierOrderId?: string;
+  fulfillerType: string;
+  fulfillerOrderId?: string;
   payload: Record<string, unknown>;
   timestamp: string; // ISO
 }
@@ -213,26 +213,26 @@ export interface ShippingAddress {
 }
 
 // ============================================================================
-// Generic Supplier Adapter Interface
+// Generic Fulfiller Adapter Interface
 // ============================================================================
 
-export interface SupplierAdapter {
-  readonly supplierType: string;
+export interface FulfillerAdapter {
+  readonly fulfillerType: string;
 
   // Catalog
-  /** Iterate over all catalog items from this supplier */
+  /** Iterate over all catalog items from this fulfiller */
   syncCatalog?(): AsyncGenerator<CatalogItem>;
   /** Look up a single catalog item by SKU */
   getCatalogItem?(sku: string): Promise<CatalogItem | null>;
 
-  /** Submit order to supplier */
-  submitOrder(request: SupplierOrderInput): Promise<SupplierOrderResult>;
+  /** Submit order to fulfiller */
+  submitOrder(request: FulfillerOrderInput): Promise<FulfillerOrderResult>;
 
   /** Get current order status */
-  getOrderStatus(supplierOrderId: string): Promise<SupplierStatusUpdate>;
+  getOrderStatus(fulfillerOrderId: string): Promise<FulfillerStatusUpdate>;
 
   /** Cancel order if possible */
-  cancelOrder(supplierOrderId: string): Promise<{ success: boolean; message?: string }>;
+  cancelOrder(fulfillerOrderId: string): Promise<{ success: boolean; message?: string }>;
 
   // Stock & Webhooks
   /** Parse a raw webhook payload into a normalized stock update */
@@ -242,30 +242,30 @@ export interface SupplierAdapter {
 }
 
 // ============================================================================
-// Supplier Order Input/Output
+// Fulfiller Order Input/Output
 // ============================================================================
 
-export interface SupplierOrderInput {
+export interface FulfillerOrderInput {
   fulfillmentId: string;
-  supplierType: string; // Plugin-defined
-  items: SupplierLineItemInput[];
+  fulfillerType: string; // Plugin-defined
+  items: FulfillerLineItemInput[];
   shippingAddress: ShippingAddress;
   shippingMethod: 'standard' | 'express' | 'economy';
 }
 
-export interface SupplierLineItemInput {
+export interface FulfillerLineItemInput {
   sku: string;
-  supplierProductId: string;
-  supplierVariantId: string | number;
+  fulfillerProductId: string;
+  fulfillerVariantId: string | number;
   quantity: number;
   externalId?: string;
 }
 
-export interface SupplierStatusUpdate {
-  supplierOrderId: string;
+export interface FulfillerStatusUpdate {
+  fulfillerOrderId: string;
   status: 'in_production' | 'partially_shipped' | 'shipped' | 'delivered' | 'cancelled' | 'failed';
   lineItems?: Array<{
-    supplierLineItemId: string;
+    fulfillerLineItemId: string;
     status:
       | 'pending'
       | 'submitted'
@@ -284,8 +284,8 @@ export interface SupplierStatusUpdate {
   timestamp: string;
 }
 
-export interface DynamicSupplierStatusUpdate {
-  supplierOrderId: string;
+export interface DynamicFulfillerStatusUpdate {
+  fulfillerOrderId: string;
   status: DynamicOrderStatus;
   shipments?: Shipment[];
   failureReason?: string;
@@ -296,11 +296,11 @@ export interface DynamicSupplierStatusUpdate {
 // SKU Mapping
 // ============================================================================
 
-export interface SupplierSkuMapping {
+export interface FulfillerSkuMapping {
   sku: string;
-  supplier: string; // Plugin-defined
-  supplierProductId: string;
-  supplierVariantId: number;
+  fulfiller: string; // Plugin-defined
+  fulfillerProductId: string;
+  fulfillerVariantId: number;
   printProviderId?: number;
   createdAt: string;
   updatedAt: string;
