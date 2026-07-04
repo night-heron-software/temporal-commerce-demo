@@ -109,38 +109,38 @@ export async function checkoutWorkflow(
   >[] = [
     {
       definition: setShippingUpdate,
-      toEvent: (s: SetShippingSignal) => ({ kind: 'setShipping', shippingAddress: s.shippingAddress }),
+      toEvent: (s: SetShippingSignal) => ({ type: 'setShipping', shippingAddress: s.shippingAddress }),
       formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
       formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
     },
     {
       definition: setPaymentUpdate,
-      toEvent: (s: SetPaymentSignal) => ({ kind: 'setPayment', paymentMethod: s.paymentMethod }),
+      toEvent: (s: SetPaymentSignal) => ({ type: 'setPayment', paymentMethod: s.paymentMethod }),
       formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
       formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
     },
     {
       definition: submitOrderUpdate,
-      toEvent: () => ({ kind: 'submitOrder' }),
+      toEvent: () => ({ type: 'submitOrder' }),
       formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
       formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
     },
     {
       definition: cancelCheckoutUpdate,
-      toEvent: () => ({ kind: 'cancelCheckout' }),
+      toEvent: () => ({ type: 'cancelCheckout' }),
       formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
       formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
     },
     {
       definition: acknowledgeCartChangeUpdate,
-      toEvent: (s: { cartVersion: number }) => ({ kind: 'acknowledgeCartChange', cartVersion: s.cartVersion }),
+      toEvent: (s: { cartVersion: number }) => ({ type: 'acknowledgeCartChange', cartVersion: s.cartVersion }),
       formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
       formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
     },
     {
       definition: retargetParentUpdate,
       toEvent: (s: RetargetParentSignal) => ({
-        kind: 'retargetParent',
+        type: 'retargetParent',
         newParentCartWorkflowId: s.newParentCartWorkflowId,
       }),
     },

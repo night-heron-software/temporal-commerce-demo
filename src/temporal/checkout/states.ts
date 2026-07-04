@@ -1,3 +1,12 @@
+/**
+ * Checkout states — the shell around the pure checkout Decider (prepare → decide → finalize).
+ *
+ * All I/O (reservations, shipping/tax pricing, the PaymentIntent, the whole submit-order
+ * pipeline) runs in `prepare` handlers; each command is enriched with the prepared result
+ * before it reaches the pure core in `checkout-decider.ts`. State structure is unchanged
+ * from the pre-refactor demo: validating → shipping → payment → review, with terminal
+ * complete / failed / cancelled.
+ */
 import { log } from '@temporalio/workflow';
 import {
   calculateShipping,
@@ -19,238 +28,127 @@ import type {
   CheckoutContext,
   CheckoutStateName,
 } from './types';
-import { StateInput, StateOutput, StateRegistry } from '../framework';
+import { decide as checkoutDecide, evolve } from './checkout-decider';
+import type {
+  CheckoutCommand,
+  ValidatingPrepared,
+  ShippingPrepared,
+  SubmitOrderPrepared,
+} from './checkout-decider';
+import { defineDomain, terminal, SELF } from '../framework';
+import type { StateRegistry, TransitionMap } from '../framework';
 
 // ==================
-// Helpers
+// Domain factory — binds the shared type params once
 // ==================
 
-/** Inputs that can be handled in any non-terminal state (lifecycle/coordination). */
-function handleLifecycleInput(
-  ctx: Readonly<CheckoutContext>,
-  input: CheckoutInput,
-  selfStateName: CheckoutStateName,
-): StateOutput<CheckoutStateName, CheckoutContext, CheckoutState> | null {
-  if (input.kind === 'retargetParent') {
-    return {
-      context: { ...ctx, parentCartWorkflowId: input.newParentCartWorkflowId },
-      next: selfStateName,
-      response: ctx.state,
-    };
-  }
+const checkout = defineDomain<CheckoutStateName, CheckoutInput, CheckoutContext, CheckoutState>();
 
-  if (input.kind === 'acknowledgeCartChange') {
-    const state = { ...ctx.state, cartVersionAcknowledged: input.cartVersion };
-    return {
-      context: { ...ctx, state },
-      next: selfStateName,
-      response: state,
-    };
-  }
+type CheckoutTransitions = TransitionMap<
+  CheckoutStateName,
+  CheckoutContext,
+  CheckoutState,
+  CheckoutInput
+>;
 
-  return null;
+/** Shell adapter — run the pure Decider (decide → evolve) for the next context. */
+function apply(ctx: Readonly<CheckoutContext>, command: CheckoutCommand): CheckoutContext {
+  const state = ctx as CheckoutContext;
+  return checkoutDecide(command, state).reduce(evolve, state);
 }
 
-/** Build a rejection output for disallowed inputs. */
-function rejectInput(
-  ctx: Readonly<CheckoutContext>,
-  input: CheckoutInput,
-  selfStateName: CheckoutStateName,
-): StateOutput<CheckoutStateName, CheckoutContext, CheckoutState> {
-  const errorMsg = `Cannot '${input.kind}' from state: ${selfStateName}`;
+// ==================
+// Shared transition entries
+// ==================
+
+/** Reject a disallowed input in this state (pre-refactor message + response shape). */
+function rejectEntry<K extends CheckoutInput['type']>(stateName: CheckoutStateName) {
   return {
-    context: ctx,
-    next: selfStateName,
-    error: errorMsg,
-    response: { ...ctx.state, error: errorMsg },
-  };
-}
-
-// ==================
-// State Functions
-// ==================
-
-/**
- * Validating state — acquires inventory reservations on entry.
- * This is the initial state; the driver enters here immediately.
- * On success → shipping. On failure → __terminal:failed.
- */
-export async function validatingState(
-  ctx: Readonly<CheckoutContext>,
-  input: StateInput<CheckoutInput>,
-): Promise<StateOutput<CheckoutStateName, CheckoutContext, CheckoutState>> {
-  const reserveResult = await renewReservationsForCheckout(
-    ctx.cartId,
-    ctx.items,
-  );
-
-  if (!reserveResult.success) {
-    const state: CheckoutState = {
-      ...ctx.state,
-      step: 'failed',
-      error: reserveResult.error || 'Some items are no longer available',
-    };
-    return {
-      context: {
-        ...ctx,
-        state,
-      },
-      next: '__terminal:failed',
-      response: state,
-    };
-  }
-
-  const state: CheckoutState = {
-    ...ctx.state,
-    step: 'shipping',
-  };
-  return {
-    context: { ...ctx, state, reservations: reserveResult.reservations },
-    next: 'shipping',
-    response: state,
-  };
-}
-
-/**
- * Shipping state — waiting for the shopper to provide a shipping address.
- */
-export async function shippingState(
-  ctx: Readonly<CheckoutContext>,
-  input: StateInput<CheckoutInput>,
-): Promise<StateOutput<CheckoutStateName, CheckoutContext, CheckoutState>> {
-  if (input.kind === 'timeout') {
-    return cancelCheckoutTransition(ctx);
-  }
-  const event = (input as { kind: 'event'; event: CheckoutInput }).event;
-
-  const lifecycle = handleLifecycleInput(ctx, event, 'shipping');
-  if (lifecycle) return lifecycle;
-
-  if (event.kind === 'cancelCheckout') {
-    return cancelCheckoutTransition(ctx);
-  }
-
-  if (event.kind === 'setShipping') {
-    return processShipping(ctx, event.shippingAddress);
-  }
-
-  return rejectInput(ctx, event, 'shipping');
-}
-
-/**
- * Payment state — waiting for payment method.
- */
-export async function paymentState(
-  ctx: Readonly<CheckoutContext>,
-  input: StateInput<CheckoutInput>,
-): Promise<StateOutput<CheckoutStateName, CheckoutContext, CheckoutState>> {
-  if (input.kind === 'timeout') {
-    return cancelCheckoutTransition(ctx);
-  }
-  const event = (input as { kind: 'event'; event: CheckoutInput }).event;
-
-  const lifecycle = handleLifecycleInput(ctx, event, 'payment');
-  if (lifecycle) return lifecycle;
-
-  if (event.kind === 'cancelCheckout') {
-    return cancelCheckoutTransition(ctx);
-  }
-
-  if (event.kind === 'setShipping') {
-    return processShipping(ctx, event.shippingAddress);
-  }
-
-  if (event.kind === 'setPayment') {
-    if (!ctx.state.shippingAddress) {
+    decide(ctx: Readonly<CheckoutContext>, event: Extract<CheckoutInput, { type: K }>) {
+      const errorMsg = `Cannot '${event.type}' from state: ${stateName}`;
       return {
-        context: ctx,
-        next: 'payment',
-        error: 'Shipping address required before payment',
-        response: { ...ctx.state, error: 'Shipping address required before payment' },
+        context: ctx as CheckoutContext,
+        next: SELF,
+        error: errorMsg,
+        response: { ...ctx.state, error: errorMsg },
       };
-    }
-
-    const state: CheckoutState = {
-      ...ctx.state,
-      step: 'review',
-      paymentMethod: event.paymentMethod,
-      error: undefined,
-    };
-    return {
-      context: { ...ctx, state },
-      next: 'review',
-      response: state,
-    };
-  }
-
-  return rejectInput(ctx, event, 'payment');
+    },
+  };
 }
 
+/** acknowledgeCartChange — lifecycle input, handled in any waiting state (stays put). */
+const acknowledgeCartChangeEntry: CheckoutTransitions['acknowledgeCartChange'] = {
+  decide(ctx, event) {
+    const context = apply(ctx, { type: 'acknowledgeCartChange', cartVersion: event.cartVersion });
+    return { context, next: SELF, response: context.state };
+  },
+};
+
+/** retargetParent — lifecycle input, handled in any waiting state (stays put). */
+const retargetParentEntry: CheckoutTransitions['retargetParent'] = {
+  decide(ctx, event) {
+    const context = apply(ctx, {
+      type: 'retargetParent',
+      newParentCartWorkflowId: event.newParentCartWorkflowId,
+    });
+    return { context, next: SELF, response: context.state };
+  },
+};
+
 /**
- * Review state — order summary, ready to submit.
+ * cancelCheckout — release reservations and transition to terminal:cancelled.
+ * Shared across states; finalize fires if reservations exist (reads the pre-decision ctx).
  */
-export async function reviewState(
-  ctx: Readonly<CheckoutContext>,
-  input: StateInput<CheckoutInput>,
-): Promise<StateOutput<CheckoutStateName, CheckoutContext, CheckoutState>> {
-  if (input.kind === 'timeout') {
-    return cancelCheckoutTransition(ctx);
-  }
-  const event = (input as { kind: 'event'; event: CheckoutInput }).event;
-
-  const lifecycle = handleLifecycleInput(ctx, event, 'review');
-  if (lifecycle) return lifecycle;
-
-  if (event.kind === 'cancelCheckout') {
-    return cancelCheckoutTransition(ctx);
-  }
-
-  if (event.kind === 'setShipping') {
-    return processShipping(ctx, event.shippingAddress);
-  }
-
-  if (event.kind === 'setPayment') {
-    const state: CheckoutState = {
-      ...ctx.state,
-      step: 'review',
-      paymentMethod: event.paymentMethod,
-      error: undefined,
-    };
+const cancelCheckoutEntry = {
+  decide(ctx: Readonly<CheckoutContext>) {
+    const context = apply(ctx, { type: 'cancelCheckout' });
     return {
-      context: { ...ctx, state },
-      next: 'review',
-      response: state,
+      context,
+      next: terminal('cancelled'),
+      response: context.state,
+      finalize: { hasReservations: ctx.reservations.length > 0 },
     };
-  }
+  },
+  async finalize(
+    ctx: Readonly<CheckoutContext>,
+    decision: { finalize?: { hasReservations: boolean } },
+  ) {
+    if (decision.finalize?.hasReservations) {
+      await releaseReservations(ctx.reservations);
+    }
+  },
+};
 
-  if (event.kind === 'submitOrder') {
-    if (!ctx.state.shippingAddress || !ctx.state.paymentMethod) {
+/** Timeout in a waiting state cancels the checkout (same path as cancelCheckout). */
+const timeoutCancels = {
+  onTimeout: {
+    decide(ctx: Readonly<CheckoutContext>) {
+      const context = apply(ctx, { type: 'cancelCheckout' });
       return {
-        context: ctx,
-        next: 'review',
-        error: 'Shipping and payment required',
-        response: { ...ctx.state, error: 'Shipping and payment required' },
+        context,
+        next: terminal('cancelled'),
+        finalize: { hasReservations: ctx.reservations.length > 0 },
       };
-    }
-
-    // Run the order processing pipeline inline synchronously
-    return processOrder(ctx);
-  }
-
-  return rejectInput(ctx, event, 'review');
-}
+    },
+    async finalize(
+      ctx: Readonly<CheckoutContext>,
+      decision: { finalize?: { hasReservations: boolean } },
+    ) {
+      if (decision.finalize?.hasReservations) {
+        await releaseReservations(ctx.reservations);
+      }
+    },
+  },
+};
 
 // ==================
-// Transition Helpers
+// setShipping prepare — computes shipping/tax and creates the PaymentIntent
 // ==================
 
-/**
- * Process shipping address: calculate shipping, tax, create PaymentIntent.
- */
-async function processShipping(
+async function prepareSetShipping(
   ctx: Readonly<CheckoutContext>,
   shippingAddress: ShippingAddress,
-): Promise<StateOutput<CheckoutStateName, CheckoutContext, CheckoutState>> {
+): Promise<ShippingPrepared> {
   const calculatedShipping = await calculateShipping(
     `${shippingAddress.city}, ${shippingAddress.state} ${shippingAddress.postalCode}`,
   );
@@ -259,88 +157,51 @@ async function processShipping(
     ctx.subtotalPrice - ctx.totalDiscounts,
   );
 
-  const shippingCost = calculatedShipping;
-  const totalTax = calculatedTax;
-  const totalPrice = ctx.subtotalPrice - ctx.totalDiscounts + shippingCost + totalTax;
-
   let clientSecret = ctx.state.clientSecret;
+  let paymentIntentError: string | undefined;
   try {
+    const totalPrice = ctx.subtotalPrice - ctx.totalDiscounts + calculatedShipping + calculatedTax;
     const result = await createPaymentIntent(totalPrice, ctx.currency);
     clientSecret = result.clientSecret;
   } catch (e) {
     log.error('Failed to create payment intent', { error: String(e) });
-    const errorState: CheckoutState = {
-      ...ctx.state,
-      shippingAddress,
-      shippingCost: calculatedShipping,
-      tax: calculatedTax,
-      error: 'Unable to initialize payment. Please try again.',
-    };
-    return {
-      context: {
-        ...ctx,
-        state: errorState,
-        shippingCost,
-        totalTax,
-        totalPrice,
-      },
-      next: 'shipping',
-      response: errorState,
-      error: 'Unable to initialize payment. Please try again.',
-    };
+    paymentIntentError = 'Unable to initialize payment. Please try again.';
   }
 
-  const state: CheckoutState = {
-    ...ctx.state,
-    step: 'payment',
-    shippingAddress,
-    shippingCost: calculatedShipping,
-    tax: calculatedTax,
-    clientSecret,
-    error: undefined,
-  };
-
-  return {
-    context: {
-      ...ctx,
-      state,
-      shippingCost,
-      totalTax,
-      totalPrice,
-    },
-    next: 'payment',
-    response: state,
-  };
+  return { calculatedShipping, calculatedTax, clientSecret, paymentIntentError };
 }
 
 /**
- * Cancel checkout: release reservations and transition to cancelled.
+ * setShipping — shared by shipping/payment/review. On success → payment; a PaymentIntent
+ * failure re-prices but returns to shipping with the error (pre-refactor behavior).
  */
-async function cancelCheckoutTransition(
-  ctx: Readonly<CheckoutContext>,
-): Promise<StateOutput<CheckoutStateName, CheckoutContext, CheckoutState>> {
-  if (ctx.reservations.length > 0) {
-    await releaseReservations(ctx.reservations);
-  }
+const setShippingEntry: CheckoutTransitions['setShipping'] = {
+  async prepare(ctx, event) {
+    return prepareSetShipping(ctx, event.shippingAddress);
+  },
+  decide(ctx, event, _meta, prepared: ShippingPrepared) {
+    const context = apply(ctx, {
+      type: 'setShipping',
+      shippingAddress: event.shippingAddress,
+      prepared,
+    });
+    if (prepared.paymentIntentError) {
+      return {
+        context,
+        next: 'shipping' as const,
+        response: context.state,
+        error: prepared.paymentIntentError,
+      };
+    }
+    return { context, next: 'payment' as const, response: context.state };
+  },
+};
 
-  const state: CheckoutState = { ...ctx.state, step: 'cancelled', error: undefined };
-  return {
-    context: {
-      ...ctx,
-      state,
-      reservations: [],
-    },
-    next: '__terminal:cancelled',
-    response: state,
-  };
-}
+// ==================
+// submitOrder prepare — the entire payment/order pipeline runs here (I/O only)
+// ==================
 
-/**
- * Process order: payment, reservation confirmation, order creation, email, OMS.
- */
-async function processOrder(
-  ctx: Readonly<CheckoutContext>,
-): Promise<StateOutput<CheckoutStateName, CheckoutContext, CheckoutState>> {
+async function prepareSubmitOrder(ctx: Readonly<CheckoutContext>): Promise<SubmitOrderPrepared> {
   try {
     const paymentSuccess = await processPayment(
       ctx.state.paymentMethod!.token,
@@ -350,17 +211,7 @@ async function processOrder(
     );
 
     if (!paymentSuccess) {
-      const state: CheckoutState = {
-        ...ctx.state,
-        step: 'payment',
-        error: 'Payment failed. Please try again.',
-      };
-      return {
-        context: { ...ctx, state },
-        next: 'payment',
-        response: state,
-        error: 'Payment failed. Please try again.',
-      };
+      return { success: false, error: 'Payment failed. Please try again.' };
     }
 
     await confirmReservations(ctx.reservations);
@@ -382,32 +233,127 @@ async function processOrder(
 
     await startOrderManagementWorkflow(order, ctx.state.shippingAddress!.email);
 
-    const state: CheckoutState = {
-      ...ctx.state,
-      step: 'complete',
-      order,
-    };
-
-    return {
-      context: { ...ctx, state },
-      next: '__terminal:complete',
-      response: state,
-    };
+    return { success: true, order };
   } catch (err) {
     log.error('Failed to process order', { error: String(err) });
-    const state: CheckoutState = {
-      ...ctx.state,
-      step: 'payment',
-      error: 'An error occurred. Please try again.',
-    };
-    return {
-      context: { ...ctx, state },
-      next: 'payment',
-      response: state,
-      error: 'An error occurred. Please try again.',
-    };
+    return { success: false, error: 'An error occurred. Please try again.' };
   }
 }
+
+// ==================
+// State: validating (escape hatch — transitional, prepare-only)
+// ==================
+
+const validating = checkout.state('validating', {
+  async prepare(ctx): Promise<ValidatingPrepared> {
+    return renewReservationsForCheckout(ctx.cartId, ctx.items);
+  },
+  decide(ctx, _input, prepared: ValidatingPrepared) {
+    const context = apply(ctx, { type: 'validated', prepared });
+    return {
+      context,
+      next: prepared.success ? ('shipping' as const) : terminal('failed'),
+      response: context.state,
+    };
+  },
+});
+
+// ==================
+// State: shipping — waiting for the shopper's shipping address
+// ==================
+
+const shipping = checkout.transitions(
+  'shipping',
+  {
+    setShipping: setShippingEntry,
+    cancelCheckout: cancelCheckoutEntry,
+    acknowledgeCartChange: acknowledgeCartChangeEntry,
+    retargetParent: retargetParentEntry,
+    setPayment: rejectEntry<'setPayment'>('shipping'),
+    submitOrder: rejectEntry<'submitOrder'>('shipping'),
+  },
+  timeoutCancels,
+);
+
+// ==================
+// State: payment — waiting for a payment method
+// ==================
+
+const payment = checkout.transitions(
+  'payment',
+  {
+    setShipping: setShippingEntry,
+    setPayment: {
+      decide(ctx, event) {
+        if (!ctx.state.shippingAddress) {
+          const errorMsg = 'Shipping address required before payment';
+          return {
+            context: ctx as CheckoutContext,
+            next: 'payment' as const,
+            error: errorMsg,
+            response: { ...ctx.state, error: errorMsg },
+          };
+        }
+        const context = apply(ctx, { type: 'setPayment', paymentMethod: event.paymentMethod });
+        return { context, next: 'review' as const, response: context.state };
+      },
+    },
+    cancelCheckout: cancelCheckoutEntry,
+    acknowledgeCartChange: acknowledgeCartChangeEntry,
+    retargetParent: retargetParentEntry,
+    submitOrder: rejectEntry<'submitOrder'>('payment'),
+  },
+  timeoutCancels,
+);
+
+// ==================
+// State: review — order summary, ready to submit
+// ==================
+
+const review = checkout.transitions(
+  'review',
+  {
+    setShipping: setShippingEntry,
+    setPayment: {
+      decide(ctx, event) {
+        const context = apply(ctx, { type: 'setPayment', paymentMethod: event.paymentMethod });
+        return { context, next: 'review' as const, response: context.state };
+      },
+    },
+    submitOrder: {
+      async prepare(ctx): Promise<SubmitOrderPrepared> {
+        if (!ctx.state.shippingAddress || !ctx.state.paymentMethod) {
+          return { success: false, error: 'Shipping and payment required' };
+        }
+        return prepareSubmitOrder(ctx);
+      },
+      decide(ctx, _event, _meta, prepared: SubmitOrderPrepared) {
+        if (!prepared.success && prepared.error === 'Shipping and payment required') {
+          return {
+            context: ctx as CheckoutContext,
+            next: 'review' as const,
+            error: prepared.error,
+            response: { ...ctx.state, error: prepared.error },
+          };
+        }
+        const context = apply(ctx, { type: 'submitOrder', prepared });
+        if (!prepared.success) {
+          // Pipeline failed — back to payment with the error (pre-refactor behavior).
+          return { context, next: 'payment' as const, response: context.state, error: prepared.error };
+        }
+        return { context, next: terminal('complete'), response: context.state };
+      },
+    },
+    cancelCheckout: cancelCheckoutEntry,
+    acknowledgeCartChange: acknowledgeCartChangeEntry,
+    retargetParent: retargetParentEntry,
+  },
+  timeoutCancels,
+);
+
+// ==================
+// Registry
+// ==================
 
 export const CHECKOUT_STATES: StateRegistry<
   CheckoutStateName,
@@ -415,8 +361,8 @@ export const CHECKOUT_STATES: StateRegistry<
   CheckoutContext,
   CheckoutState
 > = {
-  validating: { fn: validatingState, transitional: true },
-  shipping: { fn: shippingState, timeout: '1 hour' },
-  payment: { fn: paymentState, timeout: '1 hour' },
-  review: { fn: reviewState, timeout: '1 hour' },
+  validating: { ...validating, transitional: true },
+  shipping: { ...shipping, timeout: '1 hour' },
+  payment: { ...payment, timeout: '1 hour' },
+  review: { ...review, timeout: '1 hour' },
 };

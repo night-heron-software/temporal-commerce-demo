@@ -64,14 +64,15 @@ export interface RetargetParentSignal {
   newParentCartWorkflowId: string;
 }
 
+// Discriminated on `type` (framework TransitionMap convention). Driver timeouts arrive as
+// their own input kind, not as an event member.
 export type CheckoutInput =
-  | { kind: 'setShipping'; shippingAddress: ShippingAddress }
-  | { kind: 'setPayment'; paymentMethod: PaymentMethod }
-  | { kind: 'submitOrder' }
-  | { kind: 'cancelCheckout' }
-  | { kind: 'acknowledgeCartChange'; cartVersion: number }
-  | { kind: 'retargetParent'; newParentCartWorkflowId: string }
-  | { kind: 'timeout' };
+  | { type: 'setShipping'; shippingAddress: ShippingAddress }
+  | { type: 'setPayment'; paymentMethod: PaymentMethod }
+  | { type: 'submitOrder' }
+  | { type: 'cancelCheckout' }
+  | { type: 'acknowledgeCartChange'; cartVersion: number }
+  | { type: 'retargetParent'; newParentCartWorkflowId: string };
 
 export interface CheckoutContext {
   readonly cartId: string;
