@@ -16,7 +16,7 @@ async function run() {
 
   try {
     // 1. Fetch variant from Cassandra
-    const variants = await executeCql<{ id: any }>(
+    const variants = await executeCql<{ id: { toString(): string } }>(
       'SELECT id FROM catalog.variants LIMIT 1'
     );
     if (variants.length === 0) {
@@ -75,10 +75,11 @@ async function run() {
           isReady = true;
           break;
         }
-      } catch (e: any) {
-        if (e.name === 'QueryNotRegisteredError') {
+      } catch (e) {
+        const name = (e as { name?: string }).name;
+        if (name === 'QueryNotRegisteredError') {
           // Normal during boot
-        } else if (e.name === 'WorkflowExecutionAlreadyCompletedError') {
+        } else if (name === 'WorkflowExecutionAlreadyCompletedError') {
           throw new Error(`Checkout workflow terminated unexpectedly.`);
         } else {
           throw e;
@@ -150,7 +151,7 @@ async function run() {
           supplierOrderId = omsState.supplierOrders[0].supplierOrderId;
           break;
         }
-      } catch (e) {
+      } catch {
         // Query may fail if workflow is not fully initialized yet
       }
       await delay(1000);
@@ -167,13 +168,13 @@ async function run() {
     let fulfillmentStatus = '';
     for (let i = 0; i < 60; i++) {
       try {
-        const fullState: any = await fulfillmentHandle.query('getStatus');
+        const fullState = await fulfillmentHandle.query<{ status: string }>('getStatus');
         fulfillmentStatus = fullState.status;
         console.log(`      Current fulfillment status: ${fulfillmentStatus}`);
         if (fulfillmentStatus === 'shipped' || fulfillmentStatus === 'delivered') {
           break;
         }
-      } catch (e) {
+      } catch {
         // Ignore
       }
       await delay(1500);
@@ -190,7 +191,9 @@ async function run() {
     console.error('\n❌ E2E Verification failed:', error);
     try {
       await getCassandraClient().shutdown();
-    } catch (_) {}
+    } catch {
+      // best-effort shutdown
+    }
     process.exit(1);
   }
 }

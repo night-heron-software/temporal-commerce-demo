@@ -7,7 +7,6 @@ import type {
   FulfillmentSupplierOrderState,
   FulfillmentLineItemState,
   SupplierStatusUpdate,
-  ShipmentInfo,
   FulfillmentStateName,
   FulfillmentSignal,
 } from './types';
@@ -260,10 +259,10 @@ export async function fulfillmentWorkflow(
       }
       
       // Signal cancel to all child workflows
-      for (const [_, childHandle] of childHandles) {
+      for (const [, childHandle] of childHandles) {
         try {
           await childHandle.signal(childCancelSignal);
-        } catch (err) {
+        } catch {
           // Ignore errors as child might already be complete
         }
       }
@@ -282,10 +281,10 @@ export async function fulfillmentWorkflow(
     },
     onTerminal: async (finalCtx: FulfillmentWorkflowState, finalState: string) => {
       if (isTerminal(finalState, 'cancelled') || isTerminal(finalState, 'failed')) {
-        for (const [_, childHandle] of childHandles) {
+        for (const [, childHandle] of childHandles) {
           try {
             await childHandle.signal(childCancelSignal);
-          } catch (err) {
+          } catch {
             // Ignore
           }
         }

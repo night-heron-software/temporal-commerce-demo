@@ -1,11 +1,4 @@
-import {
-  allHandlersFinished,
-  condition,
-  continueAsNew,
-  getExternalWorkflowHandle,
-  log,
-  setHandler,
-} from '@temporalio/workflow';
+import { getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
 import { releaseCartItem, indexCart } from './activities';
 import { buildCartDocument } from './document-builder';
 import type {

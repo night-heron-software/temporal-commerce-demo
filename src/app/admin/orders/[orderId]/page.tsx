@@ -30,6 +30,7 @@ export default function AdminOrderDetailPage() {
   }, [orderId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: loading/error reset before the async load is intentional
     loadOrder();
   }, [loadOrder]);
 

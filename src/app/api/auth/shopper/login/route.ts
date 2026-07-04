@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     const esClient = getElasticsearchClient();
 
     // Query ES for an active cart belonging to this email
-    const esResponse = await esClient.search({
+    const esResponse = await esClient.search<{ cartId: string }>({
       index: ES_INDICES.carts,
       body: {
         query: {
@@ -75,9 +75,9 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    const hits = (esResponse as any).hits?.hits || [];
-    
-    if (hits.length > 0) {
+    const hits = esResponse.hits?.hits ?? [];
+
+    if (hits.length > 0 && hits[0]._source) {
       // 1. Recover existing active cart
       const recoveredCartId = hits[0]._source.cartId;
       console.log(`Recovered active cart ${recoveredCartId} for user ${shopper.email}`);

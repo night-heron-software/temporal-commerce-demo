@@ -1,6 +1,7 @@
 import { heartbeat } from "@temporalio/activity";
 import { logger, getElasticsearchClient } from '../../lib';
 import type { Suppliers, Elasticsearch } from '../contracts';
+import type { TrackingInfo } from './activities';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import { getFlag } from '../../lib/feature-flags';
 import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
@@ -25,43 +26,6 @@ export async function submitSupplierOrder(
   };
 }
 
-export async function buildFulfillmentPayload(
-  input: {
-    orderId: string;
-    items: any[];
-    supplierType: string;
-    productType: string;
-  },
-): Promise<any> {
-  // Demo: simulated fulfillment — no plugin registry needed
-  return { defaultPayload: true, items: input.items };
-}
-
-export async function pollSupplierStatus(input: {
-  supplierOrderId: string;
-  supplierType: string;
-}): Promise<Suppliers.SupplierStatusUpdate> {
-  logger.info({ input }, "pollSupplierStatus");
-  return {
-    supplierOrderId: input.supplierOrderId,
-    status: "in_production",
-    timestamp: new Date().toISOString(),
-  };
-}
-
-export async function lookupSkuMappings(
-  skus: string[],
-  supplier: string,
-): Promise<Record<string, Suppliers.SupplierSkuMapping>> {
-  return {};
-}
-
-interface TrackingInfo {
-  carrier: string;
-  trackingNumber: string;
-  trackingUrl?: string;
-}
-
 export async function sendShippedEmail(
   email: string,
   orderId: string,
@@ -74,7 +38,7 @@ export async function sendShippedEmail(
 export async function sendDeliveredEmail(
   email: string,
   orderId: string,
-  confirmationNumber: string,
+  _confirmationNumber: string,
 ): Promise<void> {
   logger.info({ email, orderId }, "📧 [DEMO] Delivered notification");
 }
@@ -151,8 +115,6 @@ export function createFulfillmentActivities() {
   return {
     getFeatureFlag,
     submitSupplierOrder,
-    pollSupplierStatus,
-    lookupSkuMappings,
     sendShippedEmail,
     sendDeliveredEmail,
     transferInventoryReservations,
@@ -160,7 +122,6 @@ export function createFulfillmentActivities() {
     releaseInventoryReservations,
     indexFulfillment,
     indexShipment,
-    buildFulfillmentPayload,
   };
 }
 

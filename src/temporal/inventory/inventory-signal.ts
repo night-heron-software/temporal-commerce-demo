@@ -1,4 +1,4 @@
-import { Inventory, INVENTORY_TASK_QUEUE, INVENTORY_SERVICE_WORKFLOW_TYPE } from '../contracts';
+import { INVENTORY_TASK_QUEUE, INVENTORY_SERVICE_WORKFLOW_TYPE } from '../contracts';
 import {
   buildWorkflowStartOptions,
   DEMO_STORE_ID,

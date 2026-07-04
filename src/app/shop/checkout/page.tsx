@@ -22,7 +22,6 @@ export default function CheckoutPage() {
       !hasStartedCheckout.current
     ) {
       hasStartedCheckout.current = true;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time checkout initiation on mount with loading state
       setIsProcessing(true);
 
       beginCheckout(cartId)

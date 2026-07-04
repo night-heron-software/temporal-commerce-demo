@@ -8,7 +8,7 @@
  */
 
 import { getTemporalClient } from '@/lib';
-import { executeCql, cassandraTypes as types } from '@/lib';
+import { executeCql } from '@/lib';
 import {
   getOrderStateQuery,
   updateStatusUpdate,

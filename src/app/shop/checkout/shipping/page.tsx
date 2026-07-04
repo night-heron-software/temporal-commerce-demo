@@ -77,6 +77,7 @@ export default function ShippingPage() {
 
     if (shopper && savedAddress) {
       // Signed in with saved address → pre-fill everything
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot form pre-fill once the async shopper/address contexts resolve
       setFormData({
         firstName: savedAddress.firstName,
         lastName: savedAddress.lastName,

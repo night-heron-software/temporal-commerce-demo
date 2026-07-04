@@ -7,7 +7,6 @@ import { Inventory } from '../../contracts';
  */
 
 import { executeCql, executeBatch, getCassandraClient } from '../../../lib';
-import { types } from 'cassandra-driver';
 import { logger } from '../../../lib';
 import { signalInventoryChanged } from '../inventory-signal';
 

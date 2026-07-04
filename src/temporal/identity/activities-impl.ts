@@ -5,10 +5,8 @@
  * They perform side effects (DB calls) and are NOT imported by workflow code.
  */
 
-import { createLogger } from '../../lib';
 import { ShopperRepository } from './db/shopper-repository';
 
-const logger = createLogger('identity:activities');
 const shopperRepo = new ShopperRepository();
 
 // ─── Shopper Activities ─────────────────────────────────────────────

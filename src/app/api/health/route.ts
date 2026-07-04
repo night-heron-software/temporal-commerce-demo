@@ -60,7 +60,6 @@ export async function GET(): Promise<NextResponse<HealthStatus>> {
     const temporalStart = Date.now();
     const client = await getTemporalClient();
     const workflows = client.workflow.list({ query: 'ExecutionStatus="Running"' });
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     for await (const _workflow of workflows) {
       break;
     }

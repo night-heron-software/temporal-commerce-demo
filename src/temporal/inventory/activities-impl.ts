@@ -1,8 +1,7 @@
-import { Inventory } from '../contracts';
 /**
  * Inventory Service Activities
  *
- * Activities for the Inventory.inventoryServiceWorkflow:
+ * Activities for the inventoryServiceWorkflow:
  * - Expire TEMPORARY reservations past TTL
  * - Project write tables → Cassandra read tables
  * - Sync inventory to Elasticsearch
@@ -17,7 +16,6 @@ type InventoryDocument = Elasticsearch.InventoryDocument;
 type InventorySupplierLocationDocument = Elasticsearch.InventorySupplierLocationDocument;
 type InventoryReservationDocument = Elasticsearch.InventoryReservationDocument;
 import { logger } from '../../lib';
-import { types } from 'cassandra-driver';
 
 // ============================================================
 // Expire Reservations
@@ -31,7 +29,7 @@ export async function expireReservations(): Promise<number> {
   if (expired.length === 0) return 0;
 
   await Promise.all(
-    expired.map((r: any) => InventoryCommandRepository.release(r.reservationId))
+    expired.map((r) => InventoryCommandRepository.release(r.reservationId))
   );
 
   logger.info({ count: expired.length }, 'Expired reservations released');
@@ -95,8 +93,8 @@ export async function projectStockSummaries(): Promise<void> {
   const supplierBatch: Array<{ query: string; params: unknown[] }> = [];
 
   for (const [blankSku, suppliers] of bySkuMap) {
-    const totalStock = suppliers.reduce((s: any, r: any) => s + r.total_stock, 0);
-    const reservedStock = suppliers.reduce((s: any, r: any) => s + r.reserved_stock, 0);
+    const totalStock = suppliers.reduce((s, r) => s + r.total_stock, 0);
+    const reservedStock = suppliers.reduce((s, r) => s + r.reserved_stock, 0);
     const availableStock = totalStock - reservedStock;
     const lowStock = availableStock < LOW_STOCK_THRESHOLD;
 
@@ -198,7 +196,7 @@ export async function projectLowStockAlerts(): Promise<void> {
   // Truncate and repopulate
   await executeCql(`TRUNCATE inventory_low_stock`);
 
-  const lowStockSkus = summaries.filter((s: any) => s.available_stock < LOW_STOCK_THRESHOLD);
+  const lowStockSkus = summaries.filter((s) => s.available_stock < LOW_STOCK_THRESHOLD);
   if (lowStockSkus.length === 0) return;
 
   const now = new Date();
@@ -226,6 +224,51 @@ export async function projectLowStockAlerts(): Promise<void> {
 // ============================================================
 // Elasticsearch Sync
 // ============================================================
+
+/** Build one SKU's ES inventory document from its supplier stock rows + active reservations. */
+function buildInventoryDoc(
+  blankSku: string,
+  suppliers: StockWriteRow[],
+  reservations: ReservationWriteRow[],
+): InventoryDocument {
+  const totalStock = suppliers.reduce((s, r) => s + r.total_stock, 0);
+  const reservedStock = suppliers.reduce((s, r) => s + r.reserved_stock, 0);
+
+  const toReservationDoc = (r: ReservationWriteRow): InventoryReservationDocument => ({
+    reservationId: r.reservation_id,
+    cartId: r.cart_id,
+    quantity: r.quantity,
+    status: r.status,
+    createdAt: r.created_at.getTime(),
+    expiresAt: r.expires_at ? r.expires_at.getTime() : null,
+  });
+
+  const supplierLocations: InventorySupplierLocationDocument[] = suppliers.map((sup) => ({
+    supplierId: sup.supplier_id,
+    supplierName: sup.supplier_name,
+    totalStock: sup.total_stock,
+    reservedStock: sup.reserved_stock,
+    orderedStock: sup.ordered_stock,
+    city: sup.city,
+    state: sup.state,
+    country: sup.country,
+    reservations: reservations
+      .filter((r) => r.supplier_id === sup.supplier_id)
+      .map(toReservationDoc),
+  }));
+
+  return {
+    variantId: blankSku,
+    totalStock,
+    reservedStock,
+    availableStock: totalStock - reservedStock,
+    supplierCount: suppliers.length,
+    supplierLocations,
+    reservations: reservations.filter((r) => !r.supplier_id).map(toReservationDoc),
+    reservationIds: reservations.map((r) => r.reservation_id),
+    cartIds: [...new Set(reservations.map((r) => r.cart_id))],
+  };
+}
 
 /**
  * Sync all inventory stock to Elasticsearch (bulk index).
@@ -261,55 +304,8 @@ export async function syncInventoryToES(): Promise<void> {
 
   for (const [blankSku, suppliers] of stockBySku) {
     const reservations = resBySkuMap.get(blankSku) ?? [];
-    const totalStock = suppliers.reduce((s: any, r: any) => s + r.total_stock, 0);
-    const reservedStock = suppliers.reduce((s: any, r: any) => s + r.reserved_stock, 0);
-
-    const supplierLocations: InventorySupplierLocationDocument[] = suppliers.map((sup: any) => ({
-      supplierId: sup.supplier_id,
-      supplierName: sup.supplier_name,
-      totalStock: sup.total_stock,
-      reservedStock: sup.reserved_stock,
-      orderedStock: sup.ordered_stock,
-      city: sup.city,
-      state: sup.state,
-      country: sup.country,
-      reservations: reservations
-        .filter((r: any) => r.supplier_id === sup.supplier_id)
-        .map((r: any) => ({
-          reservationId: r.reservation_id,
-          cartId: r.cart_id,
-          quantity: r.quantity,
-          status: r.status,
-          createdAt: r.created_at.getTime(),
-          expiresAt: r.expires_at ? r.expires_at.getTime() : null,
-        })),
-    }));
-
-    const itemLevelRes: InventoryReservationDocument[] = reservations
-      .filter((r: any) => !r.supplier_id)
-      .map((r: any) => ({
-        reservationId: r.reservation_id,
-        cartId: r.cart_id,
-        quantity: r.quantity,
-        status: r.status,
-        createdAt: r.created_at.getTime(),
-        expiresAt: r.expires_at ? r.expires_at.getTime() : null,
-      }));
-
-    const doc: InventoryDocument = {
-      variantId: blankSku,
-      totalStock,
-      reservedStock,
-      availableStock: totalStock - reservedStock,
-      supplierCount: suppliers.length,
-      supplierLocations,
-      reservations: itemLevelRes,
-      reservationIds: reservations.map((r: any) => r.reservation_id),
-      cartIds: [...new Set(reservations.map((r: any) => r.cart_id))],
-    };
-
     operations.push({ index: { _index: ES_INDICES.inventory, _id: blankSku } });
-    operations.push(doc);
+    operations.push(buildInventoryDoc(blankSku, suppliers, reservations));
   }
 
   if (operations.length > 0) {
@@ -352,8 +348,8 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
       continue;
     }
 
-    const totalStock = suppliers.reduce((s: any, r: any) => s + r.total_stock, 0);
-    const reservedStock = suppliers.reduce((s: any, r: any) => s + r.reserved_stock, 0);
+    const totalStock = suppliers.reduce((s, r) => s + r.total_stock, 0);
+    const reservedStock = suppliers.reduce((s, r) => s + r.reserved_stock, 0);
     const availableStock = totalStock - reservedStock;
     const lowStock = availableStock < LOW_STOCK_THRESHOLD;
 
@@ -493,55 +489,8 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
       [blankSku]
     );
 
-    const totalStock = suppliers.reduce((s: any, r: any) => s + r.total_stock, 0);
-    const reservedStock = suppliers.reduce((s: any, r: any) => s + r.reserved_stock, 0);
-
-    const supplierLocations: InventorySupplierLocationDocument[] = suppliers.map((sup: any) => ({
-      supplierId: sup.supplier_id,
-      supplierName: sup.supplier_name,
-      totalStock: sup.total_stock,
-      reservedStock: sup.reserved_stock,
-      orderedStock: sup.ordered_stock,
-      city: sup.city,
-      state: sup.state,
-      country: sup.country,
-      reservations: reservations
-        .filter((r: any) => r.supplier_id === sup.supplier_id)
-        .map((r: any) => ({
-          reservationId: r.reservation_id,
-          cartId: r.cart_id,
-          quantity: r.quantity,
-          status: r.status,
-          createdAt: r.created_at.getTime(),
-          expiresAt: r.expires_at ? r.expires_at.getTime() : null,
-        })),
-    }));
-
-    const itemLevelRes: InventoryReservationDocument[] = reservations
-      .filter((r: any) => !r.supplier_id)
-      .map((r: any) => ({
-        reservationId: r.reservation_id,
-        cartId: r.cart_id,
-        quantity: r.quantity,
-        status: r.status,
-        createdAt: r.created_at.getTime(),
-        expiresAt: r.expires_at ? r.expires_at.getTime() : null,
-      }));
-
-    const doc: InventoryDocument = {
-      variantId: blankSku,
-      totalStock,
-      reservedStock,
-      availableStock: totalStock - reservedStock,
-      supplierCount: suppliers.length,
-      supplierLocations,
-      reservations: itemLevelRes,
-      reservationIds: reservations.map((r: any) => r.reservation_id),
-      cartIds: [...new Set(reservations.map((r: any) => r.cart_id))],
-    };
-
     operations.push({ index: { _index: ES_INDICES.inventory, _id: blankSku } });
-    operations.push(doc);
+    operations.push(buildInventoryDoc(blankSku, suppliers, reservations));
   }
 
   if (operations.length > 0) {
