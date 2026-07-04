@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createErrorResponse } from '@/lib/api-utils';
 import { getElasticsearchClient } from '@/lib/es-client';
 
 
@@ -31,7 +32,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     });
 
     if (!response.hits.hits.length) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+      return createErrorResponse(404, 'Product not found');
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -83,7 +84,6 @@ export async function GET(request: Request, { params }: RouteParams) {
       defaultVariant
     });
   } catch (error) {
-    console.error('Failed to fetch product:', error);
-    return NextResponse.json({ error: 'Failed to fetch product' }, { status: 500 });
+    return createErrorResponse(500, 'Failed to fetch product', error);
   }
 }

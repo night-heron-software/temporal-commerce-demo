@@ -51,6 +51,23 @@ export async function getCartId(): Promise<string | null> {
 }
 
 /**
+ * Why a workflow update produced no result: the workflow is gone (never started /
+ * timed out / terminated) vs. it already reached a terminal state and no longer
+ * accepts updates. Distinguished so recovery paths can log what actually happened
+ * instead of collapsing both into a silent `null`.
+ */
+type UpdateFailureReason = 'workflow-not-found' | 'workflow-already-completed';
+
+type UpdateOutcome<T> = { ok: true; value: T } | { ok: false; reason: UpdateFailureReason };
+
+function classifyUpdateError(e: unknown): UpdateFailureReason | null {
+  const error = e as { name?: string; cause?: { type?: string } };
+  if (error?.name === 'WorkflowNotFoundError') return 'workflow-not-found';
+  if (error?.cause?.type === 'AcceptedUpdateCompletedWorkflow') return 'workflow-already-completed';
+  return null;
+}
+
+/**
  * Unified wrapper for Temporal cart updates with error handling.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any -- Temporal SDK executeUpdate overloads require any */
@@ -89,41 +106,44 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
       return await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
     }
   } catch (e) {
-    const error = e as { name?: string; cause?: { type?: string } };
-    if (
-      error?.name === 'WorkflowNotFoundError' ||
-      error?.cause?.type === 'AcceptedUpdateCompletedWorkflow'
-    ) {
+    const reason = classifyUpdateError(e);
+    if (reason) {
+      console.info(`[executeCartUpdate] cart ${cartId}: ${reason}`);
       return null;
     }
     throw e;
   }
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
- * Unified wrapper for checkout workflow updates.
+ * Checkout workflow update with a discriminated outcome — callers that recover
+ * (e.g. setShippingAddress restarting a dead checkout) can see WHY it failed.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any -- Temporal SDK executeUpdate overloads require any */
+async function runCheckoutUpdate<TReturn, TArgs extends any[]>(
+  checkoutWorkflowId: string,
+  updateDef: any,
+  args: TArgs
+): Promise<UpdateOutcome<TReturn>> {
+  const client = await getTemporalClient();
+  const handle = client.workflow.getHandle(checkoutWorkflowId);
+  try {
+    const value = await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
+    return { ok: true, value: value as TReturn };
+  } catch (e) {
+    const reason = classifyUpdateError(e);
+    if (reason) return { ok: false, reason };
+    throw e;
+  }
+}
+
+/** Unified wrapper for checkout workflow updates (null on any tolerated failure). */
 async function executeCheckoutUpdate<TReturn, TArgs extends any[]>(
   checkoutWorkflowId: string,
   updateDef: any,
   args: TArgs
 ): Promise<TReturn | null> {
-  const client = await getTemporalClient();
-  const handle = client.workflow.getHandle(checkoutWorkflowId);
-  try {
-    return await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
-  } catch (e) {
-    const error = e as { name?: string; cause?: { type?: string } };
-    if (
-      error?.name === 'WorkflowNotFoundError' ||
-      error?.cause?.type === 'AcceptedUpdateCompletedWorkflow'
-    ) {
-      return null;
-    }
-    throw e;
-  }
+  const outcome = await runCheckoutUpdate<TReturn, TArgs>(checkoutWorkflowId, updateDef, args);
+  return outcome.ok ? outcome.value : null;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -208,18 +228,22 @@ export async function setShippingAddress(
     if (!checkoutWfId) return null;
   }
 
-  let state = await executeCheckoutUpdate(checkoutWfId, Checkout.setShippingUpdate, [{ shippingAddress }]) as Cart.CheckoutState | null;
+  const outcome = await runCheckoutUpdate<Cart.CheckoutState, [{ shippingAddress: Cart.ShippingAddress }]>(
+    checkoutWfId,
+    Checkout.setShippingUpdate,
+    [{ shippingAddress }],
+  );
+  if (outcome.ok) return outcome.value;
 
-  // Recovery: if checkout workflow was dead, start a fresh one
-  if (state === null) {
-    await beginCheckout(cartId);
-    const newId = await getCheckoutWorkflowId(cartId);
-    if (newId) {
-      state = await executeCheckoutUpdate(newId, Checkout.setShippingUpdate, [{ shippingAddress }]) as Cart.CheckoutState | null;
-    }
-  }
-
-  return state;
+  // Recovery: the checkout workflow was dead (timed out / terminated / already
+  // completed) — start a fresh attempt and retry the update against it.
+  console.info(
+    `[setShippingAddress] checkout ${checkoutWfId} unavailable (${outcome.reason}); starting a fresh checkout`,
+  );
+  await beginCheckout(cartId);
+  const newId = await getCheckoutWorkflowId(cartId);
+  if (!newId) return null;
+  return executeCheckoutUpdate(newId, Checkout.setShippingUpdate, [{ shippingAddress }]) as Promise<Cart.CheckoutState | null>;
 }
 
 export async function setPaymentMethod(

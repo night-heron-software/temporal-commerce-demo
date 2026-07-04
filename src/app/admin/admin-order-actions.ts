@@ -8,7 +8,7 @@
  */
 
 import { getTemporalClient } from '@/lib';
-import { executeCql } from '@/lib';
+import { executeCqlAll } from '@/lib';
 import {
   getOrderStateQuery,
   updateStatusUpdate,
@@ -32,11 +32,12 @@ export interface OrderSummary {
 }
 
 /**
- * Get all orders from Cassandra
+ * Get all orders from Cassandra (auto-pages the full table — previously a silent
+ * LIMIT 200 that dropped older orders).
  */
 export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
   try {
-    const rows = await executeCql<{
+    const rows = await executeCqlAll<{
       order_id: { toString(): string };
       confirmation_number: string;
       customer_email: string;
@@ -45,7 +46,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       status: string;
       created_at: Date | null;
     }>(
-      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders LIMIT 200`
+      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders`
     );
 
     const sorted = rows.sort((a, b) => {

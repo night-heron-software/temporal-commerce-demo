@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createErrorResponse } from '@/lib/api-utils';
 import { getElasticsearchClient } from '@/lib/es-client';
 
 // Option type names can be inconsistent across suppliers.
@@ -324,7 +325,6 @@ export async function GET(
       facets
     });
   } catch (error) {
-    console.error('Search error:', error);
-    return NextResponse.json({ error: 'Search failed' }, { status: 500 });
+    return createErrorResponse(500, 'Search failed', error);
   }
 }

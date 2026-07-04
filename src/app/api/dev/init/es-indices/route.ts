@@ -4,16 +4,13 @@
  */
 import { NextResponse } from 'next/server';
 import { ensureIndicesExist } from '@/lib/es-index-mappings';
+import { createErrorResponse } from '@/lib/api-utils';
 
 export async function POST() {
   try {
     await ensureIndicesExist();
     return NextResponse.json({ success: true, message: 'ES indices ensured' });
   } catch (error) {
-    console.error('[/api/dev/init/es-indices] Failed:', error);
-    return NextResponse.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
+    return createErrorResponse(500, 'Failed to ensure ES indices', error);
   }
 }

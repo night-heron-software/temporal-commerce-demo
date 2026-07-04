@@ -4,6 +4,7 @@
  * Body: { index: 'products' | 'collections' | 'orders' | 'customers' | 'suppliers' | 'inventory' | 'supplier_orders' | 'carts' | 'fulfillments' | 'reservations' | 'shipments' | 'all' }
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { createErrorResponse } from '@/lib/api-utils';
 import { executeCql, executeCqlAll } from '@/lib';
 import { getElasticsearchClient } from '@/lib/es-client';
 import { INDEX_MAPPINGS } from '@/lib/es-index-mappings';
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
     const { index } = await request.json() as { index: string };
 
     if (index !== 'all' && !VALID_INDICES.includes(index)) {
-      return NextResponse.json({ error: `Unknown index: ${index}. Valid: ${VALID_INDICES.join(', ')}, all` }, { status: 400 });
+      return createErrorResponse(400, `Unknown index: ${index}. Valid: ${VALID_INDICES.join(', ')}, all`);
     }
 
     const indicesToReindex = index === 'all' ? VALID_INDICES : [index];
@@ -88,8 +89,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, results });
   } catch (error) {
-    console.error('Reindex failed:', error);
-    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+    return createErrorResponse(500, 'Reindex failed', error);
   }
 }
 
