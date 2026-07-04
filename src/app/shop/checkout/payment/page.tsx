@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
-import { setPaymentMethod, getCheckoutState } from '@/app/shop/cart-actions';
+import { setPaymentMethod } from '@/app/shop/cart-actions';
 
 /**
  * Mock Payment Page — Demo version
@@ -11,7 +11,7 @@ import { setPaymentMethod, getCheckoutState } from '@/app/shop/cart-actions';
  */
 export default function PaymentPage() {
   const router = useRouter();
-  const { cartId, refreshCart } = useCart();
+  const { cartId } = useCart();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

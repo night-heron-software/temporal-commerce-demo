@@ -10,19 +10,11 @@ export type CheckoutStateName = 'validating' | 'shipping' | 'payment' | 'review'
 
 export type CheckoutStep = CheckoutStateName | 'complete' | 'failed' | 'cancelled';
 
-export interface CheckoutState {
-  step: CheckoutStep;
-  isGuest: boolean;
-  shippingAddress?: ShippingAddress;
-  paymentMethod?: PaymentMethod;
-  shippingCost: number;
-  tax: number;
-  cartVersionAtStart?: number;
-  cartVersionAcknowledged?: number;
-  order?: Order;
-  error?: string;
-  clientSecret?: string;
-}
+/**
+ * The contracts definition is the single source of truth (its `step` union is a superset —
+ * it also carries the legacy 'processing' step used by cart-side display code).
+ */
+export type CheckoutState = Cart.CheckoutState;
 
 export interface CheckoutWorkflowInput {
   cartId: string;
@@ -64,14 +56,15 @@ export interface RetargetParentSignal {
   newParentCartWorkflowId: string;
 }
 
+// Discriminated on `type` (framework TransitionMap convention). Driver timeouts arrive as
+// their own input kind, not as an event member.
 export type CheckoutInput =
-  | { kind: 'setShipping'; shippingAddress: ShippingAddress }
-  | { kind: 'setPayment'; paymentMethod: PaymentMethod }
-  | { kind: 'submitOrder' }
-  | { kind: 'cancelCheckout' }
-  | { kind: 'acknowledgeCartChange'; cartVersion: number }
-  | { kind: 'retargetParent'; newParentCartWorkflowId: string }
-  | { kind: 'timeout' };
+  | { type: 'setShipping'; shippingAddress: ShippingAddress }
+  | { type: 'setPayment'; paymentMethod: PaymentMethod }
+  | { type: 'submitOrder' }
+  | { type: 'cancelCheckout' }
+  | { type: 'acknowledgeCartChange'; cartVersion: number }
+  | { type: 'retargetParent'; newParentCartWorkflowId: string };
 
 export interface CheckoutContext {
   readonly cartId: string;

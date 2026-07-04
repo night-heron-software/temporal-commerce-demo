@@ -2,6 +2,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { getTemporalClient } from '../src/lib/temporal-client';
 import { getCassandraClient, executeCql } from '../src/lib/cassandra-client';
 import { Cart, Checkout, OMS, Constants } from '../src/temporal/contracts';
+import {
+  buildWorkflowId,
+  buildWorkflowStartOptions,
+  DEMO_STORE_ID,
+} from '../src/temporal/contracts/constants';
 import { WithStartWorkflowOperation } from '@temporalio/client';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -11,7 +16,7 @@ async function run() {
 
   try {
     // 1. Fetch variant from Cassandra
-    const variants = await executeCql<{ id: any }>(
+    const variants = await executeCql<{ id: { toString(): string } }>(
       'SELECT id FROM catalog.variants LIMIT 1'
     );
     if (variants.length === 0) {
@@ -23,11 +28,17 @@ async function run() {
     // 2. Connect to Temporal
     const client = await getTemporalClient();
     const cartId = uuidv4();
-    const cartWorkflowId = `cart-${cartId}`;
+    const cartStart = buildWorkflowStartOptions({
+      storeId: DEMO_STORE_ID,
+      domain: 'cart',
+      entityId: cartId,
+      cartId,
+    });
+    const cartWorkflowId = cartStart.workflowId;
 
     console.log(`[1] Creating Cart & Adding Variant...`);
     const startOp = new WithStartWorkflowOperation('cartWorkflow', {
-      workflowId: cartWorkflowId,
+      ...cartStart,
       args: [{ cartId }],
       taskQueue: Constants.CART_TASK_QUEUE,
       workflowIdConflictPolicy: 'USE_EXISTING',
@@ -64,10 +75,11 @@ async function run() {
           isReady = true;
           break;
         }
-      } catch (e: any) {
-        if (e.name === 'QueryNotRegisteredError') {
+      } catch (e) {
+        const name = (e as { name?: string }).name;
+        if (name === 'QueryNotRegisteredError') {
           // Normal during boot
-        } else if (e.name === 'WorkflowExecutionAlreadyCompletedError') {
+        } else if (name === 'WorkflowExecutionAlreadyCompletedError') {
           throw new Error(`Checkout workflow terminated unexpectedly.`);
         } else {
           throw e;
@@ -127,7 +139,7 @@ async function run() {
 
     // 7. Track OMS & Fulfillment Workflow
     console.log(`[3] Tracking Fulfillment via Temporal...`);
-    const omsWorkflowId = `order-${orderId}`;
+    const omsWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const omsHandle = client.workflow.getHandle(omsWorkflowId);
 
     // Poll OMS status
@@ -139,7 +151,7 @@ async function run() {
           supplierOrderId = omsState.supplierOrders[0].supplierOrderId;
           break;
         }
-      } catch (e) {
+      } catch {
         // Query may fail if workflow is not fully initialized yet
       }
       await delay(1000);
@@ -149,20 +161,20 @@ async function run() {
     }
     console.log(`✅ Found Supplier Order ID: ${supplierOrderId}\n`);
 
-    const fulfillmentWorkflowId = `fulfillment-${orderId}`;
+    const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
     const fulfillmentHandle = client.workflow.getHandle(fulfillmentWorkflowId);
 
     console.log(`   🔸 Monitoring fulfillment progress...`);
     let fulfillmentStatus = '';
     for (let i = 0; i < 60; i++) {
       try {
-        const fullState: any = await fulfillmentHandle.query('getStatus');
+        const fullState = await fulfillmentHandle.query<{ status: string }>('getStatus');
         fulfillmentStatus = fullState.status;
         console.log(`      Current fulfillment status: ${fulfillmentStatus}`);
         if (fulfillmentStatus === 'shipped' || fulfillmentStatus === 'delivered') {
           break;
         }
-      } catch (e) {
+      } catch {
         // Ignore
       }
       await delay(1500);
@@ -179,7 +191,9 @@ async function run() {
     console.error('\n❌ E2E Verification failed:', error);
     try {
       await getCassandraClient().shutdown();
-    } catch (_) {}
+    } catch {
+      // best-effort shutdown
+    }
     process.exit(1);
   }
 }

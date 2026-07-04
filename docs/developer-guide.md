@@ -236,10 +236,15 @@ temporal-commerce-demo/
 
 The application is organized into six Temporal workflow domains, each with its own task queue, worker module, and dedicated contracts.
 
+> **Auto-generated diagrams:** the [State Machine Reference](reference/state-machine-diagrams.md)
+> holds a Mermaid diagram + per-state trigger table for every machine below, plus the
+> cross-domain orchestration graph — regenerated from source by `npm run docs:diagrams`
+> and enforced fresh in CI (`npm run docs:diagrams:check`).
+
 ### Cart Workflow
 
 **Task Queue:** `cart-queue`
-**Workflow ID:** `cart-{cartId}`
+**Workflow ID:** `demo.cart.{cartId}`
 **Lifetime:** Long-running (up to 30 days, with idle timeout)
 
 The cart workflow manages shopping shopping cart state as a durable entity using the declarative `runStateMachine` framework. It is the **parent** of the checkout workflow.
@@ -270,7 +275,7 @@ stateDiagram-v2
 ### Checkout Workflow
 
 **Task Queue:** `checkout-queue`
-**Workflow ID:** `checkout-{uuid}` (not tied to cart ID — allows re-entry)
+**Workflow ID:** `demo.checkout.{uuid}` (not tied to cart ID — allows re-entry)
 **Lifetime:** Up to 1 hour, then auto-expires
 
 The checkout workflow orchestrates the multi-step checkout process as a child of the cart workflow, utilizing the declarative `runStateMachine` framework to manage transitions between steps.
@@ -287,7 +292,7 @@ The checkout workflow orchestrates the multi-step checkout process as a child of
 ### Order Management (OMS) Workflow
 
 **Task Queue:** `oms-queue`
-**Workflow ID:** `order-{orderId}`
+**Workflow ID:** `demo.order.{orderId}`
 **Lifetime:** Up to 365 days (long-lived for order lifecycle tracking)
 
 The OMS workflow manages the complete order lifecycle from placement through delivery.
@@ -320,7 +325,7 @@ stateDiagram-v2
 ### Fulfillment Workflow
 
 **Task Queue:** `fulfillment-queue`
-**Workflow ID:** `fulfillment-{orderId}`
+**Workflow ID:** `demo.fulfillment.{orderId}`
 **Lifetime:** Until all supplier orders reach terminal state
 
 Manages the fulfillment lifecycle for all supplier orders in a single order using the declarative `runStateMachine` framework.
@@ -337,7 +342,7 @@ Manages the fulfillment lifecycle for all supplier orders in a single order usin
 ### Inventory Service Workflow
 
 **Task Queue:** `inventory-queue`
-**Workflow ID:** `inventory-service` (singleton)
+**Workflow ID:** `demo.inventory.service` (singleton)
 **Lifetime:** Indefinite (long-running service, `continueAsNew` after 100 signals)
 
 A CQRS inventory management system with separate write-side and read-side projections.
@@ -504,14 +509,42 @@ export const INVENTORY_TASK_QUEUE = 'inventory-queue';
 export const IDENTITY_TASK_QUEUE = 'identity-queue';
 ```
 
-### Workflow ID Convention
+### Workflow IDs & Correlation Tagging
+
+Workflow IDs are parseable, dot-delimited `{storeId}.{domain}.{entityId}` strings
+(storeId is the fixed `demo` tenant). Build them with the helpers in
+`src/temporal/contracts/constants.ts` — never inline (enforced by lint):
 
 ```typescript
-// Convention: {domain}-{entityId}
-buildWorkflowId('cart', 'cart-123')       // → 'cart-cart-123'
-buildWorkflowId('fulfillment', 'ord-1')   // → 'fulfillment-ord-1'
-buildWorkflowId('inventory', 'SKU-001')   // → 'inventory-SKU-001'
+// Convention: {storeId}.{domain}.{entityId}
+buildWorkflowId(DEMO_STORE_ID, 'cart', cartId)        // → 'demo.cart.<uuid>'
+buildWorkflowId(DEMO_STORE_ID, 'order', orderId)      // → 'demo.order.<uuid>'
+buildWorkflowId(DEMO_STORE_ID, 'inventory', 'service') // → 'demo.inventory.service'
+
+// At workflow STARTS, spread buildWorkflowStartOptions() so the correlation
+// Search Attributes (CorrelationId, StoreId, Domain, OrderId, CartId) + memo are set:
+await client.workflow.start('orderWorkflow', {
+  ...buildWorkflowStartOptions({ storeId: DEMO_STORE_ID, domain: 'order', entityId: orderId, orderId, cartId }),
+  taskQueue: OMS_TASK_QUEUE,
+  args: [input],
+});
 ```
+
+With these tags, one Temporal visibility query — `CorrelationId = '<cartId>'` — returns
+the entire cart → checkout → order → fulfillment → fulfiller-order journey. The Search
+Attributes are registered on the namespace by `scripts/register-search-attributes.sh`
+(run automatically from `infra-start.sh`).
+
+### State-Transition Recording & Order Trace
+
+Every state-machine transition is recorded asynchronously to the Cassandra
+`workflow_state_transitions` table (from/to state, trigger, full context snapshot,
+prepare/finalize activity captures) by the framework's transition recorder — off the
+workflow hot path, with a 90-day TTL. The **order-trace dev tool** at
+[`/dev/order-trace`](http://localhost:3000/dev/order-trace) (API:
+`GET /api/dev/order-trace?orderId=…|confirmation=…|email=…`) assembles the full
+cross-domain journey from the CorrelationId visibility query plus those persisted
+transitions.
 
 ### Unified Worker
 
@@ -740,7 +773,7 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f
 | Items added but search empty | Check that ES indices exist (`/api/dev/init/es-indices`) and products are indexed |
 | Checkout stuck on "processing" | Check the checkout workflow in Temporal UI for failed activities |
 | Fulfillment not advancing | Check `MANUAL_FULFILLMENT` feature flag; if enabled, send manual signals |
-| Inventory reservation errors | Check the inventory service workflow is running (`inventory-service` in Temporal UI) |
+| Inventory reservation errors | Check the inventory service workflow is running (`demo.inventory.service` in Temporal UI) |
 | Worker crash on startup | Check Temporal server is healthy: `npm run infra:ps` |
 
 ### Port Conflicts

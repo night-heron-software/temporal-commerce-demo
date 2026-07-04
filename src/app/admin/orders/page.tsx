@@ -34,6 +34,7 @@ export default function AdminOrdersPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: loading/error reset before the async load is intentional
     fetchOrders();
   }, [fetchOrders]);
 
@@ -213,12 +214,20 @@ export default function AdminOrdersPage() {
                   </td>
                   <td className="px-4 py-3 text-zinc-500 text-sm">{formatDate(order.createdAt)}</td>
                   <td className="px-4 py-3 text-center">
-                    <Link
-                      href={`/admin/orders/${order.orderId}`}
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium text-sm"
-                    >
-                      View
-                    </Link>
+                    <span className="inline-flex items-center gap-3">
+                      <Link
+                        href={`/admin/orders/${order.orderId}`}
+                        className="text-blue-600 dark:text-blue-400 hover:underline font-medium text-sm"
+                      >
+                        View
+                      </Link>
+                      <Link
+                        href={`/dev/order-trace?orderId=${order.orderId}`}
+                        className="text-amber-600 dark:text-amber-400 hover:underline font-medium text-sm"
+                      >
+                        Trace
+                      </Link>
+                    </span>
                   </td>
                 </tr>
               ))}

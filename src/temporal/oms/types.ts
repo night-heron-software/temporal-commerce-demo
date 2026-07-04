@@ -152,8 +152,24 @@ export interface CancelOrderSignal {
   reason?: string;
 }
 
-// Re-export types needed by OMS
+// ==================
+// State-machine driver types (prepare→decide→finalize refactor)
+// ==================
 
+/** The single waiting state; the startup pipeline runs in the driver's onStart hook. */
+export type OmsStateName = 'processing';
+
+/** Driver event union — one member per admin/customer update. */
+export type OrderEvent =
+  | ({ type: 'updateStatus' } & UpdateStatusSignal)
+  | ({ type: 'cancelOrder' } & CancelOrderSignal)
+  | ({ type: 'submitFeedback' } & SubmitFeedbackSignal);
+
+/** Workflow context: the order state plus the input's customer email (needed by I/O phases). */
+export interface OmsWorkflowContext {
+  state: OrderState;
+  customerEmail: string;
+}
 
 // Query result type for order status history (used by admin server actions)
 export interface StatusHistoryRow {

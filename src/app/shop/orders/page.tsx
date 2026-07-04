@@ -16,6 +16,7 @@ export default function ShopOrdersPage() {
   // If signed in via ShopperContext, use that email automatically
   useEffect(() => {
     if (shopper?.email && !loggedInEmail) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot adoption of the async-loaded shopper session into local form state
       setLoggedInEmail(shopper.email);
       setEmail(shopper.email);
     }
@@ -26,6 +27,7 @@ export default function ShopOrdersPage() {
     if (loggedInEmail) return; // already set from ShopperContext
     const saved = sessionStorage.getItem('shopperEmail');
     if (saved) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- sessionStorage is client-only; a lazy initializer would mismatch the SSR render
       setLoggedInEmail(saved);
       setEmail(saved);
     }
@@ -46,6 +48,7 @@ export default function ShopOrdersPage() {
   // Fetch orders when logged in
   useEffect(() => {
     if (loggedInEmail) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: loading/error reset before the async load is intentional
       fetchOrders(loggedInEmail);
     }
   }, [loggedInEmail, fetchOrders]);

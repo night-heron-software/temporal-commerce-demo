@@ -495,7 +495,7 @@ npm run dev:up                       # Start Next.js + Temporal workers
 1. **Browse catalog** → show products loaded from Elasticsearch
 2. **Add to cart** → show `cart-{id}` workflow appear in Temporal UI
 3. **Add more items** → show update events accumulating in history
-4. **Begin checkout** → show child `checkout-{uuid}` workflow spawn
+4. **Begin checkout** → show child `demo.checkout.{uuid}` workflow spawn
 5. **Enter shipping** → show the `setShippingUpdate` in event history
 6. **Enter payment** → show step transition to `review`
 7. **Submit order** → show:

@@ -38,7 +38,7 @@ export function ShopNavBar({ onCartClick }: ShopNavBarProps) {
               href="/admin"
               className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors hidden sm:block"
             >
-              ⚙️ Admin
+              ⚙️ Admin &amp; Dev Tools
             </Link>
 
             {/* My Orders */}

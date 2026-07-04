@@ -27,7 +27,13 @@ import {
   getCheckoutStateQuery,
 } from './definitions';
 
-import { runStateMachine, StateMachineConfig, MappedUpdateRegistration } from '../framework';
+import {
+  runStateMachine,
+  StateMachineConfig,
+  MappedUpdateRegistration,
+  deriveDisplayStatus,
+  isTerminal,
+} from '../framework';
 import { CHECKOUT_STATES } from './states';
 import { Cart } from '../contracts';
 
@@ -85,9 +91,7 @@ export async function checkoutWorkflow(
     initialState: 'validating',
     onContextUpdate: (newCtx: CheckoutContext, state: CheckoutStateName | `__terminal:${string}`) => {
       ctx = newCtx;
-      currentStep = (typeof state === 'string' && state.startsWith('__terminal:')
-        ? state.replace('__terminal:', '')
-        : state) as CheckoutStep;
+      currentStep = deriveDisplayStatus<CheckoutStep>(state);
     },
     onCancellation: async (cancelCtx: CheckoutContext, _currentState: CheckoutStateName | `__terminal:${string}`) => {
       currentStep = 'cancelled';
@@ -96,10 +100,22 @@ export async function checkoutWorkflow(
       }
     },
     onTerminal: async (finalCtx: CheckoutContext, terminalState: string) => {
-      if (terminalState !== '__terminal:complete' && finalCtx.reservations.length > 0) {
+      if (!isTerminal(terminalState, 'complete') && finalCtx.reservations.length > 0) {
         await releaseReservations(finalCtx.reservations);
       }
     },
+  };
+
+  // Shared response shaping for every update: errors echo the current state with the
+  // message attached; responses always carry the driver-derived step.
+  const stateFormatters = {
+    formatError: (err: string, currentCtx: CheckoutContext): CheckoutState => ({
+      ...currentCtx.state,
+      error: err,
+      step: currentStep,
+    }),
+    formatResponse: (res: CheckoutState | void): CheckoutState | undefined =>
+      res ? { ...res, step: res.step || currentStep } : undefined,
   };
 
   const updateHandlers: MappedUpdateRegistration<
@@ -109,38 +125,33 @@ export async function checkoutWorkflow(
   >[] = [
     {
       definition: setShippingUpdate,
-      toEvent: (s: SetShippingSignal) => ({ kind: 'setShipping', shippingAddress: s.shippingAddress }),
-      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
-      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
+      toEvent: (s: SetShippingSignal) => ({ type: 'setShipping', shippingAddress: s.shippingAddress }),
+      ...stateFormatters,
     },
     {
       definition: setPaymentUpdate,
-      toEvent: (s: SetPaymentSignal) => ({ kind: 'setPayment', paymentMethod: s.paymentMethod }),
-      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
-      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
+      toEvent: (s: SetPaymentSignal) => ({ type: 'setPayment', paymentMethod: s.paymentMethod }),
+      ...stateFormatters,
     },
     {
       definition: submitOrderUpdate,
-      toEvent: () => ({ kind: 'submitOrder' }),
-      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
-      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
+      toEvent: () => ({ type: 'submitOrder' }),
+      ...stateFormatters,
     },
     {
       definition: cancelCheckoutUpdate,
-      toEvent: () => ({ kind: 'cancelCheckout' }),
-      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
-      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
+      toEvent: () => ({ type: 'cancelCheckout' }),
+      ...stateFormatters,
     },
     {
       definition: acknowledgeCartChangeUpdate,
-      toEvent: (s: { cartVersion: number }) => ({ kind: 'acknowledgeCartChange', cartVersion: s.cartVersion }),
-      formatError: (err: string, currentCtx: CheckoutContext) => ({ ...currentCtx.state, error: err, step: currentStep } as any),
-      formatResponse: (res: CheckoutState | void) => (res ? { ...res, step: res.step || currentStep } as any : undefined),
+      toEvent: (s: { cartVersion: number }) => ({ type: 'acknowledgeCartChange', cartVersion: s.cartVersion }),
+      ...stateFormatters,
     },
     {
       definition: retargetParentUpdate,
       toEvent: (s: RetargetParentSignal) => ({
-        kind: 'retargetParent',
+        type: 'retargetParent',
         newParentCartWorkflowId: s.newParentCartWorkflowId,
       }),
     },

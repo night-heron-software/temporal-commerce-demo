@@ -1,12 +1,12 @@
 import * as wf from '@temporalio/workflow';
 import { OMS } from '../contracts';
+import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 import type {
   FulfillmentOrderRequest,
   FulfillmentWorkflowState,
   FulfillmentSupplierOrderState,
   FulfillmentLineItemState,
   SupplierStatusUpdate,
-  ShipmentInfo,
   FulfillmentStateName,
   FulfillmentSignal,
 } from './types';
@@ -29,6 +29,8 @@ import {
   runStateMachine,
   StateMachineConfig,
   SignalRegistration,
+  deriveDisplayStatus,
+  isTerminal,
 } from '../framework';
 import { FULFILLMENT_STATES } from './states';
 import {
@@ -41,7 +43,8 @@ import {
 export { supplierOrderWorkflow };
 
 export type FulfillmentStatusUpdate = OMS.FulfillmentStatusUpdate;
-export type SupplierOrderStatus = OMS.SupplierOrderStatus;
+// Internal alias for the OMS-facing status vocabulary (no external importers).
+type SupplierOrderStatus = OMS.SupplierOrderStatus;
 
 // ============================================================================
 // Status Mapping
@@ -90,7 +93,7 @@ export async function signalParentOMSWorkflow(
   };
 
   try {
-    const omsWorkflowId = `order-${state.orderId}`;
+    const omsWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'order', state.orderId);
     const omsHandle = wf.getExternalWorkflowHandle(omsWorkflowId);
     await omsHandle.signal<[OMS.FulfillmentStatusUpdate]>('fulfillmentStatus', update);
   } catch (error) {
@@ -182,10 +185,7 @@ export async function fulfillmentWorkflow(
     onContextUpdate: (newCtx: FulfillmentWorkflowState, currentState: FulfillmentStateName | `__terminal:${string}`) => {
       Object.assign(state, newCtx);
       // Sync top-level status from driver state
-      const derivedStatus = typeof currentState === 'string' && currentState.startsWith('__terminal:')
-        ? currentState.replace('__terminal:', '')
-        : currentState;
-      state.status = derivedStatus as any;
+      state.status = deriveDisplayStatus<FulfillmentWorkflowState['status']>(currentState);
     },
     onStart: async (startCtx: FulfillmentWorkflowState) => {
       // 1. Transfer inventory reservations to supplier locations
@@ -210,7 +210,13 @@ export async function fulfillmentWorkflow(
       for (const supplierOrder of startCtx.supplierOrders) {
         try {
           const childHandle = await wf.startChild(supplierOrderWorkflow, {
-            workflowId: `fulfillment-${startCtx.orderId}-supplier-${supplierOrder.supplierOrderId}`,
+            ...buildWorkflowStartOptions({
+              storeId: DEMO_STORE_ID,
+              domain: 'fulfiller-order',
+              entityId: supplierOrder.supplierOrderId,
+              orderId: startCtx.orderId,
+              cartId: startCtx.cartId,
+            }),
             args: [{
               orderId: startCtx.orderId,
               cartId: startCtx.cartId,
@@ -253,10 +259,10 @@ export async function fulfillmentWorkflow(
       }
       
       // Signal cancel to all child workflows
-      for (const [_, childHandle] of childHandles) {
+      for (const [, childHandle] of childHandles) {
         try {
           await childHandle.signal(childCancelSignal);
-        } catch (err) {
+        } catch {
           // Ignore errors as child might already be complete
         }
       }
@@ -274,11 +280,11 @@ export async function fulfillmentWorkflow(
       await syncProjections(cancelCtx);
     },
     onTerminal: async (finalCtx: FulfillmentWorkflowState, finalState: string) => {
-      if (finalState === '__terminal:cancelled' || finalState === '__terminal:failed') {
-        for (const [_, childHandle] of childHandles) {
+      if (isTerminal(finalState, 'cancelled') || isTerminal(finalState, 'failed')) {
+        for (const [, childHandle] of childHandles) {
           try {
             await childHandle.signal(childCancelSignal);
-          } catch (err) {
+          } catch {
             // Ignore
           }
         }
@@ -286,7 +292,7 @@ export async function fulfillmentWorkflow(
 
       // Fulfill inventory reservations on delivery — transitions CONFIRMED→FULFILLED,
       // decrementing both total_stock and reserved_stock in the inventory system.
-      if (finalState === '__terminal:delivered') {
+      if (isTerminal(finalState, 'delivered')) {
         const allItems = finalCtx.supplierOrders.flatMap((so: FulfillmentSupplierOrderState) =>
           so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
         );

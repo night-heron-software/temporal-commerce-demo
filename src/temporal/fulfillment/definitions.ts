@@ -40,12 +40,3 @@ export interface FulfillmentResult {
   supplierOrders: FulfillmentSupplierOrderResult[];
   error?: string;
 }
-
-/** Workflow ID helpers */
-export function fulfillmentIdToWorkflowId(orderId: string): string {
-  return `fulfillment-${orderId}`;
-}
-
-export function workflowIdToFulfillmentId(workflowId: string): string {
-  return workflowId.replace(/^fulfillment-/, '');
-}

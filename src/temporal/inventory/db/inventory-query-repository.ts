@@ -9,7 +9,6 @@ import { Inventory } from '../../contracts';
  */
 
 import { executeCql } from '../../../lib';
-import { types } from 'cassandra-driver';
 
 // ============================================================
 // Types

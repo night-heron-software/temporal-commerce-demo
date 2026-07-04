@@ -1,12 +1,14 @@
-
 import { Elasticsearch } from '../contracts';
+import type { FulfillmentWorkflowState } from './types';
 
-export function buildFulfillmentDocument(state: any): Elasticsearch.FulfillmentDocument {
+export function buildFulfillmentDocument(
+  state: FulfillmentWorkflowState,
+): Elasticsearch.FulfillmentDocument {
   return {
     orderId: state.orderId,
     customerId: state.customerId,
     status: state.status,
-    supplierOrderCount: 0,
+    supplierOrderCount: state.supplierOrders.length,
     createdAt: state.createdAt,
     updatedAt: state.updatedAt
   };

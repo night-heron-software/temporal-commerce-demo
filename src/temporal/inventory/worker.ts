@@ -3,6 +3,7 @@ import { createLogger } from '../../lib';
 import { INVENTORY_TASK_QUEUE } from '../contracts';
 
 import * as activities from './activities-impl';
+import { transitionRecorderActivities } from '../transition-recorder';
 
 const logger = createLogger('inventory:worker');
 
@@ -15,7 +16,7 @@ export default async function inventoryWorker(
     namespace: 'default',
     taskQueue: INVENTORY_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
-    activities,
+    activities: { ...activities, ...transitionRecorderActivities },
     ...otelConfig,
   });
 

@@ -1,4 +1,9 @@
-import { Inventory, INVENTORY_TASK_QUEUE, INVENTORY_SERVICE_WORKFLOW_TYPE } from '../contracts';
+import { INVENTORY_TASK_QUEUE, INVENTORY_SERVICE_WORKFLOW_TYPE } from '../contracts';
+import {
+  buildWorkflowStartOptions,
+  DEMO_STORE_ID,
+  WORKFLOW_ENTITY_SLUGS,
+} from '../contracts/constants';
 /**
  * Inventory Change Signal Utility
  *
@@ -13,7 +18,13 @@ import { getTemporalClient } from '../../lib';
 
 import { logger } from '../../lib';
 
-const WORKFLOW_ID = 'inventory-service';
+// Singleton: demo.inventory.service (ADR-0011 reserved slug — no per-entity UUID)
+const INVENTORY_SERVICE_START = buildWorkflowStartOptions({
+  storeId: DEMO_STORE_ID,
+  domain: 'inventory',
+  entityId: WORKFLOW_ENTITY_SLUGS.inventoryService,
+});
+const WORKFLOW_ID = INVENTORY_SERVICE_START.workflowId;
 const SIGNAL_NAME = 'inventoryChanged';
 
 /**
@@ -37,7 +48,7 @@ export async function signalInventoryChanged(blankSkus: string[]): Promise<void>
       try {
         const client = await getTemporalClient();
         await client.workflow.signalWithStart(INVENTORY_SERVICE_WORKFLOW_TYPE, {
-          workflowId: WORKFLOW_ID,
+          ...INVENTORY_SERVICE_START,
           taskQueue: INVENTORY_TASK_QUEUE,
           signal: SIGNAL_NAME,
           signalArgs: [{ blankSkus }],

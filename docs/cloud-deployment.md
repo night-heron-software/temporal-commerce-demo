@@ -71,6 +71,26 @@ export TEMPORAL_ADDRESS="temporal-commerce-demo.xxxxx.tmprl.cloud:7233"
 export TEMPORAL_NAMESPACE="temporal-commerce-demo"
 ```
 
+### Register Correlation Search Attributes
+
+Every workflow start tags the custom Search Attributes `CorrelationId`, `StoreId`,
+`Domain`, `OrderId`, and `CartId` (see `SEARCH_ATTRIBUTE_KEYS` in
+`src/temporal/contracts/constants.ts`). Locally these are registered automatically by
+`scripts/register-search-attributes.sh`; on Temporal Cloud the local `temporal operator`
+CLI does not manage namespaces, so register them **once** via the Cloud UI
+(Namespace → Search Attributes → Add, type **Keyword** for all five) or with `tcld`:
+
+```bash
+tcld namespace search-attributes add --namespace temporal-commerce-demo \
+  --search-attribute "CorrelationId=Keyword" \
+  --search-attribute "StoreId=Keyword" \
+  --search-attribute "Domain=Keyword" \
+  --search-attribute "OrderId=Keyword" \
+  --search-attribute "CartId=Keyword"
+```
+
+Workflow starts are rejected if the attributes are missing.
+
 ---
 
 ## Step 2: Cassandra (Astra DB)

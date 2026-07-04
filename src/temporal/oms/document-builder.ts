@@ -48,14 +48,14 @@ export function buildOrderDocument(
       type: order.paymentMethod.type,
       last4: order.paymentMethod.last4
     },
-    items: order.items.map((item: any) => ({
+    items: order.items.map((item) => ({
       lineItemId: item.lineItemId,
       variantId: item.variantId,
       quantity: item.quantity,
       price: item.price
     })),
     itemCount: order.items.length,
-    variantIds: order.items.map((item: any) => item.variantId),
+    variantIds: order.items.map((item) => item.variantId),
     assignments: state.assignments.map((a) => ({
       assignmentId: a.assignmentId,
       lineItemId: a.lineItemId,

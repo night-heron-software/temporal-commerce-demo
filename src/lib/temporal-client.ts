@@ -9,7 +9,8 @@
 import { Connection, Client, type ClientOptions } from '@temporalio/client';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS || 'localhost:7233';
-const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || 'default';
+/** Exported for server code that builds Temporal Web UI deep links (order-trace). */
+export const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || 'default';
 
 let cachedClient: Client | null = null;
 

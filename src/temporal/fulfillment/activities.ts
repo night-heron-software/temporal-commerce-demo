@@ -11,25 +11,29 @@ import { proxyActivities } from '@temporalio/workflow';
 import type { Suppliers } from '../contracts';
 import { Elasticsearch } from '../contracts';
 
+/** Shipment tracking details forwarded to the customer's shipped email. */
+export interface TrackingInfo {
+  carrier: string;
+  trackingNumber: string;
+  trackingUrl?: string;
+}
+
 export interface FulfillmentActivities {
   getFeatureFlag(name: string): Promise<boolean>;
   submitSupplierOrder(request: Suppliers.SupplierOrderInput): Promise<Suppliers.SupplierOrderResult>;
-  buildFulfillmentPayload(input: {
-    orderId: string;
-    items: any[];
-    supplierType: string;
-    productType: string;
-  }): Promise<any>;
-  pollSupplierStatus(input: {
-    supplierOrderId: string;
-    supplierType: string;
-  }): Promise<Suppliers.SupplierStatusUpdate>;
-  lookupSkuMappings(skus: string[], supplier: string): Promise<Record<string, Suppliers.SupplierSkuMapping>>;
-  sendShippedEmail(email: string, orderId: string, confirmationNumber: string, trackingInfo: any): Promise<void>;
+  sendShippedEmail(
+    email: string,
+    orderId: string,
+    confirmationNumber: string,
+    trackingInfo: TrackingInfo,
+  ): Promise<void>;
   sendDeliveredEmail(email: string, orderId: string, confirmationNumber: string): Promise<void>;
-  transferInventoryReservations(cartId: string, items: any[]): Promise<void>;
-  fulfillInventoryReservations(cartId: string, items: any[]): Promise<void>;
-  releaseInventoryReservations(cartId: string, items: any[]): Promise<void>;
+  transferInventoryReservations(
+    cartId: string,
+    items: Array<{ variantId: string; supplierId: string; quantity: number }>,
+  ): Promise<void>;
+  fulfillInventoryReservations(cartId: string, items: Array<{ variantId: string }>): Promise<void>;
+  releaseInventoryReservations(cartId: string, items: Array<{ variantId: string }>): Promise<void>;
   indexFulfillment(doc: Elasticsearch.FulfillmentDocument): Promise<void>;
   indexShipment(doc: Elasticsearch.ShipmentDocument): Promise<void>;
 }
@@ -37,9 +41,6 @@ export interface FulfillmentActivities {
 export const {
   getFeatureFlag,
   submitSupplierOrder,
-  buildFulfillmentPayload,
-  pollSupplierStatus,
-  lookupSkuMappings,
   sendShippedEmail,
   sendDeliveredEmail,
   transferInventoryReservations,

@@ -7,7 +7,6 @@ import { Inventory } from '../../contracts';
  */
 
 import { executeCql, executeBatch, getCassandraClient } from '../../../lib';
-import { types } from 'cassandra-driver';
 import { logger } from '../../../lib';
 import { signalInventoryChanged } from '../inventory-signal';
 
@@ -19,6 +18,58 @@ export const UNLIMITED_STOCK = -1;
 
 function isUnlimited(totalStock: number): boolean {
   return totalStock === UNLIMITED_STOCK;
+}
+
+/**
+ * Minimum hold time before a TEMPORARY reservation becomes preemptable (see reserve()).
+ * Business rationale: a shopper's cart reservation is protected for at least this long so
+ * an active checkout is never yanked mid-flow; past it, stale carts lose to new demand.
+ */
+export const MIN_HOLD_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Sum available stock (total − reserved) across a SKU's supplier rows.
+ * Any supplier with UNLIMITED_STOCK makes the SKU effectively infinite.
+ * Pure — shared by getStockLevel() and both aggregation points in reserve().
+ */
+export function computeTotalAvailable(
+  rows: Array<{ total_stock: number; reserved_stock: number }>,
+): number {
+  if (rows.some((r) => isUnlimited(r.total_stock))) return Number.MAX_SAFE_INTEGER;
+  return rows.reduce((sum, r) => sum + (r.total_stock - r.reserved_stock), 0);
+}
+
+/**
+ * Pick which stale TEMPORARY reservations to preempt so a new reservation of
+ * `quantityNeeded` can fit. Pure decision logic (I/O stays in reserve()):
+ * only reservations held past MIN_HOLD_MS qualify, oldest are preempted first
+ * (FIFO), the requesting cart's own reservations are never preempted, and
+ * preemption stops as soon as enough stock is freed.
+ */
+export function selectPreemptibleReservations<
+  T extends { cart_id: string; quantity: number; created_at: Date; expires_at: Date | null },
+>(
+  candidates: T[],
+  opts: {
+    totalAvailable: number;
+    quantityNeeded: number;
+    requestingCartId: string;
+    nowMs: number;
+  },
+): T[] {
+  const stale = candidates
+    .filter((r) => r.expires_at && opts.nowMs > r.created_at.getTime() + MIN_HOLD_MS)
+    .sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
+
+  let freedStock = 0;
+  const toPreempt: T[] = [];
+  for (const r of stale) {
+    if (opts.totalAvailable + freedStock >= opts.quantityNeeded) break;
+    if (r.cart_id === opts.requestingCartId) continue;
+    freedStock += r.quantity;
+    toPreempt.push(r);
+  }
+  return toPreempt;
 }
 
 export interface StockLevel {
@@ -209,13 +260,13 @@ export const InventoryCommandRepository = {
       `SELECT total_stock, reserved_stock FROM inventory_stock_w WHERE blank_sku = ?`,
       [blankSku]
     );
-    const hasUnlimited = rows.some(r => isUnlimited(r.total_stock));
     const reserved = rows.reduce((sum, r) => sum + r.reserved_stock, 0);
-    if (hasUnlimited) {
-      return { total: UNLIMITED_STOCK, reserved, available: Number.MAX_SAFE_INTEGER };
+    const available = computeTotalAvailable(rows);
+    if (rows.some(r => isUnlimited(r.total_stock))) {
+      return { total: UNLIMITED_STOCK, reserved, available };
     }
     const total = rows.reduce((sum, r) => sum + r.total_stock, 0);
-    return { total, reserved, available: total - reserved };
+    return { total, reserved, available };
   },
 
   // --- Reservation Lifecycle ---
@@ -229,8 +280,6 @@ export const InventoryCommandRepository = {
    * (oldest first) until enough stock is freed, then reserves.
    */
   async reserve(args: ReserveArgs): Promise<ReserveResult> {
-    const MIN_HOLD_MS = 15 * 60 * 1000; // 15 minutes
-
     // Find the supplier with the most available stock for this SKU
     const stockRows = await executeCql<StockRow>(
       `SELECT supplier_id, total_stock, reserved_stock FROM inventory_stock_w
@@ -242,39 +291,24 @@ export const InventoryCommandRepository = {
       return { success: false, error: `No stock found for SKU: ${args.blankSku}` };
     }
 
-    const hasUnlimited = stockRows.some(r => isUnlimited(r.total_stock));
-
     // Calculate total available across all suppliers
-    let totalAvailable = hasUnlimited
-      ? Number.MAX_SAFE_INTEGER
-      : stockRows.reduce(
-          (sum, r) => sum + (r.total_stock - r.reserved_stock), 0
-        );
+    let totalAvailable = computeTotalAvailable(stockRows);
 
     // If not enough available, attempt preemption of stale TEMPORARY reservations
     if (totalAvailable < args.quantity) {
-      const now = Date.now();
       const preemptable = await executeCql<ReservationRow>(
         `SELECT * FROM inventory_reservations_w
          WHERE blank_sku = ? AND status = 'TEMPORARY' ALLOW FILTERING`,
         [args.blankSku]
       );
 
-      // Filter to reservations past MIN_HOLD_TIME, sorted oldest first (FIFO)
-      const stale = preemptable
-        .filter(r => r.expires_at && (now > r.created_at.getTime() + MIN_HOLD_MS))
-        .sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
-
-      let freedStock = 0;
-      const toPreempt: ReservationRow[] = [];
-
-      for (const r of stale) {
-        if (totalAvailable + freedStock >= args.quantity) break;
-        // Don't preempt the same cart's reservation
-        if (r.cart_id === args.cartId) continue;
-        freedStock += r.quantity;
-        toPreempt.push(r);
-      }
+      const toPreempt = selectPreemptibleReservations(preemptable, {
+        totalAvailable,
+        quantityNeeded: args.quantity,
+        requestingCartId: args.cartId,
+        nowMs: Date.now(),
+      });
+      const freedStock = toPreempt.reduce((sum, r) => sum + r.quantity, 0);
 
       if (totalAvailable + freedStock >= args.quantity) {
         // Preempt the stale reservations
@@ -294,9 +328,7 @@ export const InventoryCommandRepository = {
         );
         stockRows.length = 0;
         stockRows.push(...freshRows);
-        totalAvailable = freshRows.reduce(
-          (sum, r) => sum + (r.total_stock - r.reserved_stock), 0
-        );
+        totalAvailable = computeTotalAvailable(freshRows);
       }
     }
 

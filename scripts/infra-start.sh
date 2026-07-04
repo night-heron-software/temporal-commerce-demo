@@ -46,6 +46,9 @@ until docker inspect --format='{{.State.Health.Status}}' demo-temporal 2>/dev/nu
 done
 echo "✓ Temporal ready"
 
+echo "⏳ Registering correlation Search Attributes (ADR-0011)..."
+bash "$(dirname "$0")/register-search-attributes.sh"
+
 if [ "$OTEL_ENABLED" = "true" ]; then
   echo "⏳ Waiting for Jaeger..."
   until docker inspect --format='{{.State.Health.Status}}' demo-jaeger 2>/dev/null | grep -q healthy; do

@@ -10,6 +10,7 @@ import { createLogger } from '../../lib';
 import { IDENTITY_TASK_QUEUE } from '../contracts';
 
 import * as activities from './activities-impl';
+import { transitionRecorderActivities } from '../transition-recorder';
 
 const logger = createLogger('identity:worker');
 
@@ -22,7 +23,7 @@ export default async function identityWorker(
     namespace: 'default',
     taskQueue: IDENTITY_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
-    activities,
+    activities: { ...activities, ...transitionRecorderActivities },
     ...otelConfig,
   });
 

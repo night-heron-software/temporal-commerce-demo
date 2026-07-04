@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { getOrderState, updateOrderStatus, cancelOrder } from '../../admin-order-actions';
 import type { OrderState } from '@/temporal/oms/types';
+import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
 export default function AdminOrderDetailPage() {
   const params = useParams();
@@ -29,6 +30,7 @@ export default function AdminOrderDetailPage() {
   }, [orderId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: loading/error reset before the async load is intentional
     loadOrder();
   }, [loadOrder]);
 
@@ -149,16 +151,22 @@ export default function AdminOrderDetailPage() {
         </div>
       )}
 
-      {/* Temporal UI Link */}
-      <div className="p-3 bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 rounded-lg mb-6 text-sm">
+      {/* Temporal UI + Order Trace Links */}
+      <div className="p-3 bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 rounded-lg mb-6 text-sm flex flex-wrap items-center gap-x-6 gap-y-1">
         <a
-          href={`http://localhost:8233/namespaces/default/workflows/${encodeURIComponent(`order-${order.orderId}`)}`}
+          href={`http://localhost:8233/namespaces/default/workflows/${encodeURIComponent(buildWorkflowId(DEMO_STORE_ID, 'order', order.orderId))}`}
           target="_blank"
           rel="noopener noreferrer"
           className="text-cyan-700 dark:text-cyan-400 hover:underline"
         >
           🔗 View this order workflow in Temporal UI →
         </a>
+        <Link
+          href={`/dev/order-trace?orderId=${order.orderId}`}
+          className="text-amber-700 dark:text-amber-400 hover:underline"
+        >
+          🧭 Trace this order&apos;s workflow journey →
+        </Link>
       </div>
 
       <div className="grid md:grid-cols-2 gap-6 mb-8">

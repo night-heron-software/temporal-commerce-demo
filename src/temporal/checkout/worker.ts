@@ -1,10 +1,12 @@
 import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
-import path from 'path';
+import { createLogger } from '../../lib';
 
 import * as activities from './activities-impl';
-
+import { transitionRecorderActivities } from '../transition-recorder';
 
 import { CHECKOUT_TASK_QUEUE } from '../contracts';
+
+const logger = createLogger('checkout:worker');
 
 
 
@@ -15,7 +17,7 @@ async function start(
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
-    activities,
+    activities: { ...activities, ...transitionRecorderActivities },
     taskQueue: CHECKOUT_TASK_QUEUE,
     ...otelConfig,
   });
@@ -33,7 +35,7 @@ if (require.main === module) {
       address: TEMPORAL_ADDRESS
     });
 
-    console.log(`[checkout:worker] Connected to Temporal at ${TEMPORAL_ADDRESS}`);
+    logger.info({ address: TEMPORAL_ADDRESS }, 'Connected to Temporal');
 
     try {
       await start(connection);
@@ -41,7 +43,7 @@ if (require.main === module) {
       connection.close();
     }
   })().catch((err) => {
-    console.error('[checkout:worker] Fatal:', err);
+    logger.fatal(err, 'Checkout worker process failed');
     process.exit(1);
   });
 }

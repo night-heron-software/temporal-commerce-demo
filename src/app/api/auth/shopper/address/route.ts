@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { createErrorResponse } from '@/lib/api-utils';
 import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
 import { AddressRepository } from '@/temporal/identity';
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
   const shopperId = cookieStore.get(SHOPPER_COOKIE)?.value;
 
   if (!shopperId) {
-    return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+    return createErrorResponse(401, 'Not signed in');
   }
 
   const body = await request.json();

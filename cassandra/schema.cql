@@ -371,3 +371,34 @@ CREATE TABLE IF NOT EXISTS shopper_shipping_addresses (
     updated_at TIMESTAMP,
     PRIMARY KEY (user_id, address_id)
 );
+
+-- ===========================================
+-- Workflow Observability (ADR-0010, ported from nightheron-mono)
+-- ===========================================
+-- Async state-transition projection: every state-machine transition, with a full JSON
+-- snapshot of the workflow context and the decoded trigger payload. Written off the hot
+-- path by the in-workflow AsyncTransitionRecorder. Audit/debug projection, not a source of
+-- truth (Temporal remains authoritative). store_id is TEXT; in this demo it is always the
+-- fixed 'demo' tenant. (at, run_id, seq) is workflow-determined → idempotent under activity
+-- retry; run_id in the key keeps per-run seq collision-free across continue-as-new.
+CREATE TABLE IF NOT EXISTS workflow_state_transitions (
+    store_id TEXT,
+    workflow_id TEXT,
+    at TIMESTAMP,
+    run_id TEXT,
+    seq INT,
+    workflow_type TEXT,
+    domain TEXT,
+    correlation_id TEXT,
+    order_id TEXT,
+    from_state TEXT,
+    to_state TEXT,
+    trigger_kind TEXT,
+    trigger_name TEXT,
+    trigger_payload TEXT,
+    context_snapshot TEXT,
+    prepare_activities TEXT,
+    finalize_activities TEXT,
+    PRIMARY KEY ((store_id, workflow_id), at, run_id, seq)
+) WITH CLUSTERING ORDER BY (at ASC, run_id ASC, seq ASC)
+  AND default_time_to_live = 7776000;

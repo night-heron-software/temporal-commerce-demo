@@ -69,7 +69,7 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 ### 1:00 — Checkout (~1 minute)
 
 1. Open the **cart drawer** and click **Checkout**
-2. Glance at Temporal UI — a `checkout-{uuid}` child workflow appeared
+2. Glance at Temporal UI — a `demo.checkout.{uuid}` child workflow appeared
 3. On the **Shipping** page, note the **Sign In** option in the navbar — if signed in, the email and saved address auto-populate
 4. Click **🧪 Autofill Test Data**, then **Continue to Payment**
 5. On the **Payment** page, click **Continue with Mock Payment**
@@ -82,17 +82,17 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 1. Click **Place Order** → the Confirmation page appears
 2. Switch to **Temporal UI** and show the workflow cascade:
    - `cart-{uuid}` — **Completed** (received the `checkoutCompleted` signal)
-   - `checkout-{uuid}` — **Completed**
-   - `order-{orderId}` — **Running** (OMS workflow)
-   - `fulfillment-{orderId}` — **Running** (fulfillment simulation)
-   - `inventory-service` — **Running** (singleton, started lazily on the first inventory reservation)
-3. Click into the `order-{orderId}` workflow — show auto-assignment and the fulfillment trigger activity
+   - `demo.checkout.{uuid}` — **Completed**
+   - `demo.order.{orderId}` — **Running** (OMS workflow)
+   - `demo.fulfillment.{orderId}` — **Running** (fulfillment simulation)
+   - `demo.inventory.service` — **Running** (singleton, started lazily on the first inventory reservation)
+3. Click into the `demo.order.{orderId}` workflow — show auto-assignment and the fulfillment trigger activity
 
 > "One click triggered a cascade: checkout persisted the order, signaled the parent cart, and the OMS workflow started. It auto-assigned items to suppliers and kicked off a fully decoupled fulfillment workflow on a separate task queue."
 
 ### 3:00 — Fulfillment and Admin (~1 minute)
 
-1. Click into the `fulfillment-{orderId}` workflow — show status is `in_production`
+1. Click into the `demo.fulfillment.{orderId}` workflow — show status is `in_production`
 2. Open the **Admin Panel** at `http://localhost:3000/admin/orders`
 3. Show the order in the list with its current status
 4. Open the **Elasticsearch Explorer** at `http://localhost:3000/admin/search`

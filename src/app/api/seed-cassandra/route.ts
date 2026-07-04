@@ -4,7 +4,7 @@
  * No auth required — demo mode.
  */
 import { NextResponse } from 'next/server';
-import { getCassandraClient, executeCql, cassandraTypes as types } from '@/lib';
+import { executeCql, cassandraTypes as types } from '@/lib';
 import path from 'path';
 import fs from 'fs/promises';
 

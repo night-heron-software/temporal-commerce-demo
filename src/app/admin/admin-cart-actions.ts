@@ -9,6 +9,7 @@
 
 import { getTemporalClient } from '@/lib';
 import { Cart } from '@/temporal/contracts';
+import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
 export type ActionResult<T> =
   | { success: true; data: T }
@@ -92,7 +93,7 @@ export async function getActiveCarts(): Promise<ActionResult<CartSummary[]>> {
 export async function getCartDetails(cartId: string): Promise<ActionResult<Cart.CartDetails>> {
   try {
     const client = await getTemporalClient();
-    const handle = client.workflow.getHandle(`cart-${cartId}`);
+    const handle = client.workflow.getHandle(buildWorkflowId(DEMO_STORE_ID, 'cart', cartId));
     const details = await handle.query(Cart.getCartQuery);
     return { success: true, data: details };
   } catch (e) {

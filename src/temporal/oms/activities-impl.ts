@@ -360,21 +360,29 @@ export async function getOrderById(orderId: string): Promise<Order | null> {
  */
 export async function startFulfillmentWorkflow(input: Record<string, unknown>): Promise<string> {
   const orderId = input.orderId as string;
-  const workflowId = `fulfillment-${orderId}`;
-  log.info(`[Activity] Starting fulfillment workflow: ${workflowId}`);
 
   const { getTemporalClient } = await import('../../lib/temporal-client');
+  const { buildWorkflowStartOptions, DEMO_STORE_ID } = await import('../contracts/constants');
   const client = await getTemporalClient();
 
+  const startOptions = buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'fulfillment',
+    entityId: orderId,
+    orderId,
+    cartId: input.cartId as string | undefined,
+  });
+  log.info(`[Activity] Starting fulfillment workflow: ${startOptions.workflowId}`);
+
   await client.workflow.start('fulfillmentWorkflow', {
+    ...startOptions,
     taskQueue: 'fulfillment-queue',
-    workflowId,
     args: [input],
     workflowExecutionTimeout: '90 days'
   });
 
-  log.info(`[Activity] Started fulfillment workflow: ${workflowId}`);
-  return workflowId;
+  log.info(`[Activity] Started fulfillment workflow: ${startOptions.workflowId}`);
+  return startOptions.workflowId;
 }
 
 export function createOmsActivities() {

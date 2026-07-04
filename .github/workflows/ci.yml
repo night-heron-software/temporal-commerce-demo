@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The @temporalio/testing time-skipping test server binary is downloaded on first
+      # use; cache it so workflow-level tests don't re-download every run.
+      - name: Cache Temporal test-server binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.temporalio
+            ~/.cache/temporalio
+          key: temporal-test-server-${{ runner.os }}
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      # Unit + workflow tests run against the in-process time-skipping Temporal test
+      # server — no Docker services required.
+      - run: npm test
+
+      # State diagrams are generated from source (static AST analysis); fail if a
+      # states/decider change landed without regenerating them.
+      - run: npm run docs:diagrams:check

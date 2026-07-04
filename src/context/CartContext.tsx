@@ -88,23 +88,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  /**
+   * Adopt an edit result: an abandoned/emptied cart (its workflow reached terminal)
+   * or a missing result clears local cart state; otherwise the new cart is applied.
+   */
+  const adoptEditedCart = (newCart: Awaited<ReturnType<typeof removeFromCart>>) => {
+    if (newCart && newCart.status !== 'abandoned' && newCart.items.length > 0) {
+      setCart(newCart);
+    } else {
+      setCart(null);
+      setCartId(null);
+    }
+  };
+
   const removeItem = async (lineItemId: string) => {
     if (!cartId) return;
     setLoading(true);
     setError(null);
     try {
-      const newCart = await removeFromCart(cartId, lineItemId);
-      if (newCart) {
-        if (newCart.status === 'abandoned' || newCart.items.length === 0) {
-          setCart(null);
-          setCartId(null);
-        } else {
-          setCart(newCart);
-        }
-      } else {
-        setCart(null);
-        setCartId(null);
-      }
+      adoptEditedCart(await removeFromCart(cartId, lineItemId));
     } catch {
       setError('Unable to connect to cart service. Please try again.');
     } finally {
@@ -117,18 +119,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const newCart = await updateItemQuantity(cartId, lineItemId, quantity);
-      if (newCart) {
-        if (newCart.status === 'abandoned' || newCart.items.length === 0) {
-          setCart(null);
-          setCartId(null);
-        } else {
-          setCart(newCart);
-        }
-      } else {
-        setCart(null);
-        setCartId(null);
-      }
+      adoptEditedCart(await updateItemQuantity(cartId, lineItemId, quantity));
     } catch {
       setError('Unable to connect to cart service. Please try again.');
     } finally {

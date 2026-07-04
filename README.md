@@ -40,6 +40,18 @@ graph TB
 | **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
 | **Identity** | Email-based shopper auth and address persistence | Cookie sessions, auto-create accounts, address pre-fill |
 
+Domain workflows are authored as **prepare → decide → finalize state machines** around
+pure, unit-tested deciders (`src/temporal/framework`). Every workflow carries a parseable
+`demo.{domain}.{entityId}` ID plus correlation Search Attributes, so one Temporal
+visibility query (`CorrelationId = '<cartId>'`) returns the whole
+cart → checkout → order → fulfillment journey; each state transition is also recorded to
+Cassandra with a full context snapshot for the order-trace tool.
+
+Every machine's diagram is auto-generated from source: see the
+[State Machine Reference](docs/reference/state-machine-diagrams.md) (Mermaid diagrams,
+per-state trigger tables, and the cross-domain orchestration graph), regenerated with
+`npm run docs:diagrams` and kept fresh by CI.
+
 ## Quick Start
 
 ### Prerequisites
@@ -78,6 +90,7 @@ This starts the Next.js dev server and Temporal workers concurrently.
 
 - **Storefront** → [http://localhost:3000/shop](http://localhost:3000/shop)
 - **Temporal UI** → [http://localhost:8233](http://localhost:8233)
+- **Order Trace (dev tool)** → [http://localhost:3000/dev/order-trace](http://localhost:3000/dev/order-trace) — cross-domain trace of an order's workflow journey with per-transition state history
 
 ## NPM Scripts
 
@@ -99,6 +112,9 @@ This starts the Next.js dev server and Temporal workers concurrently.
 | `npm run infra:down` | Stop Docker containers |
 | `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
 | `npm run infra:ps` | List running Docker containers |
+| `npm test` | Run the vitest unit/workflow test suite (no Docker required) |
+| `npm run test:watch` | Run tests in watch mode |
+| `npm run docs:diagrams` | Regenerate the [State Machine Reference](docs/reference/state-machine-diagrams.md) from source |
 
 See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 

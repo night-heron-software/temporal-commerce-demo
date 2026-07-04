@@ -27,6 +27,10 @@ These rules are mandatory for all workflow and activity code in `src/temporal/`:
 3. **CQRS**: Sync projections with non-blocking updates/signals. Perform dirty-loop projections for high-latency Update handlers. Use Queries for reads, Updates for exact confirmations, and Signals for fire-and-forget APIs.
 4. **Code Organization**: Use the Two-File Activity pattern (contract vs. impl), Definitions File pattern for queries/signals, and strict module isolation to prevent Temporal runtime imports within Next.js.
 5. **Client Operations**: Use unified domain-specific wrappers (e.g., `executeCartUpdate`) inside Next.js Server Actions to safely handle terminal errors and perform redemptive client-state clearing.
+6. **Workflow IDs & Correlation (ported from nightheron-mono ADR-0011)**: Build workflow IDs with `buildWorkflowId(DEMO_STORE_ID, domain, entityId)` from `src/temporal/contracts/constants.ts` — never inline `{storeId}.{domain}.{entityId}` strings (lint-enforced). At workflow **starts**, spread `buildWorkflowStartOptions()` so the correlation Search Attributes (`CorrelationId`, `StoreId`, `Domain`, `OrderId`, `CartId`) and memo are set.
+7. **Prepare → Decide → Finalize (ADR-0003/0009/0010)**: Domain state machines are authored with `defineDomain()/transitions()` from `src/temporal/framework`; each domain has a pure `*-decider.ts` (decide → facts, evolve as the sole state writer). `decide` is pure and synchronous — no activities, no clock (`meta.timestamp` / the `at` hook argument carry deterministic time; lint-enforced), no id generation (inject via the command from `prepare`). I/O belongs in `prepare`/`finalize`/hooks. Changes to decider/states files **require** co-located `*.test.ts` unit tests.
+8. **Transition recording (ADR-0010)**: the framework records every transition to Cassandra `workflow_state_transitions` via the `persistWorkflowTransitions` activity — spread `transitionRecorderActivities` into any new domain worker. The order-trace dev tool (`/dev/order-trace`) reads these.
+9. **State diagrams are generated, never hand-edited**: after changing any `states.ts` / `*-decider.ts` / `supplier-states.ts`, run `npm run docs:diagrams` and commit the regenerated `docs/reference/state-machine-diagrams.md` + `state-graph.json`. CI fails stale diagrams via `npm run docs:diagrams:check`; `src/temporal/state-graph.test.ts` asserts structural properties (reachability, no dead-end states) against the JSON.
 
 ---
 
@@ -138,7 +142,7 @@ See `.env.example` for all variables. The demo uses hardcoded defaults for local
 | `CASSANDRA_CONTACT_POINTS` | `localhost:9042` | Cassandra contact points |
 | `CASSANDRA_KEYSPACE` | `catalog` | Cassandra keyspace |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch URL |
-| `OTEL_ENABLED` | `true` | Enable distributed tracing via OTel |
+| `OTEL_ENABLED` | `false` | Enable distributed tracing via OTel (opt-in) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint (Jaeger) |
 
 ---

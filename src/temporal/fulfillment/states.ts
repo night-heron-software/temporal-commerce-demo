@@ -1,83 +1,84 @@
-import { log } from '@temporalio/workflow';
+/**
+ * Fulfillment states — the shell around the pure fulfillment Decider.
+ *
+ * The parent fulfillment workflow is entirely signal-driven: child supplier-order
+ * workflows report status via the `childStatus` signal; OMS can `cancel`. Routing to
+ * a terminal happens here from the decider-aggregated status.
+ */
 import type {
   FulfillmentWorkflowState,
   FulfillmentSignal,
   FulfillmentStateName,
 } from './types';
 import type { FulfillmentResult } from './definitions';
-import { StateInput, StateOutput, StateRegistry } from '../framework';
+import { decide as fulfillmentDecide, evolve } from './fulfillment-decider';
+import type { FulfillmentCommand } from './fulfillment-decider';
+import { defineDomain, terminal } from '../framework';
+import type { StateRegistry } from '../framework';
 
-// ==================
-// Status Aggregation
-// ==================
+const fulfillment = defineDomain<
+  FulfillmentStateName,
+  never,
+  FulfillmentWorkflowState,
+  FulfillmentResult,
+  FulfillmentSignal
+>();
 
-function aggregateStatus(state: FulfillmentWorkflowState): FulfillmentWorkflowState['status'] {
-  const statuses = state.supplierOrders.map((so) => so.status);
-
-  if (statuses.every((s) => s === 'delivered')) return 'delivered';
-  if (statuses.every((s) => s === 'cancelled' || s === 'failed')) return 'failed';
-  if (statuses.every((s) => s === 'shipped' || s === 'delivered')) return 'shipped';
-  if (statuses.some((s) => s === 'shipped' || s === 'delivered')) return 'partially_shipped';
-  return 'in_production';
-}
-
-// ==================
-// State Functions
-// ==================
-
-export async function inProductionState(
+/** Shell adapter — run the pure Decider (decide → evolve) for the next state. */
+function apply(
   ctx: Readonly<FulfillmentWorkflowState>,
-  input: StateInput<never, FulfillmentSignal>,
-): Promise<StateOutput<FulfillmentStateName, FulfillmentWorkflowState, FulfillmentResult>> {
-  const draft: FulfillmentWorkflowState = {
-    ...ctx,
-    supplierOrders: ctx.supplierOrders.map((so) => ({
-      ...so,
-      items: so.items.map((i) => ({ ...i })),
-      shipments: so.shipments ? so.shipments.map((s) => ({ ...s })) : undefined,
-    })),
-  };
-
-  if (input.kind === 'timeout') {
-    return { context: ctx, next: 'in_production' };
-  }
-
-  if (input.kind === 'signal') {
-    const signal = input.result;
-
-    if (signal.kind === 'cancel') {
-      draft.status = 'cancelled';
-      draft.updatedAt = new Date().toISOString();
-      for (const so of draft.supplierOrders) {
-        so.status = 'cancelled';
-        so.items.forEach((i) => (i.status = 'cancelled'));
-      }
-      return { context: draft, next: '__terminal:cancelled' };
-    }
-
-    if (signal.kind === 'childStatus') {
-      const childOrderState = signal.update;
-      draft.supplierOrders = draft.supplierOrders.map((so) =>
-        so.supplierOrderId === childOrderState.supplierOrderId ? childOrderState : so
-      );
-
-      draft.status = aggregateStatus(draft);
-      draft.updatedAt = new Date().toISOString();
-
-      if (draft.status === 'delivered') {
-        return { context: draft, next: '__terminal:delivered' };
-      }
-      if (draft.status === 'failed') {
-        return { context: draft, next: '__terminal:failed' };
-      }
-      if (draft.status === 'cancelled') {
-        return { context: draft, next: '__terminal:cancelled' };
-      }
-    }
-  }
-
-  return { context: draft, next: 'in_production' };
+  command: FulfillmentCommand,
+): FulfillmentWorkflowState {
+  const state = ctx as FulfillmentWorkflowState;
+  return fulfillmentDecide(command, state).reduce(evolve, state);
 }
+
+// ==================
+// State: received — transitional entry (onStart spawns children, then we wait)
+// ==================
+
+const received = fulfillment.state('received', {
+  decide(ctx) {
+    return { context: ctx as FulfillmentWorkflowState, next: 'in_production' as const };
+  },
+});
+
+// ==================
+// State: in_production — signal-driven aggregation until all children close
+// ==================
+
+const inProduction = fulfillment.transitions(
+  'in_production',
+  {},
+  {
+    onTimeout: {
+      decide(ctx) {
+        return { context: ctx as FulfillmentWorkflowState, next: 'in_production' as const };
+      },
+    },
+    onSignals: {
+      cancel: {
+        decide(ctx, _signal, meta) {
+          const context = apply(ctx, { type: 'cancel', at: meta.timestamp });
+          return { context, next: terminal('cancelled') };
+        },
+      },
+      childStatus: {
+        decide(ctx, signal, meta) {
+          const context = apply(ctx, {
+            type: 'childStatusReported',
+            update: signal.update,
+            at: meta.timestamp,
+          });
+          if (context.status === 'delivered') return { context, next: terminal('delivered') };
+          if (context.status === 'failed') return { context, next: terminal('failed') };
+          if (context.status === 'cancelled') return { context, next: terminal('cancelled') };
+          return { context, next: 'in_production' as const };
+        },
+      },
+    },
+  },
+);
 
 export const FULFILLMENT_STATES: StateRegistry<
   FulfillmentStateName,
@@ -86,9 +87,6 @@ export const FULFILLMENT_STATES: StateRegistry<
   FulfillmentResult,
   FulfillmentSignal
 > = {
-  received: {
-    fn: async (ctx: Readonly<FulfillmentWorkflowState>) => ({ context: ctx, next: 'in_production' as const }),
-    transitional: true,
-  },
-  in_production: { fn: inProductionState, timeout: '365 days' },
+  received: { ...received, transitional: true },
+  in_production: { ...inProduction, timeout: '365 days' },
 };

@@ -8,13 +8,14 @@
  */
 
 import { getTemporalClient } from '@/lib';
-import { executeCql, cassandraTypes as types } from '@/lib';
+import { executeCqlAll } from '@/lib';
 import {
   getOrderStateQuery,
   updateStatusUpdate,
   cancelOrderUpdate,
 } from '@/temporal/oms/definitions';
 import type { OrderState, UpdateStatusSignal, OrderStatus } from '@/temporal/oms/types';
+import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
 export type ActionResult<T> =
   | { success: true; data: T }
@@ -31,11 +32,12 @@ export interface OrderSummary {
 }
 
 /**
- * Get all orders from Cassandra
+ * Get all orders from Cassandra (auto-pages the full table — previously a silent
+ * LIMIT 200 that dropped older orders).
  */
 export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
   try {
-    const rows = await executeCql<{
+    const rows = await executeCqlAll<{
       order_id: { toString(): string };
       confirmation_number: string;
       customer_email: string;
@@ -44,7 +46,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       status: string;
       created_at: Date | null;
     }>(
-      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders LIMIT 200`
+      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders`
     );
 
     const sorted = rows.sort((a, b) => {
@@ -77,7 +79,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
 export async function getOrderState(orderId: string): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `order-${orderId}`;
+    const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.query(getOrderStateQuery);
     return { success: true, data: state };
@@ -102,7 +104,7 @@ export async function updateOrderStatus(
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `order-${orderId}`;
+    const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.executeUpdate(updateStatusUpdate, {
       args: [{ status, note, updatedBy: 'admin' as const } as UpdateStatusSignal],
@@ -124,7 +126,7 @@ export async function cancelOrder(
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `order-${orderId}`;
+    const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.executeUpdate(cancelOrderUpdate, {
       args: [{ reason }],

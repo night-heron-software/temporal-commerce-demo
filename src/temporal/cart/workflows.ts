@@ -1,11 +1,4 @@
-import {
-  allHandlersFinished,
-  condition,
-  continueAsNew,
-  getExternalWorkflowHandle,
-  log,
-  setHandler,
-} from '@temporalio/workflow';
+import { getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
 import { releaseCartItem, indexCart } from './activities';
 import { buildCartDocument } from './document-builder';
 import type {
@@ -29,6 +22,7 @@ import {
 import {
   runStateMachine,
   StateMachineConfig,
+  deriveDisplayStatus,
 } from '../framework';
 
 import { CART_STATES } from './states';
@@ -56,12 +50,13 @@ interface CartWorkflowInput {
   currentState?: 'active' | 'awaitingCheckout';
 }
 
-/** Bump version/timestamps on a cart and sync the ES projection. */
-async function flushCart(cart: CartDetails): Promise<CartDetails> {
+/** Bump version/timestamps on a cart and sync the ES projection. `at` is the driver-supplied
+ * deterministic transition time (never read the clock in state-machine hooks). */
+async function flushCart(cart: CartDetails, at: string): Promise<CartDetails> {
   const updated: CartDetails = {
     ...cart,
     cartVersion: (cart.cartVersion || 0) + 1,
-    updatedAt: new Date().toISOString(),
+    updatedAt: at,
   };
 
   await indexCart(buildCartDocument(updated, updated.createdAt));
@@ -134,12 +129,16 @@ export async function cartWorkflow(input: CartWorkflowInput | string): Promise<C
     initialState: (inputCheckoutInProgress || legacyStateName === 'awaitingCheckout') ? 'checkout' : 'active',
     onContextUpdate: (newCtx: CartWorkflowContext, state: CartStateName | `__terminal:${string}`) => {
       workflowContext = newCtx;
-      currentStatus = (typeof state === 'string' && state.startsWith('__terminal:')
-        ? state.replace('__terminal:', '')
-        : state) as CartDetails['status'];
+      currentStatus = deriveDisplayStatus<CartDetails['status']>(state);
     },
-    onTransition: async (from: CartStateName, to: CartStateName | `__terminal:${string}`, event: CartEvent | 'timeout' | 'signal', currentCtx: CartWorkflowContext) => {
-      const flushedCart = await flushCart(currentCtx.cart);
+    onTransition: async (
+      from: CartStateName,
+      to: CartStateName | `__terminal:${string}`,
+      event: CartEvent | 'timeout' | 'signal',
+      currentCtx: CartWorkflowContext,
+      at: string,
+    ) => {
+      const flushedCart = await flushCart(currentCtx.cart, at);
       workflowContext.cart = flushedCart;
     },
     continueAsNewThreshold: CONTINUE_AS_NEW_THRESHOLD,
