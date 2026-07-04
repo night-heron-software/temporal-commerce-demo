@@ -107,6 +107,8 @@ This starts the Next.js dev server and Temporal workers concurrently.
 | `npm run infra:down` | Stop Docker containers |
 | `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
 | `npm run infra:ps` | List running Docker containers |
+| `npm test` | Run the vitest unit/workflow test suite (no Docker required) |
+| `npm run test:watch` | Run tests in watch mode |
 
 See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 

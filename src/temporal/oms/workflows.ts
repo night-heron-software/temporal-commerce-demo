@@ -1,5 +1,4 @@
 import { log, setHandler, uuid4 } from '@temporalio/workflow';
-const getFeatureFlag = async (_flag: string) => false;
 import { OrderLineItem, Cart } from '../contracts';
 type CartItem = Cart.CartItem;
 import {
@@ -27,20 +26,7 @@ import {
 } from './types';
 import { buildOrderDocument, buildSupplierOrderDocument } from './document-builder';
 
-interface FulfillmentSupplierOrderInput {
-  supplierOrderId: string;
-  supplierId: string;
-  supplierType: string;
-  items: FulfillmentItem[];
-}
-interface FulfillmentItem {
-  sku: string;
-  productId: string;
-  variantId: string;
-  quantity: number;
-  unitPrice: number;
-  title: string;
-}
+import type { FulfillmentSupplierOrderInput, FulfillmentItem } from '../contracts/fulfillment';
 
 // Import definitions from the dedicated definitions file
 import {
@@ -74,8 +60,6 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     itemCount: input.order.items.length,
     customerEmail: input.customerEmail
   });
-
-  const dataFlowEnabled = await getFeatureFlag('DATA_FLOW_LOGGING');
 
   let ctx: OmsWorkflowContext = {
     customerEmail: input.customerEmail,
@@ -177,12 +161,6 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         totalAssignments: state.assignments.length,
         simulated: simulatedCount
       });
-      if (dataFlowEnabled) {
-        log.info('[DataFlow] T6: Order → OrderAssignment[] — mid.assignments', {
-          dataFlow: true, stage: 'T6: Order → FulfillmentOrderRequest', label: 'mid.OrderAssignment[]',
-          data: JSON.stringify(state.assignments, null, 2)
-        });
-      }
 
       // All items are now assigned, move to ready_to_fulfill
       state.status = 'ready_to_fulfill';
@@ -204,7 +182,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
       // Trigger fulfillment
       log.info('[OMS] Triggering fulfillment');
-      await triggerFulfillment(state, input, 'system', dataFlowEnabled);
+      await triggerFulfillment(state, input, 'system');
       log.info('[OMS] Fulfillment triggered, entering main loop', {
         status: state.status,
         supplierOrderCount: state.supplierOrders.length
@@ -269,8 +247,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 async function triggerFulfillment(
   state: OrderState,
   input: OrderWorkflowInput,
-  updatedBy: 'admin' | 'system',
-  dataFlowEnabled: boolean = false
+  updatedBy: 'admin' | 'system'
 ): Promise<void> {
   // Group assignments by supplierId
   const bySupplier: Record<string, typeof state.assignments> = {};
@@ -342,13 +319,6 @@ async function triggerFulfillment(
       supplierId,
       supplierType: 'simulated',
       items: fulfillmentItems
-    });
-  }
-
-  if (dataFlowEnabled) {
-    log.info('[DataFlow] T6: Order → FulfillmentOrderRequest — output.FulfillmentSupplierOrderInput[]', {
-      dataFlow: true, stage: 'T6: Order → FulfillmentOrderRequest', label: 'output.FulfillmentSupplierOrderInput[]',
-      data: JSON.stringify(fulfillmentSupplierOrders, null, 2)
     });
   }
 

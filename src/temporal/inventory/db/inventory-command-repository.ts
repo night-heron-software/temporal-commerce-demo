@@ -21,6 +21,25 @@ function isUnlimited(totalStock: number): boolean {
   return totalStock === UNLIMITED_STOCK;
 }
 
+/**
+ * Minimum hold time before a TEMPORARY reservation becomes preemptable (see reserve()).
+ * Business rationale: a shopper's cart reservation is protected for at least this long so
+ * an active checkout is never yanked mid-flow; past it, stale carts lose to new demand.
+ */
+export const MIN_HOLD_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Sum available stock (total − reserved) across a SKU's supplier rows.
+ * Any supplier with UNLIMITED_STOCK makes the SKU effectively infinite.
+ * Pure — shared by getStockLevel() and both aggregation points in reserve().
+ */
+export function computeTotalAvailable(
+  rows: Array<{ total_stock: number; reserved_stock: number }>,
+): number {
+  if (rows.some((r) => isUnlimited(r.total_stock))) return Number.MAX_SAFE_INTEGER;
+  return rows.reduce((sum, r) => sum + (r.total_stock - r.reserved_stock), 0);
+}
+
 export interface StockLevel {
   total: number;
   reserved: number;
@@ -209,13 +228,13 @@ export const InventoryCommandRepository = {
       `SELECT total_stock, reserved_stock FROM inventory_stock_w WHERE blank_sku = ?`,
       [blankSku]
     );
-    const hasUnlimited = rows.some(r => isUnlimited(r.total_stock));
     const reserved = rows.reduce((sum, r) => sum + r.reserved_stock, 0);
-    if (hasUnlimited) {
-      return { total: UNLIMITED_STOCK, reserved, available: Number.MAX_SAFE_INTEGER };
+    const available = computeTotalAvailable(rows);
+    if (rows.some(r => isUnlimited(r.total_stock))) {
+      return { total: UNLIMITED_STOCK, reserved, available };
     }
     const total = rows.reduce((sum, r) => sum + r.total_stock, 0);
-    return { total, reserved, available: total - reserved };
+    return { total, reserved, available };
   },
 
   // --- Reservation Lifecycle ---
@@ -229,8 +248,6 @@ export const InventoryCommandRepository = {
    * (oldest first) until enough stock is freed, then reserves.
    */
   async reserve(args: ReserveArgs): Promise<ReserveResult> {
-    const MIN_HOLD_MS = 15 * 60 * 1000; // 15 minutes
-
     // Find the supplier with the most available stock for this SKU
     const stockRows = await executeCql<StockRow>(
       `SELECT supplier_id, total_stock, reserved_stock FROM inventory_stock_w
@@ -242,14 +259,8 @@ export const InventoryCommandRepository = {
       return { success: false, error: `No stock found for SKU: ${args.blankSku}` };
     }
 
-    const hasUnlimited = stockRows.some(r => isUnlimited(r.total_stock));
-
     // Calculate total available across all suppliers
-    let totalAvailable = hasUnlimited
-      ? Number.MAX_SAFE_INTEGER
-      : stockRows.reduce(
-          (sum, r) => sum + (r.total_stock - r.reserved_stock), 0
-        );
+    let totalAvailable = computeTotalAvailable(stockRows);
 
     // If not enough available, attempt preemption of stale TEMPORARY reservations
     if (totalAvailable < args.quantity) {
@@ -294,9 +305,7 @@ export const InventoryCommandRepository = {
         );
         stockRows.length = 0;
         stockRows.push(...freshRows);
-        totalAvailable = freshRows.reduce(
-          (sum, r) => sum + (r.total_stock - r.reserved_stock), 0
-        );
+        totalAvailable = computeTotalAvailable(freshRows);
       }
     }
 

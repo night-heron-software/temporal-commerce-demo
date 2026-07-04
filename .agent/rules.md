@@ -141,7 +141,7 @@ See `.env.example` for all variables. The demo uses hardcoded defaults for local
 | `CASSANDRA_CONTACT_POINTS` | `localhost:9042` | Cassandra contact points |
 | `CASSANDRA_KEYSPACE` | `catalog` | Cassandra keyspace |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch URL |
-| `OTEL_ENABLED` | `true` | Enable distributed tracing via OTel |
+| `OTEL_ENABLED` | `false` | Enable distributed tracing via OTel (opt-in) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint (Jaeger) |
 
 ---

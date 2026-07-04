@@ -44,7 +44,8 @@ import {
 export { supplierOrderWorkflow };
 
 export type FulfillmentStatusUpdate = OMS.FulfillmentStatusUpdate;
-export type SupplierOrderStatus = OMS.SupplierOrderStatus;
+// Internal alias for the OMS-facing status vocabulary (no external importers).
+type SupplierOrderStatus = OMS.SupplierOrderStatus;
 
 // ============================================================================
 // Status Mapping

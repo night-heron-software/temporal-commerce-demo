@@ -10,19 +10,11 @@ export type CheckoutStateName = 'validating' | 'shipping' | 'payment' | 'review'
 
 export type CheckoutStep = CheckoutStateName | 'complete' | 'failed' | 'cancelled';
 
-export interface CheckoutState {
-  step: CheckoutStep;
-  isGuest: boolean;
-  shippingAddress?: ShippingAddress;
-  paymentMethod?: PaymentMethod;
-  shippingCost: number;
-  tax: number;
-  cartVersionAtStart?: number;
-  cartVersionAcknowledged?: number;
-  order?: Order;
-  error?: string;
-  clientSecret?: string;
-}
+/**
+ * The contracts definition is the single source of truth (its `step` union is a superset —
+ * it also carries the legacy 'processing' step used by cart-side display code).
+ */
+export type CheckoutState = Cart.CheckoutState;
 
 export interface CheckoutWorkflowInput {
   cartId: string;
