@@ -11,6 +11,11 @@ import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
 import { getTemporalClient } from '@/lib/temporal-client';
 import { Cart, Checkout, Constants } from '@/temporal/contracts';
+import {
+  buildWorkflowId,
+  buildWorkflowStartOptions,
+  DEMO_STORE_ID,
+} from '@/temporal/contracts/constants';
 
 const CART_ID_COOKIE = 'cartId';
 
@@ -56,14 +61,19 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
   options: { createIfMissing?: boolean } = {}
 ): Promise<TReturn | null> {
   const client = await getTemporalClient();
-  const workflowId = `cart-${cartId}`;
+  const workflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', cartId);
 
   try {
     if (options.createIfMissing) {
       // Use updateWithStart to lazily create the workflow
       const { WithStartWorkflowOperation } = await import('@temporalio/client');
       const startOp = new WithStartWorkflowOperation('cartWorkflow', {
-        workflowId,
+        ...buildWorkflowStartOptions({
+          storeId: DEMO_STORE_ID,
+          domain: 'cart',
+          entityId: cartId,
+          cartId,
+        }),
         args: [{ cartId }],
         taskQueue: Constants.CART_TASK_QUEUE,
         workflowIdConflictPolicy: 'USE_EXISTING',
@@ -122,7 +132,7 @@ async function executeCheckoutUpdate<TReturn, TArgs extends any[]>(
  */
 export async function getCart(cartId: string): Promise<Cart.CartDetails | null> {
   const client = await getTemporalClient();
-  const handle = client.workflow.getHandle(`cart-${cartId}`);
+  const handle = client.workflow.getHandle(buildWorkflowId(DEMO_STORE_ID, 'cart', cartId));
   try {
     return await handle.query(Cart.getCartQuery);
   } catch (e: unknown) {
@@ -178,7 +188,7 @@ export async function beginCheckout(cartId: string): Promise<Cart.CartDetails | 
 
 export async function getCheckoutWorkflowId(cartId: string): Promise<string | null> {
   const client = await getTemporalClient();
-  const handle = client.workflow.getHandle(`cart-${cartId}`);
+  const handle = client.workflow.getHandle(buildWorkflowId(DEMO_STORE_ID, 'cart', cartId));
   try {
     return await handle.query(Cart.getCheckoutWorkflowIdQuery);
   } catch {
@@ -253,7 +263,7 @@ export async function getCheckoutState(cartId: string): Promise<Cart.CheckoutSta
   }
   try {
     const client = await getTemporalClient();
-    const cartHandle = client.workflow.getHandle(`cart-${cartId}`);
+    const cartHandle = client.workflow.getHandle(buildWorkflowId(DEMO_STORE_ID, 'cart', cartId));
     return await cartHandle.query(Cart.getCheckoutStateQuery);
   } catch {
     return null;

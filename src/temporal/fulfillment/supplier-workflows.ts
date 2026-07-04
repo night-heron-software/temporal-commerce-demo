@@ -1,5 +1,6 @@
 import * as wf from '@temporalio/workflow';
 import { Fulfillment, Suppliers } from '../contracts';
+import { buildWorkflowId, DEMO_STORE_ID } from '../contracts/constants';
 import type {
   FulfillmentSupplierOrderState,
   FulfillmentLineItemState,
@@ -67,7 +68,7 @@ async function notifyParent(
   orderId: string,
 ) {
   try {
-    const parentWorkflowId = `fulfillment-${orderId}`;
+    const parentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
     const parentHandle = wf.getExternalWorkflowHandle(parentWorkflowId);
     await parentHandle.signal('childStatusUpdate', so);
   } catch (err) {

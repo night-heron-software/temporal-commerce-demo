@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getTemporalClient } from '../src/lib/temporal-client';
 import { getCassandraClient, executeCql } from '../src/lib/cassandra-client';
 import { Cart, Checkout, OMS, Constants } from '../src/temporal/contracts';
+import { buildWorkflowStartOptions, DEMO_STORE_ID } from '../src/temporal/contracts/constants';
 import { WithStartWorkflowOperation } from '@temporalio/client';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -10,11 +11,17 @@ async function runCheckout(variantId: string, runIndex: number) {
   console.log(`\n--- STARTING CHECKOUT RUN #${runIndex} ---`);
   const client = await getTemporalClient();
   const cartId = uuidv4();
-  const cartWorkflowId = `cart-${cartId}`;
+  const cartStart = buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'cart',
+    entityId: cartId,
+    cartId,
+  });
+  const cartWorkflowId = cartStart.workflowId;
 
   console.log(`[Run ${runIndex}] Creating Cart & Adding Variant...`);
   const startOp = new WithStartWorkflowOperation('cartWorkflow', {
-    workflowId: cartWorkflowId,
+    ...cartStart,
     args: [{ cartId }],
     taskQueue: Constants.CART_TASK_QUEUE,
     workflowIdConflictPolicy: 'USE_EXISTING',

@@ -28,6 +28,27 @@ const eslintConfig = defineConfig([
     rules: {
       "no-console": "warn"
     }
+  },
+  {
+    // Architecture invariant (ADR-0011, ported from nightheron-mono): workflow IDs are
+    // built with buildWorkflowId()/buildWorkflowStartOptions(), never inline template
+    // strings. The middle template element of `${storeId}.<domain>.${entityId}` is
+    // exactly ".<domain>."; match that shape.
+    files: ["**/*.ts", "**/*.tsx"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "TemplateElement[value.raw=/\\.(cart|checkout|order|inventory|fulfillment|fulfiller-order|identity)\\./]",
+          message:
+            "Build workflow IDs with buildWorkflowId(storeId, domain, entityId) from " +
+            "src/temporal/contracts/constants — never construct the {storeId}.{domain}.{entityId} " +
+            "string inline. For workflow starts, prefer buildWorkflowStartOptions(...) so " +
+            "correlation tags are applied too.",
+        },
+      ],
+    },
   }
 ]);
 

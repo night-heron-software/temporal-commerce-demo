@@ -2,6 +2,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { getTemporalClient } from '../src/lib/temporal-client';
 import { getCassandraClient, executeCql } from '../src/lib/cassandra-client';
 import { Cart, Checkout, OMS, Constants } from '../src/temporal/contracts';
+import {
+  buildWorkflowId,
+  buildWorkflowStartOptions,
+  DEMO_STORE_ID,
+} from '../src/temporal/contracts/constants';
 import { WithStartWorkflowOperation } from '@temporalio/client';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,11 +28,17 @@ async function run() {
     // 2. Connect to Temporal
     const client = await getTemporalClient();
     const cartId = uuidv4();
-    const cartWorkflowId = `cart-${cartId}`;
+    const cartStart = buildWorkflowStartOptions({
+      storeId: DEMO_STORE_ID,
+      domain: 'cart',
+      entityId: cartId,
+      cartId,
+    });
+    const cartWorkflowId = cartStart.workflowId;
 
     console.log(`[1] Creating Cart & Adding Variant...`);
     const startOp = new WithStartWorkflowOperation('cartWorkflow', {
-      workflowId: cartWorkflowId,
+      ...cartStart,
       args: [{ cartId }],
       taskQueue: Constants.CART_TASK_QUEUE,
       workflowIdConflictPolicy: 'USE_EXISTING',
@@ -127,7 +138,7 @@ async function run() {
 
     // 7. Track OMS & Fulfillment Workflow
     console.log(`[3] Tracking Fulfillment via Temporal...`);
-    const omsWorkflowId = `order-${orderId}`;
+    const omsWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const omsHandle = client.workflow.getHandle(omsWorkflowId);
 
     // Poll OMS status
@@ -149,7 +160,7 @@ async function run() {
     }
     console.log(`✅ Found Supplier Order ID: ${supplierOrderId}\n`);
 
-    const fulfillmentWorkflowId = `fulfillment-${orderId}`;
+    const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
     const fulfillmentHandle = client.workflow.getHandle(fulfillmentWorkflowId);
 
     console.log(`   🔸 Monitoring fulfillment progress...`);

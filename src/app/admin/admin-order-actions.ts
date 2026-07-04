@@ -15,6 +15,7 @@ import {
   cancelOrderUpdate,
 } from '@/temporal/oms/definitions';
 import type { OrderState, UpdateStatusSignal, OrderStatus } from '@/temporal/oms/types';
+import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
 export type ActionResult<T> =
   | { success: true; data: T }
@@ -77,7 +78,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
 export async function getOrderState(orderId: string): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `order-${orderId}`;
+    const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.query(getOrderStateQuery);
     return { success: true, data: state };
@@ -102,7 +103,7 @@ export async function updateOrderStatus(
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `order-${orderId}`;
+    const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.executeUpdate(updateStatusUpdate, {
       args: [{ status, note, updatedBy: 'admin' as const } as UpdateStatusSignal],
@@ -124,7 +125,7 @@ export async function cancelOrder(
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
-    const workflowId = `order-${orderId}`;
+    const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
     const handle = client.workflow.getHandle(workflowId);
     const state = await handle.executeUpdate(cancelOrderUpdate, {
       args: [{ reason }],

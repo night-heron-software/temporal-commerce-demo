@@ -8,6 +8,7 @@ import {
 } from '@temporalio/workflow';
 const getFeatureFlag = async (_flag: string) => false;
 import { OrderLineItem, Cart } from '../contracts';
+import { buildWorkflowId, DEMO_STORE_ID } from '../contracts/constants';
 type CartItem = Cart.CartItem;
 import {
   saveOrderToDatabase,
@@ -357,7 +358,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     if (signal.status === 'cancelled' || signal.status === 'refunded') {
       // Signal fulfillment workflow to cancel (it will release inventory)
       try {
-        const fulfillmentWorkflowId = `fulfillment-${input.order.orderId}`;
+        const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', input.order.orderId);
         const handle = getExternalWorkflowHandle(fulfillmentWorkflowId);
         await handle.signal(fulfillmentCancelSignal);
         log.info('[OMS] Sent cancel signal to fulfillment workflow');

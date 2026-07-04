@@ -10,6 +10,7 @@ import type {
   CartWorkflowContext,
 } from './types';
 import { StateInput, StateOutput, StateRegistry } from '../framework';
+import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 
 // ==================
 // Helpers
@@ -181,8 +182,16 @@ export async function activeState(
         return { context: ctx, next: 'active', error: 'Cannot checkout with empty cart' };
       }
 
-      const newCheckoutWorkflowId = `checkout-${uuid4()}`;
-      const parentCartWorkflowId = `cart-${ctx.cart.cartId}`;
+      const parentCartWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', ctx.cart.cartId);
+      // A fresh checkout id per attempt, tagged with the cart's correlation id so the
+      // whole journey is queryable (ADR-0011).
+      const checkoutStart = buildWorkflowStartOptions({
+        storeId: DEMO_STORE_ID,
+        domain: 'checkout',
+        entityId: uuid4(),
+        cartId: ctx.cart.cartId,
+      });
+      const newCheckoutWorkflowId = checkoutStart.workflowId;
       const newCheckoutVersion = ctx.checkoutVersion + 1;
 
       draft.status = 'checkout';
@@ -192,7 +201,7 @@ export async function activeState(
       await startChild<(input: CheckoutWorkflowInput) => Promise<CheckoutWorkflowResult>>(
         'checkoutWorkflow',
         {
-          workflowId: newCheckoutWorkflowId,
+          ...checkoutStart,
           taskQueue: 'checkout-queue',
           parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
           args: [{ ...buildCheckoutInput(draft, parentCartWorkflowId), checkoutVersion: newCheckoutVersion }],

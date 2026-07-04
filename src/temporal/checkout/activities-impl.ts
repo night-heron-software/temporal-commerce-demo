@@ -181,19 +181,27 @@ export async function startOrderManagementWorkflow(
   log.info(`[Activity] Starting OMS workflow for order: ${order.orderId}`);
 
   const { getTemporalClient } = await import('../../lib/temporal-client');
+  const { buildWorkflowStartOptions, DEMO_STORE_ID } = await import('../contracts/constants');
   const client = await getTemporalClient();
 
-  const workflowId = `order-${order.orderId}`;
+  const startOptions = buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'order',
+    entityId: order.orderId,
+    orderId: order.orderId,
+    cartId: order.cartId,
+    memo: { confirmationNumber: order.confirmationNumber },
+  });
 
   await client.workflow.start('orderWorkflow', {
+    ...startOptions,
     taskQueue: 'oms-queue',
-    workflowId,
     args: [{ order, customerEmail }],
     workflowExecutionTimeout: '365 days'
   });
 
-  log.info(`[Activity] Started OMS workflow: ${workflowId}`);
-  return workflowId;
+  log.info(`[Activity] Started OMS workflow: ${startOptions.workflowId}`);
+  return startOptions.workflowId;
 }
 
 /**

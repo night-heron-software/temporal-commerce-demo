@@ -1,5 +1,6 @@
 import * as wf from '@temporalio/workflow';
 import { OMS } from '../contracts';
+import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 import type {
   FulfillmentOrderRequest,
   FulfillmentWorkflowState,
@@ -90,7 +91,7 @@ export async function signalParentOMSWorkflow(
   };
 
   try {
-    const omsWorkflowId = `order-${state.orderId}`;
+    const omsWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'order', state.orderId);
     const omsHandle = wf.getExternalWorkflowHandle(omsWorkflowId);
     await omsHandle.signal<[OMS.FulfillmentStatusUpdate]>('fulfillmentStatus', update);
   } catch (error) {
@@ -210,7 +211,13 @@ export async function fulfillmentWorkflow(
       for (const supplierOrder of startCtx.supplierOrders) {
         try {
           const childHandle = await wf.startChild(supplierOrderWorkflow, {
-            workflowId: `fulfillment-${startCtx.orderId}-supplier-${supplierOrder.supplierOrderId}`,
+            ...buildWorkflowStartOptions({
+              storeId: DEMO_STORE_ID,
+              domain: 'fulfiller-order',
+              entityId: supplierOrder.supplierOrderId,
+              orderId: startCtx.orderId,
+              cartId: startCtx.cartId,
+            }),
             args: [{
               orderId: startCtx.orderId,
               cartId: startCtx.cartId,
