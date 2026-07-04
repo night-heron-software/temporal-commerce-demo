@@ -3,6 +3,7 @@ import { OMS } from '../contracts';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 import type {
   FulfillmentOrderRequest,
+  FulfillmentOrderStatus,
   FulfillmentWorkflowState,
   FulfillmentFulfillerOrderState,
   FulfillmentLineItemState,
@@ -20,7 +21,6 @@ import {
 } from './definitions';
 import {
   transferInventoryReservations,
-  fulfillInventoryReservations,
   releaseInventoryReservations,
   indexFulfillment,
 } from './activities';
@@ -50,9 +50,7 @@ type FulfillerOrderStatus = OMS.FulfillerOrderStatus;
 // Status Mapping
 // ============================================================================
 
-function mapToFulfillerOrderStatus(
-  status: FulfillmentFulfillerOrderState['status'],
-): FulfillerOrderStatus | null {
+function mapToFulfillerOrderStatus(status: FulfillmentOrderStatus): FulfillerOrderStatus | null {
   switch (status) {
     case 'in_production':
       return 'processing';
@@ -64,8 +62,14 @@ function mapToFulfillerOrderStatus(
     case 'failed':
     case 'cancelled':
       return 'rejected';
-    default:
+    // Pre-submission phases have no OMS-visible status yet — explicitly skipped.
+    case 'received':
+    case 'validating':
+    case 'submitting':
       return null;
+    default:
+      // No silent fallbacks: a new status must be mapped (or explicitly skipped) here.
+      throw new Error(`Unmapped fulfiller order status: ${status satisfies never}`);
   }
 }
 
@@ -290,21 +294,8 @@ export async function fulfillmentWorkflow(
         }
       }
 
-      // Fulfill inventory reservations on delivery — transitions CONFIRMED→FULFILLED,
-      // decrementing both total_stock and reserved_stock in the inventory system.
-      if (isTerminal(finalState, 'delivered')) {
-        const allItems = finalCtx.fulfillerOrders.flatMap((so: FulfillmentFulfillerOrderState) =>
-          so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
-        );
-        try {
-          await fulfillInventoryReservations(finalCtx.cartId, allItems);
-        } catch (fulfillErr) {
-          wf.log.error('Failed to fulfill inventory reservations on delivery', {
-            error: String(fulfillErr),
-          });
-        }
-      }
-
+      // Inventory fulfillment on delivery happens in the fulfiller-order child (which
+      // owns the shipment lifecycle) — fulfilling here too double-decremented stock.
       await syncProjections(finalCtx);
     },
   };
