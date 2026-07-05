@@ -12,7 +12,15 @@ function makeFulfillerOrder(
     fulfillerType: 'simulated',
     status: 'in_production',
     items: [
-      { sku: 'SKU-1', productId: 'p1', variantId: 'v1', quantity: 1, unitPrice: 10, title: 'T', status: 'in_production' },
+      {
+        sku: 'SKU-1',
+        productId: 'p1',
+        variantId: 'v1',
+        quantity: 1,
+        unitPrice: 10,
+        title: 'T',
+        status: 'in_production',
+      },
     ],
     statusHistory: [],
     ...overrides,
@@ -39,11 +47,21 @@ describe('aggregateStatus', () => {
   const so = (status: FulfillmentFulfillerOrderState['status']) => makeFulfillerOrder({ status });
 
   it('aggregates across fulfiller orders', () => {
-    expect(aggregateStatus(makeState({ fulfillerOrders: [so('delivered'), so('delivered')] }))).toBe('delivered');
-    expect(aggregateStatus(makeState({ fulfillerOrders: [so('cancelled'), so('failed')] }))).toBe('failed');
-    expect(aggregateStatus(makeState({ fulfillerOrders: [so('shipped'), so('delivered')] }))).toBe('shipped');
-    expect(aggregateStatus(makeState({ fulfillerOrders: [so('shipped'), so('in_production')] }))).toBe('partially_shipped');
-    expect(aggregateStatus(makeState({ fulfillerOrders: [so('in_production')] }))).toBe('in_production');
+    expect(
+      aggregateStatus(makeState({ fulfillerOrders: [so('delivered'), so('delivered')] })),
+    ).toBe('delivered');
+    expect(aggregateStatus(makeState({ fulfillerOrders: [so('cancelled'), so('failed')] }))).toBe(
+      'failed',
+    );
+    expect(aggregateStatus(makeState({ fulfillerOrders: [so('shipped'), so('delivered')] }))).toBe(
+      'shipped',
+    );
+    expect(
+      aggregateStatus(makeState({ fulfillerOrders: [so('shipped'), so('in_production')] })),
+    ).toBe('partially_shipped');
+    expect(aggregateStatus(makeState({ fulfillerOrders: [so('in_production')] }))).toBe(
+      'in_production',
+    );
   });
 });
 

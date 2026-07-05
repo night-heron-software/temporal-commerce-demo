@@ -134,11 +134,7 @@ export interface CancelReservationArgs {
 export const getStockLevelQuery = 'getStockLevel';
 export const getFullStateQuery = 'getFullState';
 
-
 import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
-
-
-
 
 // ==================
 // Inventory Workflow Definitions
@@ -149,16 +145,28 @@ export const getStockLevelQueryDef = defineQuery<StockLevel>(getStockLevelQuery)
 export const getFullStateQueryDef = defineQuery<InventoryItem>(getFullStateQuery);
 
 // Updates
-export const setFulfillerStockUpdateDef = defineUpdate<SetFulfillerStockResult, [SetFulfillerStockArgs]>(setFulfillerStockUpdate);
-export const reserveInventoryUpdateDef = defineUpdate<ReserveInventoryResult, [ReserveInventoryArgs]>(reserveInventoryUpdate);
+export const setFulfillerStockUpdateDef = defineUpdate<
+  SetFulfillerStockResult,
+  [SetFulfillerStockArgs]
+>(setFulfillerStockUpdate);
+export const reserveInventoryUpdateDef = defineUpdate<
+  ReserveInventoryResult,
+  [ReserveInventoryArgs]
+>(reserveInventoryUpdate);
 
 // Signals
-export const transferReservationSignalDef = defineSignal<[TransferReservationArgs]>(transferReservationSignal);
-export const updateReservationSignalDef = defineSignal<[UpdateReservationArgs]>(updateReservationSignal);
-export const releaseReservationSignalDef = defineSignal<[ReleaseReservationArgs]>(releaseReservationSignal);
-export const confirmReservationSignalDef = defineSignal<[ConfirmReservationArgs]>(confirmReservationSignal);
-export const fulfillReservationSignalDef = defineSignal<[FulfillReservationArgs]>(fulfillReservationSignal);
-export const cancelReservationSignalDef = defineSignal<[CancelReservationArgs]>(cancelReservationSignal);
+export const transferReservationSignalDef =
+  defineSignal<[TransferReservationArgs]>(transferReservationSignal);
+export const updateReservationSignalDef =
+  defineSignal<[UpdateReservationArgs]>(updateReservationSignal);
+export const releaseReservationSignalDef =
+  defineSignal<[ReleaseReservationArgs]>(releaseReservationSignal);
+export const confirmReservationSignalDef =
+  defineSignal<[ConfirmReservationArgs]>(confirmReservationSignal);
+export const fulfillReservationSignalDef =
+  defineSignal<[FulfillReservationArgs]>(fulfillReservationSignal);
+export const cancelReservationSignalDef =
+  defineSignal<[CancelReservationArgs]>(cancelReservationSignal);
 
 // Service-level signal for the inventoryServiceWorkflow
 export interface InventoryChangedPayload {
@@ -167,6 +175,3 @@ export interface InventoryChangedPayload {
 export const inventoryChangedSignal = defineSignal<[InventoryChangedPayload]>('inventoryChanged');
 
 // Re-export the string names for external consumers that need them
-
-
-

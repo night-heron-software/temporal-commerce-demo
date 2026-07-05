@@ -5,6 +5,9 @@
  */
 
 import { getElasticsearchClient } from '@/lib/es-client';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('admin-search-actions');
 
 const ALL_INDICES = [
   'products',
@@ -17,7 +20,7 @@ const ALL_INDICES = [
   'carts',
   'reservations',
   'fulfillments',
-  'shipments'
+  'shipments',
 ] as const;
 
 export type SearchableIndex = (typeof ALL_INDICES)[number];
@@ -44,7 +47,11 @@ export interface IndexStats {
   status: 'green' | 'yellow' | 'red' | 'unknown';
 }
 
-export async function getIndexStats(): Promise<{ success: boolean; stats: IndexStats[]; error?: string }> {
+export async function getIndexStats(): Promise<{
+  success: boolean;
+  stats: IndexStats[];
+  error?: string;
+}> {
   try {
     const client = getElasticsearchClient();
     const stats: IndexStats[] = [];
@@ -57,7 +64,7 @@ export async function getIndexStats(): Promise<{ success: boolean; stats: IndexS
           stats.push({
             index,
             docCount: count.count,
-            status: 'green'
+            status: 'green',
           });
         } else {
           stats.push({ index, docCount: 0, status: 'unknown' });
@@ -76,7 +83,7 @@ export async function getIndexStats(): Promise<{ success: boolean; stats: IndexS
 export async function searchElasticsearch(
   query: string,
   indices: SearchableIndex[],
-  size: number = 25
+  size: number = 25,
 ): Promise<SearchResponse> {
   try {
     const client = getElasticsearchClient();
@@ -130,9 +137,9 @@ export async function searchElasticsearch(
             query: lower,
             type: 'phrase',
             lenient: true,
-            fields: ['*.keyword']
-          }
-        }
+            fields: ['*.keyword'],
+          },
+        },
       );
     }
 
@@ -145,17 +152,17 @@ export async function searchElasticsearch(
             type: 'best_fields',
             fuzziness: 'AUTO',
             lenient: true,
-            fields: ['*']
-          }
+            fields: ['*'],
+          },
         },
         {
           multi_match: {
             query: textPart,
             type: 'phrase',
             lenient: true,
-            fields: ['*']
-          }
-        }
+            fields: ['*'],
+          },
+        },
       );
     }
 
@@ -167,8 +174,8 @@ export async function searchElasticsearch(
       esQuery = {
         bool: {
           should: shouldClauses,
-          minimum_should_match: 1
-        }
+          minimum_should_match: 1,
+        },
       };
     }
 
@@ -179,8 +186,8 @@ export async function searchElasticsearch(
       highlight: {
         fields: { '*': {} },
         pre_tags: ['<mark>'],
-        post_tags: ['</mark>']
-      }
+        post_tags: ['</mark>'],
+      },
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -188,28 +195,29 @@ export async function searchElasticsearch(
       index: hit._index,
       id: hit._id,
       score: hit._score ?? 0,
-      source: hit._source ?? {}
+      source: hit._source ?? {},
     }));
 
-    const total = typeof response.hits.total === 'number'
-      ? response.hits.total
-      : response.hits.total?.value ?? 0;
+    const total =
+      typeof response.hits.total === 'number'
+        ? response.hits.total
+        : (response.hits.total?.value ?? 0);
 
     return {
       success: true,
       results,
       total,
-      took: response.took
+      took: response.took,
     };
   } catch (error) {
-    console.error('Search failed:', error);
+    log.error({ err: error }, 'Search failed');
     return { success: false, results: [], total: 0, took: 0, error: String(error) };
   }
 }
 
 export async function getDocument(
   index: string,
-  id: string
+  id: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<{ success: boolean; source?: Record<string, any>; error?: string }> {
   try {

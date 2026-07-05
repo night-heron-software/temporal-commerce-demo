@@ -68,8 +68,11 @@ function ShopPageContent() {
     max?: number;
   } | null>(
     initialPriceMin || initialPriceMax
-      ? { min: initialPriceMin ? parseInt(initialPriceMin, 10) : undefined, max: initialPriceMax ? parseInt(initialPriceMax, 10) : undefined }
-      : null
+      ? {
+          min: initialPriceMin ? parseInt(initialPriceMin, 10) : undefined,
+          max: initialPriceMax ? parseInt(initialPriceMax, 10) : undefined,
+        }
+      : null,
   );
 
   // Debounce search and reset page when query changes
@@ -100,7 +103,15 @@ function ShopPageContent() {
 
     // Use replaceState to avoid cluttering browser history
     window.history.replaceState(null, '', newUrl);
-  }, [debouncedQuery, selectedCollection, selectedType, selectedColor, selectedSize, selectedPriceRange, page]);
+  }, [
+    debouncedQuery,
+    selectedCollection,
+    selectedType,
+    selectedColor,
+    selectedSize,
+    selectedPriceRange,
+    page,
+  ]);
 
   // Build search URL
   const buildSearchUrl = useCallback(() => {
@@ -125,7 +136,7 @@ function ShopPageContent() {
     selectedSize,
     selectedPriceRange,
     page,
-    pageSize
+    pageSize,
   ]);
 
   // Track if this is the initial load
@@ -206,7 +217,12 @@ function ShopPageContent() {
   };
 
   const hasActiveFilters =
-    selectedCollection || selectedType || selectedColor || selectedSize || selectedPriceRange || searchQuery;
+    selectedCollection ||
+    selectedType ||
+    selectedColor ||
+    selectedSize ||
+    selectedPriceRange ||
+    searchQuery;
 
   // Format price
   const formatPrice = (amount: number) => `$${(amount / 100).toFixed(2)}`;
@@ -318,7 +334,7 @@ function ShopPageContent() {
                             handlePriceRangeChange(
                               selectedPriceRange?.min === p.min
                                 ? null
-                                : { min: p.min, max: p.max === Infinity ? undefined : p.max }
+                                : { min: p.min, max: p.max === Infinity ? undefined : p.max },
                             )
                           }
                           className={`w-full text-left px-2 py-1 text-sm rounded hover:bg-[var(--heron-cream)] dark:hover:bg-[var(--heron-slate-dark)] transition-colors ${

@@ -22,14 +22,12 @@ interface VariantRow {
 }
 
 async function resolveBlankSku(variantId: string): Promise<string | null> {
-  const variants = await executeCql<VariantRow>(
-    `SELECT blank_sku FROM variants WHERE id = ?`,
-    [types.Uuid.fromString(variantId)]
-  );
+  const variants = await executeCql<VariantRow>(`SELECT blank_sku FROM variants WHERE id = ?`, [
+    types.Uuid.fromString(variantId),
+  ]);
   if (variants.length > 0) return variants[0].blank_sku;
   return null;
 }
-
 
 export interface CreateOrderInput {
   cartId: string;
@@ -70,7 +68,7 @@ export async function calculateTax(state: string, subtotal: number): Promise<num
     WA: 0.065,
     FL: 0.06,
     OR: 0,
-    NH: 0
+    NH: 0,
   };
 
   const rate = taxRates[state.toUpperCase()] ?? 0.08;
@@ -82,7 +80,7 @@ export async function calculateTax(state: string, subtotal: number): Promise<num
  */
 export async function createPaymentIntent(
   amount: number,
-  currency: string
+  currency: string,
 ): Promise<{ clientSecret: string; id: string }> {
   log.info(`[Activity] Creating mock PaymentIntent for ${amount} ${currency}`);
   return { clientSecret: 'mock_secret', id: 'mock_pi_' + Date.now() };
@@ -103,7 +101,7 @@ export async function processPayment(
   token: string,
   amount: number,
   currency: string,
-  _idempotencyKey?: string
+  _idempotencyKey?: string,
 ): Promise<boolean> {
   log.info(`[Activity] Processing MOCK payment: ${amount} ${currency} with token ${token}`);
   await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate processing
@@ -138,7 +136,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     currency: input.currency,
     status: 'paid',
     createdAt: new Date().toISOString(),
-    confirmationNumber
+    confirmationNumber,
   };
 
   log.info(`[Activity] Order created: ${confirmationNumber}`);
@@ -151,7 +149,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 export async function sendConfirmationEmail(
   email: string,
   confirmationNumber: string,
-  _order: Order
+  _order: Order,
 ): Promise<void> {
   await sendEmail({
     to: email,
@@ -176,7 +174,7 @@ function generateConfirmationNumber(): string {
  */
 export async function startOrderManagementWorkflow(
   order: Order,
-  customerEmail: string
+  customerEmail: string,
 ): Promise<string> {
   log.info(`[Activity] Starting OMS workflow for order: ${order.orderId}`);
 
@@ -197,7 +195,7 @@ export async function startOrderManagementWorkflow(
     ...startOptions,
     taskQueue: 'oms-queue',
     args: [{ order, customerEmail }],
-    workflowExecutionTimeout: '365 days'
+    workflowExecutionTimeout: '365 days',
   });
 
   log.info(`[Activity] Started OMS workflow: ${startOptions.workflowId}`);
@@ -235,7 +233,7 @@ export async function queryCart(parentCartWorkflowId: string): Promise<{
 
 export async function renewReservationsForCheckout(
   cartId: string,
-  items: CartItem[]
+  items: CartItem[],
 ): Promise<{
   success: boolean;
   reservations: ReservationInfo[];
@@ -270,7 +268,11 @@ export async function renewReservationsForCheckout(
   }
 
   // Reserve all items atomically (with rollback on any failure)
-  const result = await InventoryCommandRepository.reserveAll(cartId, resolvedItems, `checkout-${cartId}`);
+  const result = await InventoryCommandRepository.reserveAll(
+    cartId,
+    resolvedItems,
+    `checkout-${cartId}`,
+  );
 
   if (!result.success) {
     return {
@@ -282,7 +284,7 @@ export async function renewReservationsForCheckout(
 
   return {
     success: true,
-    reservations: result.reservations!.map(r => ({
+    reservations: result.reservations!.map((r) => ({
       variantId: r.variantId,
       reservationId: r.reservationId,
     })),
@@ -298,20 +300,22 @@ export async function confirmReservations(reservations: ReservationInfo[]): Prom
   if (reservations.length === 0) return;
   log.info({ count: reservations.length }, 'Confirming reservations');
 
-  await Promise.all(
-    reservations.map(r => InventoryCommandRepository.confirm(r.reservationId))
-  );
+  await Promise.all(reservations.map((r) => InventoryCommandRepository.confirm(r.reservationId)));
 
   // Update reservation status in ES
   const esClient = getElasticsearchClient();
   await Promise.all(
-    reservations.map(r =>
-      esClient.update({
-        index: ES_INDICES.reservations,
-        id: r.reservationId,
-        doc: { status: 'CONFIRMED', expiresAt: null }
-      }).catch(() => { /* ignore if not found */ })
-    )
+    reservations.map((r) =>
+      esClient
+        .update({
+          index: ES_INDICES.reservations,
+          id: r.reservationId,
+          doc: { status: 'CONFIRMED', expiresAt: null },
+        })
+        .catch(() => {
+          /* ignore if not found */
+        }),
+    ),
   );
 }
 
@@ -323,19 +327,21 @@ export async function releaseReservations(reservations: ReservationInfo[]): Prom
   if (reservations.length === 0) return;
   log.info({ count: reservations.length }, 'Releasing reservations');
 
-  await Promise.all(
-    reservations.map(r => InventoryCommandRepository.release(r.reservationId))
-  );
+  await Promise.all(reservations.map((r) => InventoryCommandRepository.release(r.reservationId)));
 
   // Remove reservation docs from ES
   const esClient = getElasticsearchClient();
   await Promise.all(
-    reservations.map(r =>
-      esClient.delete({
-        index: ES_INDICES.reservations,
-        id: r.reservationId
-      }).catch(() => { /* ignore if not found */ })
-    )
+    reservations.map((r) =>
+      esClient
+        .delete({
+          index: ES_INDICES.reservations,
+          id: r.reservationId,
+        })
+        .catch(() => {
+          /* ignore if not found */
+        }),
+    ),
   );
 }
 
@@ -347,18 +353,20 @@ export async function cancelReservations(reservations: ReservationInfo[]): Promi
   if (reservations.length === 0) return;
   log.info({ count: reservations.length }, 'Cancelling reservations');
 
-  await Promise.all(
-    reservations.map(r => InventoryCommandRepository.cancel(r.reservationId))
-  );
+  await Promise.all(reservations.map((r) => InventoryCommandRepository.cancel(r.reservationId)));
 
   // Remove reservation docs from ES
   const esClient = getElasticsearchClient();
   await Promise.all(
-    reservations.map(r =>
-      esClient.delete({
-        index: ES_INDICES.reservations,
-        id: r.reservationId
-      }).catch(() => { /* ignore if not found */ })
-    )
+    reservations.map((r) =>
+      esClient
+        .delete({
+          index: ES_INDICES.reservations,
+          id: r.reservationId,
+        })
+        .catch(() => {
+          /* ignore if not found */
+        }),
+    ),
   );
 }

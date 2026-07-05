@@ -92,11 +92,17 @@ export interface CartDetails {
 // ==================
 
 export type CartEvent =
-  | { type: 'addItem';        variantId: string; quantity: number; price: number; properties?: Record<string, unknown> }
+  | {
+      type: 'addItem';
+      variantId: string;
+      quantity: number;
+      price: number;
+      properties?: Record<string, unknown>;
+    }
   | { type: 'updateQuantity'; lineItemId: string; quantity: number }
-  | { type: 'removeItem';     lineItemId: string }
-  | { type: 'applyCoupon';    code: string }
-  | { type: 'linkUser';       email: string; userId: string }
+  | { type: 'removeItem'; lineItemId: string }
+  | { type: 'applyCoupon'; code: string }
+  | { type: 'linkUser'; email: string; userId: string }
   | { type: 'beginCheckout' };
 
 // Update response: either the updated cart state or void for terminal operations

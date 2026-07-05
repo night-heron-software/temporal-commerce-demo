@@ -6,7 +6,7 @@ import Link from 'next/link';
 const steps = [
   { key: 'shipping', label: 'Shipping', path: '/shop/checkout/shipping' },
   { key: 'payment', label: 'Payment', path: '/shop/checkout/payment' },
-  { key: 'review', label: 'Review', path: '/shop/checkout/review' }
+  { key: 'review', label: 'Review', path: '/shop/checkout/review' },
 ];
 
 export function CheckoutProgress() {

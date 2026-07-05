@@ -17,10 +17,12 @@ async function run() {
   try {
     // 1. Fetch variant from Cassandra
     const variants = await executeCql<{ id: { toString(): string } }>(
-      'SELECT id FROM catalog.variants LIMIT 1'
+      'SELECT id FROM catalog.variants LIMIT 1',
     );
     if (variants.length === 0) {
-      throw new Error('No variants found in Cassandra catalog. Make sure the seed script ran successfully.');
+      throw new Error(
+        'No variants found in Cassandra catalog. Make sure the seed script ran successfully.',
+      );
     }
     const variantId = variants[0].id.toString();
     console.log(`✅ Selected Product Variant ID: ${variantId}\n`);
@@ -47,7 +49,7 @@ async function run() {
 
     await client.workflow.executeUpdateWithStart(Cart.cartUpdate, {
       startWorkflowOperation: startOp,
-      args: [{ type: 'addItem' as const, variantId, quantity: 2, price: 15.99 }]
+      args: [{ type: 'addItem' as const, variantId, quantity: 2, price: 15.99 }],
     });
     console.log(`✅ Cart Created: ${cartId}. Item added!\n`);
 
@@ -87,7 +89,7 @@ async function run() {
       }
       await delay(1000);
     }
-    if (!isReady) throw new Error("Checkout workflow stalled in validating state.");
+    if (!isReady) throw new Error('Checkout workflow stalled in validating state.');
     console.log(`✅ Inventory reservations complete!\n`);
 
     // 4. Set Shipping details
@@ -103,17 +105,17 @@ async function run() {
             state: 'TX',
             postalCode: '78701',
             country: 'US',
-            email: 'demo@nightheron.test'
-          }
-        }
-      ]
+            email: 'demo@nightheron.test',
+          },
+        },
+      ],
     });
     console.log(`✅ Shipping address set!\n`);
 
     // 5. Apply mock payment
     console.log(`   🔸 Setting Payment Method...`);
     await checkoutHandle.executeUpdate(Checkout.setPaymentUpdate, {
-      args: [{ paymentMethod: { type: 'mock' as const, token: 'valid' } }]
+      args: [{ paymentMethod: { type: 'mock' as const, token: 'valid' } }],
     });
     console.log(`✅ Mock payment method set!\n`);
 
@@ -134,7 +136,7 @@ async function run() {
       }
       await delay(1000);
     }
-    if (!isComplete) throw new Error("Order submission did not complete.");
+    if (!isComplete) throw new Error('Order submission did not complete.');
     console.log(`✅ Order Submitted successfully! Order ID: ${orderId}\n`);
 
     // 7. Track OMS & Fulfillment Workflow
@@ -181,7 +183,9 @@ async function run() {
     }
 
     if (fulfillmentStatus !== 'shipped' && fulfillmentStatus !== 'delivered') {
-      throw new Error(`Fulfillment did not progress as expected. Last status: ${fulfillmentStatus}`);
+      throw new Error(
+        `Fulfillment did not progress as expected. Last status: ${fulfillmentStatus}`,
+      );
     }
 
     console.log(`\n🎉 E2E Verification Check Completed Successfully with ZERO Errors!`);

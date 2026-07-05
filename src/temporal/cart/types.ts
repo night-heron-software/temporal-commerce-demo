@@ -11,7 +11,7 @@ export type {
   CartUpdateResponse,
   CartInboundSignal,
   CheckoutWorkflowInput,
-  CheckoutWorkflowResult
+  CheckoutWorkflowResult,
 } from '../contracts/cart';
 
 import type { CartDetails } from '../contracts/cart';

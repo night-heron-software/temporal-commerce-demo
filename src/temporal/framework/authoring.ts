@@ -57,8 +57,12 @@ export function isTerminal(state: string, reason?: string): boolean {
 type Next<TState extends string> = TState | `__terminal:${string}`;
 
 /** A decision that is statically guaranteed not to be a Promise (§7.4). */
-type SyncDecision<TState extends string, TContext, TResponse, TFinalize> =
-  DecisionResult<TState, TContext, TResponse, TFinalize> & { then?: never };
+type SyncDecision<TState extends string, TContext, TResponse, TFinalize> = DecisionResult<
+  TState,
+  TContext,
+  TResponse,
+  TFinalize
+> & { then?: never };
 
 /** One event's three phases, co-located. `prepare`/`finalize` optional. */
 export interface TransitionHandler<
@@ -135,19 +139,20 @@ export interface SignalHandler<
  * so signals are authored exactly like updates. Only available when `TSignal` is a
  * discriminated union (`{ kind: string }`); single-payload signals use `onSignal`.
  */
-export type SignalMap<TState extends string, TContext, TResponse, TSignal> =
-  TSignal extends { kind: string }
-    ? {
-        [K in TSignal['kind']]?: SignalHandler<
-          TState,
-          TContext,
-          TResponse,
-          Extract<TSignal, { kind: K }>,
-          Any,
-          Any
-        >;
-      }
-    : never;
+export type SignalMap<TState extends string, TContext, TResponse, TSignal> = TSignal extends {
+  kind: string;
+}
+  ? {
+      [K in TSignal['kind']]?: SignalHandler<
+        TState,
+        TContext,
+        TResponse,
+        Extract<TSignal, { kind: K }>,
+        Any,
+        Any
+      >;
+    }
+  : never;
 
 /**
  * Handlers for the non-event inputs (timeout / signal) of a state.
@@ -163,13 +168,28 @@ export type SignalMap<TState extends string, TContext, TResponse, TSignal> =
 export interface InputHandlers<TState extends string, TContext, TResponse, TSignal> {
   onTimeout?: {
     prepare?: (ctx: Readonly<TContext>) => Promise<Any>;
-    decide: (ctx: Readonly<TContext>, meta: InputMeta, prepared?: Any) => SyncDecision<TState, TContext, TResponse, Any>;
-    finalize?: (ctx: Readonly<TContext>, decision: DecisionResult<TState, TContext, TResponse, Any>) => Promise<void>;
+    decide: (
+      ctx: Readonly<TContext>,
+      meta: InputMeta,
+      prepared?: Any,
+    ) => SyncDecision<TState, TContext, TResponse, Any>;
+    finalize?: (
+      ctx: Readonly<TContext>,
+      decision: DecisionResult<TState, TContext, TResponse, Any>,
+    ) => Promise<void>;
   };
   onSignal?: {
     prepare?: (ctx: Readonly<TContext>, signal: TSignal) => Promise<Any>;
-    decide: (ctx: Readonly<TContext>, signal: TSignal, meta: InputMeta, prepared?: Any) => SyncDecision<TState, TContext, TResponse, Any>;
-    finalize?: (ctx: Readonly<TContext>, decision: DecisionResult<TState, TContext, TResponse, Any>) => Promise<void>;
+    decide: (
+      ctx: Readonly<TContext>,
+      signal: TSignal,
+      meta: InputMeta,
+      prepared?: Any,
+    ) => SyncDecision<TState, TContext, TResponse, Any>;
+    finalize?: (
+      ctx: Readonly<TContext>,
+      decision: DecisionResult<TState, TContext, TResponse, Any>,
+    ) => Promise<void>;
   };
   onSignals?: SignalMap<TState, TContext, TResponse, TSignal>;
 }
@@ -215,7 +235,10 @@ export function defineTransitions<
   map: TransitionMap<TState, TContext, TResponse, TEvent>,
   inputs: InputHandlers<TState, TContext, TResponse, TSignal> = {},
 ): StateConfig<TState, TEvent, TContext, TResponse, TSignal> {
-  const table = map as unknown as Record<string, TransitionHandler<TState, TContext, TResponse, Any, Any, Any>>;
+  const table = map as unknown as Record<
+    string,
+    TransitionHandler<TState, TContext, TResponse, Any, Any, Any>
+  >;
   const signalTable = inputs.onSignals as
     | Record<string, SignalHandler<TState, TContext, TResponse, Any, Any, Any>>
     | undefined;
@@ -238,11 +261,17 @@ export function defineTransitions<
         const payload = h?.prepare ? await h.prepare(ctx, input.result as Any) : undefined;
         return { __t: `__signal:${k}`, payload };
       }
-      const payload = inputs.onSignal?.prepare ? await inputs.onSignal.prepare(ctx, input.result) : undefined;
+      const payload = inputs.onSignal?.prepare
+        ? await inputs.onSignal.prepare(ctx, input.result)
+        : undefined;
       return { __t: '__signal', payload };
     },
 
-    decide(ctx, input: StateInput<TEvent, TSignal>, prepared: Boxed): DecisionResult<TState, TContext, TResponse, Boxed> {
+    decide(
+      ctx,
+      input: StateInput<TEvent, TSignal>,
+      prepared: Boxed,
+    ): DecisionResult<TState, TContext, TResponse, Boxed> {
       const wrap = (
         d: DecisionResult<TState, TContext, TResponse, Any>,
         key: string,
@@ -255,7 +284,11 @@ export function defineTransitions<
       if (input.kind === 'event') {
         const t = table[input.event.type];
         if (!t) {
-          return { context: ctx as TContext, next: self, error: `No transition for '${input.event.type}' in state '${self}'` };
+          return {
+            context: ctx as TContext,
+            next: self,
+            error: `No transition for '${input.event.type}' in state '${self}'`,
+          };
         }
         return wrap(
           t.decide(ctx, input.event as Any, { timestamp: input.timestamp }, prepared.payload),
@@ -290,7 +323,10 @@ export function defineTransitions<
       );
     },
 
-    async finalize(ctx, decision: DecisionResult<TState, TContext, TResponse, Boxed>): Promise<void> {
+    async finalize(
+      ctx,
+      decision: DecisionResult<TState, TContext, TResponse, Boxed>,
+    ): Promise<void> {
       const box = decision.finalize;
       if (!box) return;
       const t =
@@ -336,10 +372,13 @@ export function route<
   const handler: PureStateHandler<TState, TEvent, TContext, TResponse, TSignal, void, void> = {
     decide(ctx, input): DecisionResult<TState, TContext, TResponse, void> {
       if (input.kind === 'event') {
-        const next = (table as unknown as Record<string, Next<TState> | undefined>)[input.event.type];
+        const next = (table as unknown as Record<string, Next<TState> | undefined>)[
+          input.event.type
+        ];
         return { context: ctx as TContext, next: next ?? self };
       }
-      if (input.kind === 'timeout') return { context: ctx as TContext, next: options.timeout ?? self };
+      if (input.kind === 'timeout')
+        return { context: ctx as TContext, next: options.timeout ?? self };
       return { context: ctx as TContext, next: options.signal ?? self };
     },
   };
@@ -384,7 +423,13 @@ export function defineDomain<
       self: TState,
       handler: PureStateHandler<TState, TEvent, TContext, TResponse, TSignal, TPrepared, TFinalize>,
     ): StateConfig<TState, TEvent, TContext, TResponse, TSignal> => ({
-      fn: definePureState(handler, self) as StateFunction<TState, TEvent, TContext, TResponse, TSignal>,
+      fn: definePureState(handler, self) as StateFunction<
+        TState,
+        TEvent,
+        TContext,
+        TResponse,
+        TSignal
+      >,
     }),
 
     /** Typed terminal (§7.5). */

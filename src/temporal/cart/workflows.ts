@@ -19,11 +19,7 @@ import {
   getUserIdQuery,
 } from './definitions';
 
-import {
-  runStateMachine,
-  StateMachineConfig,
-  deriveDisplayStatus,
-} from '../framework';
+import { runStateMachine, StateMachineConfig, deriveDisplayStatus } from '../framework';
 
 import { CART_STATES } from './states';
 

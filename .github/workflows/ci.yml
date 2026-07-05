@@ -13,7 +13,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       # The @temporalio/testing time-skipping test server binary is downloaded on first
@@ -31,6 +31,8 @@ jobs:
       - run: npm run lint
 
       - run: npm run typecheck
+
+      - run: npm run format:check
 
       # Unit + workflow tests run against the in-process time-skipping Temporal test
       # server — no Docker services required.

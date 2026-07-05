@@ -52,7 +52,9 @@ function makeState(overrides: Partial<OrderState> = {}): OrderState {
 const apply = (state: OrderState, cmd: OrderCommand): OrderState =>
   decide(cmd, state).reduce(evolve, state);
 
-const fulfillmentUpdate = (over: Partial<FulfillmentStatusUpdate> = {}): FulfillmentStatusUpdate => ({
+const fulfillmentUpdate = (
+  over: Partial<FulfillmentStatusUpdate> = {},
+): FulfillmentStatusUpdate => ({
   fulfillerOrderId: 'so-1',
   status: 'shipped',
   carrier: 'UPS',
@@ -118,9 +120,15 @@ describe('fulfillmentStatus aggregation', () => {
   });
 
   it('collapses duplicate consecutive statuses into one history entry', () => {
-    const once = apply(makeState(), { type: 'fulfillmentStatus', update: fulfillmentUpdate(), at: 't1' });
+    const once = apply(makeState(), {
+      type: 'fulfillmentStatus',
+      update: fulfillmentUpdate(),
+      at: 't1',
+    });
     const twice = apply(once, { type: 'fulfillmentStatus', update: fulfillmentUpdate(), at: 't2' });
-    const shippedEntries = twice.fulfillerOrders[0].statusHistory.filter((h) => h.status === 'shipped');
+    const shippedEntries = twice.fulfillerOrders[0].statusHistory.filter(
+      (h) => h.status === 'shipped',
+    );
     expect(shippedEntries).toHaveLength(1);
     expect(shippedEntries[0].timestamp).toBe('t2');
   });
@@ -128,7 +136,11 @@ describe('fulfillmentStatus aggregation', () => {
   it('an unknown fulfiller order emits no facts', () => {
     expect(
       decide(
-        { type: 'fulfillmentStatus', update: fulfillmentUpdate({ fulfillerOrderId: 'nope' }), at: 't1' },
+        {
+          type: 'fulfillmentStatus',
+          update: fulfillmentUpdate({ fulfillerOrderId: 'nope' }),
+          at: 't1',
+        },
         makeState(),
       ),
     ).toEqual([]);

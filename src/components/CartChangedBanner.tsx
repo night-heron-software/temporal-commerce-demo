@@ -70,7 +70,8 @@ export function CartChangedBanner() {
           Your cart has been updated
         </p>
         <p className="text-xs text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)] mt-1">
-          Items in your cart have changed since you started checkout. Please review before continuing.
+          Items in your cart have changed since you started checkout. Please review before
+          continuing.
         </p>
         <div className="flex gap-2 mt-3">
           <button

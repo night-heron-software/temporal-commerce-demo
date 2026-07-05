@@ -165,13 +165,27 @@ export function deriveTransitions(
         steps.push({ at: ev.timestamp, kind: 'start', label: 'Started' });
         break;
       case 'WorkflowExecutionUpdateAccepted':
-        steps.push({ at: ev.timestamp, kind: 'update', label: stripPrefix(ev.detail, 'update:') || 'update', payload: ev.payload });
+        steps.push({
+          at: ev.timestamp,
+          kind: 'update',
+          label: stripPrefix(ev.detail, 'update:') || 'update',
+          payload: ev.payload,
+        });
         break;
       case 'WorkflowExecutionSignaled':
-        steps.push({ at: ev.timestamp, kind: 'signal', label: stripPrefix(ev.detail, 'signal:') || 'signal', payload: ev.payload });
+        steps.push({
+          at: ev.timestamp,
+          kind: 'signal',
+          label: stripPrefix(ev.detail, 'signal:') || 'signal',
+          payload: ev.payload,
+        });
         break;
       case 'StartChildWorkflowExecutionInitiated':
-        steps.push({ at: ev.timestamp, kind: 'child', label: stripPrefix(ev.detail, 'child:') || 'child workflow' });
+        steps.push({
+          at: ev.timestamp,
+          kind: 'child',
+          label: stripPrefix(ev.detail, 'child:') || 'child workflow',
+        });
         break;
       case 'WorkflowExecutionCompleted':
         steps.push({ at: ev.timestamp, kind: 'terminal', label: 'Completed' });

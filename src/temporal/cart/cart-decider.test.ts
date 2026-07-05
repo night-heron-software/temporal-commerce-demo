@@ -46,12 +46,21 @@ describe('decide', () => {
       makeCtx(),
     );
     expect(facts).toEqual([
-      { type: 'ItemAdded', variantId: 'v2', quantity: 2, price: 5, properties: undefined, lineItemId: 'li-new' },
+      {
+        type: 'ItemAdded',
+        variantId: 'v2',
+        quantity: 2,
+        price: 5,
+        properties: undefined,
+        lineItemId: 'li-new',
+      },
     ]);
   });
 
   it('updateQuantity of an unknown line emits nothing', () => {
-    expect(decide({ type: 'updateQuantity', lineItemId: 'nope', quantity: 2 }, makeCtx())).toEqual([]);
+    expect(decide({ type: 'updateQuantity', lineItemId: 'nope', quantity: 2 }, makeCtx())).toEqual(
+      [],
+    );
   });
 
   it('updateQuantity to 0 on the last line also abandons the cart', () => {
@@ -96,12 +105,15 @@ describe('decide', () => {
   });
 
   it('checkoutCompleted success emits CartCompleted; failure emits CheckoutFailed with the error', () => {
-    expect(decide({ type: 'checkoutCompleted', result: okResult() }, makeCtx()).map((f) => f.type)).toEqual([
-      'CartCompleted',
-    ]);
+    expect(
+      decide({ type: 'checkoutCompleted', result: okResult() }, makeCtx()).map((f) => f.type),
+    ).toEqual(['CartCompleted']);
     expect(
       decide(
-        { type: 'checkoutCompleted', result: okResult({ success: false, order: undefined, error: 'declined' }) },
+        {
+          type: 'checkoutCompleted',
+          result: okResult({ success: false, order: undefined, error: 'declined' }),
+        },
         makeCtx(),
       ),
     ).toEqual([{ type: 'CheckoutFailed', error: 'declined' }]);
@@ -192,13 +204,19 @@ describe('evolve', () => {
     expect(ctx.checkoutWorkflowId).toBeNull();
   });
 
-  it('CartCompleted folds the final checkout state into totals', () => {
+  it('CartCompleted folds the final checkout state into totals and drops the link', () => {
     const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x' });
-    const ctx = apply(inCheckout, { type: 'checkoutCompleted', result: okResult({ checkoutVersion: 1 }) });
+    const ctx = apply(inCheckout, {
+      type: 'checkoutCompleted',
+      result: okResult({ checkoutVersion: 1 }),
+    });
     expect(ctx.cart.status).toBe('completed');
     expect(ctx.cart.shippingCost).toBe(5);
     expect(ctx.cart.totalTax).toBe(0.8);
     expect(ctx.cart.totalPrice).toBeCloseTo(10 - 0 + 5 + 0.8);
+    // The checkout child already closed — the link is dropped so terminal cleanup
+    // doesn't request-cancel a finished workflow.
+    expect(ctx.checkoutWorkflowId).toBeNull();
   });
 });
 

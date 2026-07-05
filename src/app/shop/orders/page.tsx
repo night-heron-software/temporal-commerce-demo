@@ -83,18 +83,42 @@ export default function ShopOrdersPage() {
     switch (status) {
       case 'delivered':
       case 'complete':
-        return { classes: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300', icon: '✓', label: 'Delivered' };
+        return {
+          classes: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+          icon: '✓',
+          label: 'Delivered',
+        };
       case 'shipped':
-        return { classes: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300', icon: '🚚', label: 'Shipped' };
+        return {
+          classes: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+          icon: '🚚',
+          label: 'Shipped',
+        };
       case 'processing':
       case 'ready_to_fulfill':
-        return { classes: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300', icon: '⏳', label: 'Processing' };
+        return {
+          classes: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+          icon: '⏳',
+          label: 'Processing',
+        };
       case 'paid':
-        return { classes: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300', icon: '💳', label: 'Paid' };
+        return {
+          classes: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
+          icon: '💳',
+          label: 'Paid',
+        };
       case 'cancelled':
-        return { classes: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300', icon: '✕', label: 'Cancelled' };
+        return {
+          classes: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+          icon: '✕',
+          label: 'Cancelled',
+        };
       default:
-        return { classes: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300', icon: '•', label: status.replace(/_/g, ' ') };
+        return {
+          classes: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+          icon: '•',
+          label: status.replace(/_/g, ' '),
+        };
     }
   };
 
@@ -115,7 +139,10 @@ export default function ShopOrdersPage() {
             </div>
 
             <form onSubmit={handleLogin}>
-              <label htmlFor="email" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5"
+              >
                 Email address
               </label>
               <input
@@ -162,7 +189,8 @@ export default function ShopOrdersPage() {
               Your Orders
             </h1>
             <p className="text-zinc-500 dark:text-zinc-400 mt-1 text-sm">
-              Showing orders for <span className="font-medium text-zinc-700 dark:text-zinc-300">{loggedInEmail}</span>
+              Showing orders for{' '}
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">{loggedInEmail}</span>
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -191,7 +219,10 @@ export default function ShopOrdersPage() {
         {isLoading ? (
           <div className="space-y-4">
             {[...Array(3)].map((_, i) => (
-              <div key={i} className="animate-pulse bg-white dark:bg-zinc-800 rounded-xl p-6 border border-zinc-200 dark:border-zinc-700">
+              <div
+                key={i}
+                className="animate-pulse bg-white dark:bg-zinc-800 rounded-xl p-6 border border-zinc-200 dark:border-zinc-700"
+              >
                 <div className="h-4 bg-zinc-200 dark:bg-zinc-700 rounded w-1/3 mb-3" />
                 <div className="h-3 bg-zinc-200 dark:bg-zinc-700 rounded w-1/2" />
               </div>
@@ -204,7 +235,8 @@ export default function ShopOrdersPage() {
               No orders found
             </h2>
             <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-              No orders have been placed with <span className="font-medium">{loggedInEmail}</span> yet.
+              No orders have been placed with <span className="font-medium">{loggedInEmail}</span>{' '}
+              yet.
             </p>
             <Link
               href="/shop"
@@ -239,7 +271,9 @@ export default function ShopOrdersPage() {
                           {date} at {time}
                         </div>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 ${statusConfig.classes}`}>
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 ${statusConfig.classes}`}
+                      >
                         <span>{statusConfig.icon}</span>
                         <span className="capitalize">{statusConfig.label}</span>
                       </span>
@@ -261,7 +295,8 @@ export default function ShopOrdersPage() {
                             <>, {order.shippingAddress.address2}</>
                           )}
                           <br />
-                          {order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}
+                          {order.shippingAddress.city}, {order.shippingAddress.state}{' '}
+                          {order.shippingAddress.postalCode}
                         </div>
                       </div>
                     )}
@@ -305,7 +340,7 @@ function OrderProgressBar({ status }: { status: string }) {
     return <div className="h-1 bg-red-500" />;
   }
 
-  const currentIndex = ORDER_STEPS.indexOf(status as typeof ORDER_STEPS[number]);
+  const currentIndex = ORDER_STEPS.indexOf(status as (typeof ORDER_STEPS)[number]);
   const progress = currentIndex >= 0 ? ((currentIndex + 1) / ORDER_STEPS.length) * 100 : 10;
 
   return (

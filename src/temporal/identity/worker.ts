@@ -37,7 +37,7 @@ if (require.main === module) {
 
   (async () => {
     const connection = await NativeConnection.connect({
-      address: TEMPORAL_ADDRESS
+      address: TEMPORAL_ADDRESS,
     });
 
     logger.info({ address: TEMPORAL_ADDRESS }, 'Connected to Temporal');

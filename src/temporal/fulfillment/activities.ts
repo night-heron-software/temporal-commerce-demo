@@ -20,7 +20,9 @@ export interface TrackingInfo {
 
 export interface FulfillmentActivities {
   getFeatureFlag(name: string): Promise<boolean>;
-  submitFulfillerOrder(request: Fulfillers.FulfillerOrderInput): Promise<Fulfillers.FulfillerOrderResult>;
+  submitFulfillerOrder(
+    request: Fulfillers.FulfillerOrderInput,
+  ): Promise<Fulfillers.FulfillerOrderResult>;
   sendShippedEmail(
     email: string,
     orderId: string,
@@ -47,12 +49,12 @@ export const {
   fulfillInventoryReservations,
   releaseInventoryReservations,
   indexFulfillment,
-  indexShipment
+  indexShipment,
 } = proxyActivities<FulfillmentActivities>({
   startToCloseTimeout: '5m',
   retry: {
     maximumAttempts: 3,
     initialInterval: '2s',
-    backoffCoefficient: 2
-  }
+    backoffCoefficient: 2,
+  },
 });

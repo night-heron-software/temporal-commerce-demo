@@ -5,7 +5,12 @@
 
 import { proxyActivities } from '@temporalio/workflow';
 import type { Order, OrderState, OrderStatus } from './types';
-import { OrderLineItem, FulfillerResolutionContext, FulfillerAssignment, Elasticsearch } from '../contracts';
+import {
+  OrderLineItem,
+  FulfillerResolutionContext,
+  FulfillerAssignment,
+  Elasticsearch,
+} from '../contracts';
 
 export interface OmsActivities {
   saveOrderToDatabase(order: Order): Promise<void>;
@@ -14,15 +19,18 @@ export interface OmsActivities {
     email: string,
     orderId: string,
     status: OrderStatus,
-    details?: { trackingNumber?: string; carrier?: string }
+    details?: { trackingNumber?: string; carrier?: string },
   ): Promise<void>;
   sendFeedbackThankYouEmail(email: string, orderId: string): Promise<void>;
   getOrdersByEmail(email: string): Promise<Order[]>;
   getOrderById(orderId: string): Promise<Order | null>;
-  resolveFulfillerAssignments(items: OrderLineItem[], context: FulfillerResolutionContext): Promise<FulfillerAssignment[]>;
+  resolveFulfillerAssignments(
+    items: OrderLineItem[],
+    context: FulfillerResolutionContext,
+  ): Promise<FulfillerAssignment[]>;
   insertStatusHistoryEntry(
     orderId: string,
-    entry: { status: string; timestamp: string; note?: string; updatedBy: string }
+    entry: { status: string; timestamp: string; note?: string; updatedBy: string },
   ): Promise<void>;
   indexOrder(doc: Elasticsearch.OrderDocument): Promise<void>;
   indexFulfillerOrder(doc: Elasticsearch.FulfillerOrderDocument): Promise<void>;
@@ -30,57 +38,44 @@ export interface OmsActivities {
 }
 
 // Database write activities: order persistence and status tracking
-export const {
-  saveOrderToDatabase,
-  updateOrderInDatabase,
-  insertStatusHistoryEntry
-} = proxyActivities<OmsActivities>({
-  startToCloseTimeout: '1m',
-  retry: {
-    maximumAttempts: 3,
-    initialInterval: '1s',
-    backoffCoefficient: 2
-  }
-});
+export const { saveOrderToDatabase, updateOrderInDatabase, insertStatusHistoryEntry } =
+  proxyActivities<OmsActivities>({
+    startToCloseTimeout: '1m',
+    retry: {
+      maximumAttempts: 3,
+      initialInterval: '1s',
+      backoffCoefficient: 2,
+    },
+  });
 
 // Elasticsearch projection activities
-export const {
-  indexOrder,
-  indexFulfillerOrder,
-  indexCustomer
-} = proxyActivities<OmsActivities>({
+export const { indexOrder, indexFulfillerOrder, indexCustomer } = proxyActivities<OmsActivities>({
   startToCloseTimeout: '30s',
   retry: {
     maximumAttempts: 3,
     initialInterval: '1s',
-    backoffCoefficient: 2
-  }
+    backoffCoefficient: 2,
+  },
 });
 
 // Email activities: longer timeout for external Mailgun API
-export const {
-  sendOrderStatusEmail,
-  sendFeedbackThankYouEmail
-} = proxyActivities<OmsActivities>({
+export const { sendOrderStatusEmail, sendFeedbackThankYouEmail } = proxyActivities<OmsActivities>({
   startToCloseTimeout: '2m',
   retry: {
     maximumAttempts: 3,
     initialInterval: '1s',
     backoffCoefficient: 2,
-    nonRetryableErrorTypes: ['InvalidRecipientError']
-  }
+    nonRetryableErrorTypes: ['InvalidRecipientError'],
+  },
 });
 
 // Query/lookup activities: read-only operations
-export const {
-  getOrdersByEmail,
-  getOrderById,
-  resolveFulfillerAssignments
-} = proxyActivities<OmsActivities>({
-  startToCloseTimeout: '1m',
-  retry: {
-    maximumAttempts: 3,
-    initialInterval: '1s',
-    backoffCoefficient: 2
-  }
-});
+export const { getOrdersByEmail, getOrderById, resolveFulfillerAssignments } =
+  proxyActivities<OmsActivities>({
+    startToCloseTimeout: '1m',
+    retry: {
+      maximumAttempts: 3,
+      initialInterval: '1s',
+      backoffCoefficient: 2,
+    },
+  });

@@ -2,13 +2,14 @@
 
 /**
  * Cart Server Actions — Demo version
- * 
+ *
  * Simplified: no auth, cookie-only cart ID.
  * Uses Temporal updateWithStart for lazy cart creation.
  */
 
 import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
+import { createLogger } from '@/lib/logger';
 import { getTemporalClient } from '@/lib/temporal-client';
 import { Cart, Checkout, Constants } from '@/temporal/contracts';
 import {
@@ -16,6 +17,8 @@ import {
   buildWorkflowStartOptions,
   DEMO_STORE_ID,
 } from '@/temporal/contracts/constants';
+
+const log = createLogger('cart-actions');
 
 const CART_ID_COOKIE = 'cartId';
 
@@ -37,7 +40,7 @@ export async function getOrCreateCartId(): Promise<string> {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: 30 * 24 * 60 * 60,
-    path: '/'
+    path: '/',
   });
   return cartId;
 }
@@ -75,7 +78,7 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
   cartId: string,
   updateDef: any,
   args: TArgs,
-  options: { createIfMissing?: boolean } = {}
+  options: { createIfMissing?: boolean } = {},
 ): Promise<TReturn | null> {
   const client = await getTemporalClient();
   const workflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', cartId);
@@ -95,11 +98,11 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
         taskQueue: Constants.CART_TASK_QUEUE,
         workflowIdConflictPolicy: 'USE_EXISTING',
         workflowExecutionTimeout: '30 days',
-        workflowTaskTimeout: '2m'
+        workflowTaskTimeout: '2m',
       });
       return await client.workflow.executeUpdateWithStart(updateDef, {
         startWorkflowOperation: startOp,
-        args: args as unknown as [any, ...any[]]
+        args: args as unknown as [any, ...any[]],
       });
     } else {
       const handle = client.workflow.getHandle(workflowId);
@@ -108,7 +111,7 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
   } catch (e) {
     const reason = classifyUpdateError(e);
     if (reason) {
-      console.info(`[executeCartUpdate] cart ${cartId}: ${reason}`);
+      log.info({ cartId, reason }, 'Cart update produced no result');
       return null;
     }
     throw e;
@@ -122,12 +125,14 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
 async function runCheckoutUpdate<TReturn, TArgs extends any[]>(
   checkoutWorkflowId: string,
   updateDef: any,
-  args: TArgs
+  args: TArgs,
 ): Promise<UpdateOutcome<TReturn>> {
   const client = await getTemporalClient();
   const handle = client.workflow.getHandle(checkoutWorkflowId);
   try {
-    const value = await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
+    const value = await handle.executeUpdate(updateDef, {
+      args: args as unknown as [any, ...any[]],
+    });
     return { ok: true, value: value as TReturn };
   } catch (e) {
     const reason = classifyUpdateError(e);
@@ -140,7 +145,7 @@ async function runCheckoutUpdate<TReturn, TArgs extends any[]>(
 async function executeCheckoutUpdate<TReturn, TArgs extends any[]>(
   checkoutWorkflowId: string,
   updateDef: any,
-  args: TArgs
+  args: TArgs,
 ): Promise<TReturn | null> {
   const outcome = await runCheckoutUpdate<TReturn, TArgs>(checkoutWorkflowId, updateDef, args);
   return outcome.ok ? outcome.value : null;
@@ -158,9 +163,9 @@ export async function getCart(cartId: string): Promise<Cart.CartDetails | null> 
   } catch (e: unknown) {
     const err = e as { name?: string };
     if (err?.name === 'WorkflowNotFoundError') {
-      console.info(`[getCart] Cart workflow not found for ${cartId}`);
+      log.info({ cartId }, 'Cart workflow not found');
     } else {
-      console.error('Failed to get cart', e);
+      log.error({ cartId, err: e }, 'Failed to get cart');
     }
     return null;
   }
@@ -173,19 +178,19 @@ export async function addItemToCart(
   cartId: string,
   variantId: string,
   quantity: number,
-  price: number
+  price: number,
 ): Promise<Cart.CartDetails | null> {
   return executeCartUpdate(
     cartId,
     Cart.cartUpdate,
     [{ type: 'addItem' as const, variantId, quantity, price }],
-    { createIfMissing: true }
+    { createIfMissing: true },
   );
 }
 
 export async function removeFromCart(
   cartId: string,
-  lineItemId: string
+  lineItemId: string,
 ): Promise<Cart.CartDetails | null> {
   return executeCartUpdate(cartId, Cart.cartUpdate, [{ type: 'removeItem' as const, lineItemId }]);
 }
@@ -193,9 +198,11 @@ export async function removeFromCart(
 export async function updateItemQuantity(
   cartId: string,
   lineItemId: string,
-  quantity: number
+  quantity: number,
 ): Promise<Cart.CartDetails | null> {
-  return executeCartUpdate(cartId, Cart.cartUpdate, [{ type: 'updateQuantity' as const, lineItemId, quantity }]);
+  return executeCartUpdate(cartId, Cart.cartUpdate, [
+    { type: 'updateQuantity' as const, lineItemId, quantity },
+  ]);
 }
 
 // ==================
@@ -218,7 +225,7 @@ export async function getCheckoutWorkflowId(cartId: string): Promise<string | nu
 
 export async function setShippingAddress(
   cartId: string,
-  shippingAddress: Cart.ShippingAddress
+  shippingAddress: Cart.ShippingAddress,
 ): Promise<Cart.CheckoutState | null> {
   let checkoutWfId = await getCheckoutWorkflowId(cartId);
 
@@ -228,37 +235,43 @@ export async function setShippingAddress(
     if (!checkoutWfId) return null;
   }
 
-  const outcome = await runCheckoutUpdate<Cart.CheckoutState, [{ shippingAddress: Cart.ShippingAddress }]>(
-    checkoutWfId,
-    Checkout.setShippingUpdate,
-    [{ shippingAddress }],
-  );
+  const outcome = await runCheckoutUpdate<
+    Cart.CheckoutState,
+    [{ shippingAddress: Cart.ShippingAddress }]
+  >(checkoutWfId, Checkout.setShippingUpdate, [{ shippingAddress }]);
   if (outcome.ok) return outcome.value;
 
   // Recovery: the checkout workflow was dead (timed out / terminated / already
   // completed) — start a fresh attempt and retry the update against it.
-  console.info(
-    `[setShippingAddress] checkout ${checkoutWfId} unavailable (${outcome.reason}); starting a fresh checkout`,
+  log.info(
+    { checkoutWorkflowId: checkoutWfId, reason: outcome.reason },
+    'Checkout unavailable; starting a fresh checkout',
   );
   await beginCheckout(cartId);
   const newId = await getCheckoutWorkflowId(cartId);
   if (!newId) return null;
-  return executeCheckoutUpdate(newId, Checkout.setShippingUpdate, [{ shippingAddress }]) as Promise<Cart.CheckoutState | null>;
+  return executeCheckoutUpdate(newId, Checkout.setShippingUpdate, [
+    { shippingAddress },
+  ]) as Promise<Cart.CheckoutState | null>;
 }
 
 export async function setPaymentMethod(
   cartId: string,
-  paymentMethod: Cart.PaymentMethod
+  paymentMethod: Cart.PaymentMethod,
 ): Promise<Cart.CheckoutState | null> {
   const checkoutWfId = await getCheckoutWorkflowId(cartId);
   if (!checkoutWfId) return null;
-  return executeCheckoutUpdate(checkoutWfId, Checkout.setPaymentUpdate, [{ paymentMethod }]) as Promise<Cart.CheckoutState | null>;
+  return executeCheckoutUpdate(checkoutWfId, Checkout.setPaymentUpdate, [
+    { paymentMethod },
+  ]) as Promise<Cart.CheckoutState | null>;
 }
 
 export async function submitOrder(cartId: string): Promise<Cart.CheckoutState | null> {
   const checkoutWfId = await getCheckoutWorkflowId(cartId);
   if (!checkoutWfId) return null;
-  const state = await executeCheckoutUpdate(checkoutWfId, Checkout.submitOrderUpdate, [{}]) as Cart.CheckoutState | null;
+  const state = (await executeCheckoutUpdate(checkoutWfId, Checkout.submitOrderUpdate, [
+    {},
+  ])) as Cart.CheckoutState | null;
 
   if (state?.step === 'complete') {
     const cookieStore = await cookies();
@@ -271,7 +284,9 @@ export async function submitOrder(cartId: string): Promise<Cart.CheckoutState | 
 export async function cancelCheckout(cartId: string): Promise<Cart.CheckoutState | null> {
   const checkoutWfId = await getCheckoutWorkflowId(cartId);
   if (!checkoutWfId) return null;
-  return executeCheckoutUpdate(checkoutWfId, Checkout.cancelCheckoutUpdate, [{}]) as Promise<Cart.CheckoutState | null>;
+  return executeCheckoutUpdate(checkoutWfId, Checkout.cancelCheckoutUpdate, [
+    {},
+  ]) as Promise<Cart.CheckoutState | null>;
 }
 
 export async function getCheckoutState(cartId: string): Promise<Cart.CheckoutState | null> {
@@ -296,9 +311,11 @@ export async function getCheckoutState(cartId: string): Promise<Cart.CheckoutSta
 
 export async function acknowledgeCartChange(
   cartId: string,
-  cartVersion: number
+  cartVersion: number,
 ): Promise<Cart.CheckoutState | null> {
   const checkoutWfId = await getCheckoutWorkflowId(cartId);
   if (!checkoutWfId) return null;
-  return executeCheckoutUpdate(checkoutWfId, Checkout.acknowledgeCartChangeUpdate, [{ cartVersion }]) as Promise<Cart.CheckoutState | null>;
+  return executeCheckoutUpdate(checkoutWfId, Checkout.acknowledgeCartChangeUpdate, [
+    { cartVersion },
+  ]) as Promise<Cart.CheckoutState | null>;
 }

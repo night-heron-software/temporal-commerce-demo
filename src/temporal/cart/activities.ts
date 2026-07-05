@@ -14,11 +14,12 @@ export interface CartActivities {
   deleteCart(cartId: string): Promise<void>;
 }
 
-export const { validateInventory, reserveCartItem, releaseCartItem, indexCart, deleteCart } = proxyActivities<CartActivities>({
-  startToCloseTimeout: '1m',
-  retry: {
-    maximumAttempts: 3,
-    initialInterval: '1s',
-    backoffCoefficient: 2
-  }
-});
+export const { validateInventory, reserveCartItem, releaseCartItem, indexCart, deleteCart } =
+  proxyActivities<CartActivities>({
+    startToCloseTimeout: '1m',
+    retry: {
+      maximumAttempts: 3,
+      initialInterval: '1s',
+      backoffCoefficient: 2,
+    },
+  });

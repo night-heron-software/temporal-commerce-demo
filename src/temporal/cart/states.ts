@@ -100,7 +100,10 @@ function itemEditEntries(): Pick<
         if (!reservationId) {
           // Reservation failed — re-reserve at the old quantity if we released
           if (oldQty > 0) await reserveCartItem(ctx.cart.cartId, event.variantId, oldQty);
-          return { lineItemId, reserveError: `Insufficient inventory for variant ${event.variantId}` };
+          return {
+            lineItemId,
+            reserveError: `Insufficient inventory for variant ${event.variantId}`,
+          };
         }
         return { lineItemId, reserveError: undefined };
       },
@@ -293,7 +296,11 @@ const checkout = cart.transitions(
 
     beginCheckout: {
       decide(ctx) {
-        return { context: ctx as CartWorkflowContext, next: 'checkout' as const, response: ctx.cart };
+        return {
+          context: ctx as CartWorkflowContext,
+          next: 'checkout' as const,
+          response: ctx.cart,
+        };
       },
     },
   },
@@ -323,7 +330,10 @@ const checkout = cart.transitions(
 
         // Ignore stale signals from a previous checkout attempt.
         const result = signal.result;
-        if (result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion) {
+        if (
+          result.checkoutVersion !== undefined &&
+          result.checkoutVersion !== ctx.checkoutVersion
+        ) {
           log.warn('Ignoring stale checkout signal', {
             cartId: ctx.cart.cartId,
             expected: ctx.checkoutVersion,

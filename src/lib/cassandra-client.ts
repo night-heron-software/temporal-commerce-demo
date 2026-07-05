@@ -92,4 +92,3 @@ export async function executeBatch(
   const client = getCassandraClient();
   await client.batch(queries, { prepare: true, logged: opts?.logged ?? true });
 }
-

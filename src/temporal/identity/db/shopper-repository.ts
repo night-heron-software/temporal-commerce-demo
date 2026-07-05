@@ -26,7 +26,7 @@ export class ShopperRepository {
       `SELECT id, email, password_hash, name, phone, failed_attempts, locked_until, created_at, updated_at
        FROM shoppers
        WHERE email = ?`,
-      [email]
+      [email],
     );
 
     if (rows.length === 0) return null;
@@ -41,7 +41,7 @@ export class ShopperRepository {
       failedAttempts: row.failed_attempts || 0,
       lockedUntil: row.locked_until || null,
       createdAt: row.created_at,
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
     };
   }
 
@@ -66,8 +66,8 @@ export class ShopperRepository {
         shopper.phone || null,
         0,
         now,
-        now
-      ]
+        now,
+      ],
     );
   }
 
@@ -79,13 +79,13 @@ export class ShopperRepository {
       `UPDATE shoppers 
        SET password_hash = ?, updated_at = ?, failed_attempts = 0, locked_until = null
        WHERE email = ?`,
-      [newHash, now, email]
+      [newHash, now, email],
     );
   }
 
   async recordFailedLogin(email: string): Promise<{ locked: boolean; attempts: number }> {
     logger.info({ email }, 'ShopperRepository.recordFailedLogin');
-    
+
     const shopper = await this.getShopperByEmail(email);
     if (!shopper) return { locked: false, attempts: 0 };
 
@@ -98,7 +98,7 @@ export class ShopperRepository {
         `UPDATE shoppers 
          SET failed_attempts = ?, locked_until = ?, updated_at = ?
          WHERE email = ?`,
-        [newAttempts, lockUntil, now, email]
+        [newAttempts, lockUntil, now, email],
       );
       return { locked: true, attempts: newAttempts };
     }
@@ -107,7 +107,7 @@ export class ShopperRepository {
       `UPDATE shoppers 
        SET failed_attempts = ?, updated_at = ?
        WHERE email = ?`,
-      [newAttempts, now, email]
+      [newAttempts, now, email],
     );
     return { locked: false, attempts: newAttempts };
   }
@@ -120,7 +120,7 @@ export class ShopperRepository {
       `UPDATE shoppers 
        SET failed_attempts = 0, locked_until = null, updated_at = ?
        WHERE email = ?`,
-      [now, email]
+      [now, email],
     );
   }
 
@@ -141,7 +141,7 @@ export class ShopperRepository {
     }
 
     const isValid = await bcrypt.compare(password, shopper.passwordHash);
-    
+
     if (!isValid) {
       await this.recordFailedLogin(email);
       return null;
@@ -152,7 +152,9 @@ export class ShopperRepository {
     return shopper;
   }
 
-  async getAllShoppers(): Promise<Array<{ id: string; email: string; name: string; phone?: string; createdAt?: Date }>> {
+  async getAllShoppers(): Promise<
+    Array<{ id: string; email: string; name: string; phone?: string; createdAt?: Date }>
+  > {
     logger.info('ShopperRepository.getAllShoppers');
 
     const rows = await executeCql<{
@@ -161,16 +163,14 @@ export class ShopperRepository {
       name: string;
       phone: string | null;
       created_at: Date;
-    }>(
-      `SELECT id, email, name, phone, created_at FROM shoppers`
-    );
+    }>(`SELECT id, email, name, phone, created_at FROM shoppers`);
 
     return rows.map((row) => ({
       id: row.id.toString(),
       email: row.email,
       name: row.name,
       phone: row.phone || undefined,
-      createdAt: row.created_at
+      createdAt: row.created_at,
     }));
   }
 
@@ -192,10 +192,7 @@ export class ShopperRepository {
 
     params.push(email);
 
-    await executeCql(
-      `UPDATE shoppers SET ${setClauses.join(', ')} WHERE email = ?`,
-      params
-    );
+    await executeCql(`UPDATE shoppers SET ${setClauses.join(', ')} WHERE email = ?`, params);
   }
 
   /**
@@ -204,7 +201,7 @@ export class ShopperRepository {
    */
   async searchShoppers(
     query: string,
-    limit: number = 10
+    limit: number = 10,
   ): Promise<Array<{ id: string; email: string; name: string }>> {
     logger.info({ query, limit }, 'ShopperRepository.searchShoppers');
 
@@ -220,21 +217,19 @@ export class ShopperRepository {
       id: types.Uuid;
       email: string;
       name: string;
-    }>(
-      `SELECT id, email, name FROM shoppers`
-    );
+    }>(`SELECT id, email, name FROM shoppers`);
 
     const filtered = rows
       .filter(
         (row) =>
           row.email.toLowerCase().includes(normalizedQuery) ||
-          row.name.toLowerCase().includes(normalizedQuery)
+          row.name.toLowerCase().includes(normalizedQuery),
       )
       .slice(0, limit)
       .map((row) => ({
         id: row.id.toString(),
         email: row.email,
-        name: row.name
+        name: row.name,
       }));
 
     return filtered;

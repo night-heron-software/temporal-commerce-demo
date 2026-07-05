@@ -30,7 +30,7 @@ export class AddressRepository {
               is_default, created_at, updated_at
        FROM shopper_shipping_addresses
        WHERE user_id = ?`,
-      [userId]
+      [userId],
     );
 
     return rows.map((row) => ({
@@ -48,7 +48,7 @@ export class AddressRepository {
       email: row.email,
       isDefault: row.is_default,
       createdAt: row.created_at,
-      updatedAt: row.updated_at
+      updatedAt: row.updated_at,
     }));
   }
 
@@ -83,8 +83,8 @@ export class AddressRepository {
         address.email,
         address.isDefault,
         address.createdAt || now,
-        now
-      ]
+        now,
+      ],
     );
   }
 
@@ -93,7 +93,7 @@ export class AddressRepository {
 
     await executeCql(
       `DELETE FROM shopper_shipping_addresses WHERE user_id = ? AND address_id = ?`,
-      [userId, types.Uuid.fromString(addressId)]
+      [userId, types.Uuid.fromString(addressId)],
     );
   }
 
@@ -107,7 +107,7 @@ export class AddressRepository {
     await executeCql(
       `UPDATE shopper_shipping_addresses SET is_default = true, updated_at = ?
        WHERE user_id = ? AND address_id = ?`,
-      [new Date(), userId, types.Uuid.fromString(addressId)]
+      [new Date(), userId, types.Uuid.fromString(addressId)],
     );
   }
 
@@ -120,9 +120,9 @@ export class AddressRepository {
         executeCql(
           `UPDATE shopper_shipping_addresses SET is_default = false, updated_at = ?
            WHERE user_id = ? AND address_id = ?`,
-          [new Date(), userId, types.Uuid.fromString(addr.addressId)]
-        )
-      )
+          [new Date(), userId, types.Uuid.fromString(addr.addressId)],
+        ),
+      ),
     );
   }
 }

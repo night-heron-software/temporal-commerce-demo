@@ -10,6 +10,6 @@ export function buildFulfillmentDocument(
     status: state.status,
     fulfillerOrderCount: state.fulfillerOrders.length,
     createdAt: state.createdAt,
-    updatedAt: state.updatedAt
+    updatedAt: state.updatedAt,
   };
 }

@@ -6,7 +6,7 @@ import {
   getIndexStats,
   type SearchResult,
   type SearchableIndex,
-  type IndexStats
+  type IndexStats,
 } from '../admin-search-actions';
 
 const ALL_INDICES: { key: SearchableIndex; label: string; icon: string }[] = [
@@ -26,7 +26,7 @@ const ALL_INDICES: { key: SearchableIndex; label: string; icon: string }[] = [
 export default function AdminSearchPage() {
   const [query, setQuery] = useState('');
   const [selectedIndices, setSelectedIndices] = useState<Set<SearchableIndex>>(
-    new Set(ALL_INDICES.map(i => i.key))
+    new Set(ALL_INDICES.map((i) => i.key)),
   );
   const [results, setResults] = useState<SearchResult[]>([]);
   const [total, setTotal] = useState(0);
@@ -41,16 +41,18 @@ export default function AdminSearchPage() {
   // Load index stats on mount
   useEffect(() => {
     let active = true;
-    getIndexStats().then(result => {
+    getIndexStats().then((result) => {
       if (!active) return;
       if (result.success) setStats(result.stats);
       setStatsLoading(false);
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
   const toggleIndex = (index: SearchableIndex) => {
-    setSelectedIndices(prev => {
+    setSelectedIndices((prev) => {
       const next = new Set(prev);
       if (next.has(index)) next.delete(index);
       else next.add(index);
@@ -58,7 +60,7 @@ export default function AdminSearchPage() {
     });
   };
 
-  const selectAll = () => setSelectedIndices(new Set(ALL_INDICES.map(i => i.key)));
+  const selectAll = () => setSelectedIndices(new Set(ALL_INDICES.map((i) => i.key)));
   const selectNone = () => setSelectedIndices(new Set());
 
   const executeSearch = useCallback(async () => {
@@ -72,11 +74,7 @@ export default function AdminSearchPage() {
     setHasSearched(true);
     setExpandedResult(null);
 
-    const response = await searchElasticsearch(
-      query,
-      Array.from(selectedIndices),
-      50
-    );
+    const response = await searchElasticsearch(query, Array.from(selectedIndices), 50);
 
     if (response.success) {
       setResults(response.results);
@@ -94,11 +92,11 @@ export default function AdminSearchPage() {
   };
 
   const toggleExpand = (key: string) => {
-    setExpandedResult(prev => prev === key ? null : key);
+    setExpandedResult((prev) => (prev === key ? null : key));
   };
 
   const getDocCount = (index: string): number => {
-    return stats.find(s => s.index === index)?.docCount ?? 0;
+    return stats.find((s) => s.index === index)?.docCount ?? 0;
   };
 
   // Group results by index
@@ -139,7 +137,7 @@ export default function AdminSearchPage() {
   };
 
   const getIndexMeta = (index: string) =>
-    ALL_INDICES.find(i => i.key === index) ?? { key: index, label: index, icon: '📄' };
+    ALL_INDICES.find((i) => i.key === index) ?? { key: index, label: index, icon: '📄' };
 
   return (
     <div className="max-w-7xl mx-auto p-6">
@@ -180,22 +178,26 @@ export default function AdminSearchPage() {
                 className={`
                   inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium
                   border transition-all duration-150
-                  ${selected
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                    : 'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500'
+                  ${
+                    selected
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                      : 'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500'
                   }
                 `}
               >
                 <span>{icon}</span>
                 <span>{label}</span>
                 {!statsLoading && (
-                  <span className={`
+                  <span
+                    className={`
                     ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold
-                    ${selected
-                      ? 'bg-blue-500/30 text-blue-100'
-                      : 'bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'
+                    ${
+                      selected
+                        ? 'bg-blue-500/30 text-blue-100'
+                        : 'bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'
                     }
-                  `}>
+                  `}
+                  >
                     {count}
                   </span>
                 )}
@@ -213,7 +215,7 @@ export default function AdminSearchPage() {
             type="text"
             placeholder="Search across all selected indices (IDs, names, emails, statuses…)"
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             className="
               w-full px-4 py-3 pl-10 rounded-lg border border-zinc-200 dark:border-zinc-700
@@ -263,7 +265,8 @@ export default function AdminSearchPage() {
           <span>{took}ms</span>
           <span className="text-zinc-300 dark:text-zinc-600">•</span>
           <span>
-            {Object.keys(groupedResults).length} {Object.keys(groupedResults).length === 1 ? 'index' : 'indices'}
+            {Object.keys(groupedResults).length}{' '}
+            {Object.keys(groupedResults).length === 1 ? 'index' : 'indices'}
           </span>
         </div>
       )}
@@ -296,9 +299,11 @@ export default function AdminSearchPage() {
                       onClick={() => toggleExpand(key)}
                       className="w-full text-left px-4 py-3 flex items-center gap-3"
                     >
-                      <span className={`
+                      <span
+                        className={`
                         text-xs transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}
-                      `}>
+                      `}
+                      >
                         ▶
                       </span>
                       <div className="flex-1 min-w-0">
@@ -347,7 +352,8 @@ export default function AdminSearchPage() {
         <div className="text-center py-16">
           <div className="text-5xl mb-4">🗂️</div>
           <p className="text-zinc-600 dark:text-zinc-400 font-medium">
-            {stats.reduce((sum, s) => sum + s.docCount, 0).toLocaleString()} documents across {stats.filter(s => s.docCount > 0).length} indices
+            {stats.reduce((sum, s) => sum + s.docCount, 0).toLocaleString()} documents across{' '}
+            {stats.filter((s) => s.docCount > 0).length} indices
           </p>
           <p className="text-zinc-400 dark:text-zinc-500 text-sm mt-1">
             Enter a query above or press Search to browse all documents.

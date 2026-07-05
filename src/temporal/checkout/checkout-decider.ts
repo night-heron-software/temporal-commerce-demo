@@ -133,7 +133,9 @@ export function decide(command: CheckoutCommand, _state: CheckoutContext): Check
       return [{ type: 'CartChangeAcknowledged', cartVersion: command.cartVersion }];
 
     case 'retargetParent':
-      return [{ type: 'ParentRetargeted', newParentCartWorkflowId: command.newParentCartWorkflowId }];
+      return [
+        { type: 'ParentRetargeted', newParentCartWorkflowId: command.newParentCartWorkflowId },
+      ];
 
     case 'recompute':
       return [

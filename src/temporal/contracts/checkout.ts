@@ -64,9 +64,7 @@ export interface RetargetParentSignal {
 // Re-export types from cart that checkout needs
 export type { CartItem, Order, PaymentMethod, ShippingAddress } from './cart';
 
-
 import { defineQuery, defineUpdate } from '@temporalio/workflow';
-
 
 // ==================
 // Checkout Workflow Updates & Queries
@@ -75,9 +73,11 @@ import { defineQuery, defineUpdate } from '@temporalio/workflow';
 export const setShippingUpdate = defineUpdate<CheckoutState, [SetShippingSignal]>('setShipping');
 export const setPaymentUpdate = defineUpdate<CheckoutState, [SetPaymentSignal]>('setPayment');
 export const submitOrderUpdate = defineUpdate<CheckoutState, [SubmitOrderSignal]>('submitOrder');
-export const cancelCheckoutUpdate = defineUpdate<CheckoutState, [CancelCheckoutSignal]>('cancelCheckout');
-export const acknowledgeCartChangeUpdate = defineUpdate<CheckoutState, [{ cartVersion: number }]>('acknowledgeCartChange');
+export const cancelCheckoutUpdate = defineUpdate<CheckoutState, [CancelCheckoutSignal]>(
+  'cancelCheckout',
+);
+export const acknowledgeCartChangeUpdate = defineUpdate<CheckoutState, [{ cartVersion: number }]>(
+  'acknowledgeCartChange',
+);
 export const retargetParentUpdate = defineUpdate<void, [RetargetParentSignal]>('retargetParent');
 export const getCheckoutStateQuery = defineQuery<CheckoutState>('getCheckoutStateForCheckout');
-
-

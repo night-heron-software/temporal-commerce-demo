@@ -92,7 +92,10 @@ export default function AdminOrderDetailPage() {
   if (error && !orderState) {
     return (
       <div className="max-w-4xl mx-auto p-8">
-        <Link href="/admin/orders" className="text-blue-600 dark:text-blue-400 hover:underline mb-4 block">
+        <Link
+          href="/admin/orders"
+          className="text-blue-600 dark:text-blue-400 hover:underline mb-4 block"
+        >
           ← Back to Orders
         </Link>
         <div className="p-8 bg-red-100 dark:bg-red-900/30 rounded-lg text-red-800 dark:text-red-300">
@@ -112,7 +115,10 @@ export default function AdminOrderDetailPage() {
 
   return (
     <div className="max-w-5xl mx-auto p-8">
-      <Link href="/admin/orders" className="text-blue-600 dark:text-blue-400 hover:underline mb-4 block text-sm">
+      <Link
+        href="/admin/orders"
+        className="text-blue-600 dark:text-blue-400 hover:underline mb-4 block text-sm"
+      >
         ← Back to Orders
       </Link>
 
@@ -125,7 +131,9 @@ export default function AdminOrderDetailPage() {
           <p className="text-zinc-500 text-sm mt-1 font-mono">{order.orderId}</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`px-4 py-2 rounded-full font-semibold text-sm ${getStatusClasses(status)}`}>
+          <span
+            className={`px-4 py-2 rounded-full font-semibold text-sm ${getStatusClasses(status)}`}
+          >
             {status.replace(/_/g, ' ').toUpperCase()}
           </span>
           <button
@@ -141,13 +149,23 @@ export default function AdminOrderDetailPage() {
       {message && (
         <div className="p-4 bg-green-100 dark:bg-green-900/30 rounded-lg mb-4 text-green-800 dark:text-green-300 flex justify-between items-center">
           {message}
-          <button onClick={() => setMessage(null)} className="text-green-600 hover:text-green-800 text-lg">×</button>
+          <button
+            onClick={() => setMessage(null)}
+            className="text-green-600 hover:text-green-800 text-lg"
+          >
+            ×
+          </button>
         </div>
       )}
       {error && (
         <div className="p-4 bg-red-100 dark:bg-red-900/30 rounded-lg mb-4 text-red-800 dark:text-red-300 flex justify-between items-center">
           {error}
-          <button onClick={() => setError(null)} className="text-red-600 hover:text-red-800 text-lg">×</button>
+          <button
+            onClick={() => setError(null)}
+            className="text-red-600 hover:text-red-800 text-lg"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -172,27 +190,49 @@ export default function AdminOrderDetailPage() {
       <div className="grid md:grid-cols-2 gap-6 mb-8">
         {/* Order Details */}
         <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">Order Details</h2>
+          <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">
+            Order Details
+          </h2>
           <div className="space-y-2 text-sm text-zinc-700 dark:text-zinc-300">
-            <p><strong>Created:</strong> {formatDate(order.createdAt)}</p>
-            <p><strong>Customer:</strong> {order.shippingAddress?.email || order.customerEmail || 'Guest'}</p>
-            <p><strong>Subtotal:</strong> {formatPrice(order.subtotal)}</p>
-            <p><strong>Shipping:</strong> {formatPrice(order.shippingCost)}</p>
-            <p><strong>Tax:</strong> {formatPrice(order.tax)}</p>
+            <p>
+              <strong>Created:</strong> {formatDate(order.createdAt)}
+            </p>
+            <p>
+              <strong>Customer:</strong>{' '}
+              {order.shippingAddress?.email || order.customerEmail || 'Guest'}
+            </p>
+            <p>
+              <strong>Subtotal:</strong> {formatPrice(order.subtotal)}
+            </p>
+            <p>
+              <strong>Shipping:</strong> {formatPrice(order.shippingCost)}
+            </p>
+            <p>
+              <strong>Tax:</strong> {formatPrice(order.tax)}
+            </p>
             <hr className="border-zinc-200 dark:border-zinc-700 my-2" />
-            <p className="text-base font-semibold"><strong>Total:</strong> {formatPrice(order.total)}</p>
+            <p className="text-base font-semibold">
+              <strong>Total:</strong> {formatPrice(order.total)}
+            </p>
           </div>
         </div>
 
         {/* Shipping Address */}
         <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">Shipping Address</h2>
+          <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">
+            Shipping Address
+          </h2>
           {order.shippingAddress ? (
             <div className="space-y-1 text-sm text-zinc-700 dark:text-zinc-300">
-              <p>{order.shippingAddress.firstName} {order.shippingAddress.lastName}</p>
+              <p>
+                {order.shippingAddress.firstName} {order.shippingAddress.lastName}
+              </p>
               <p>{order.shippingAddress.address1}</p>
               {order.shippingAddress.address2 && <p>{order.shippingAddress.address2}</p>}
-              <p>{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}</p>
+              <p>
+                {order.shippingAddress.city}, {order.shippingAddress.state}{' '}
+                {order.shippingAddress.postalCode}
+              </p>
               <p>{order.shippingAddress.country}</p>
             </div>
           ) : (
@@ -210,7 +250,10 @@ export default function AdminOrderDetailPage() {
           {order.items.map((item) => {
             const itemAssignments = assignments.filter((a) => a.lineItemId === item.lineItemId);
             return (
-              <div key={item.lineItemId} className="p-3 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700">
+              <div
+                key={item.lineItemId}
+                className="p-3 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700"
+              >
                 <div className="flex justify-between items-center">
                   <div>
                     <span className="font-mono text-sm text-zinc-600 dark:text-zinc-400">
@@ -248,18 +291,28 @@ export default function AdminOrderDetailPage() {
           </h2>
           <div className="space-y-3">
             {fulfillerOrders.map((so) => (
-              <div key={so.fulfillerOrderId} className="p-4 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700">
+              <div
+                key={so.fulfillerOrderId}
+                className="p-4 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700"
+              >
                 <div className="flex justify-between items-start mb-2">
                   <div>
-                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">{so.fulfillerName}</span>
-                    <span className="ml-2 text-xs text-zinc-500 font-mono">{so.fulfillerOrderId}</span>
+                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      {so.fulfillerName}
+                    </span>
+                    <span className="ml-2 text-xs text-zinc-500 font-mono">
+                      {so.fulfillerOrderId}
+                    </span>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusClasses(so.status)}`}>
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusClasses(so.status)}`}
+                  >
                     {so.status.replace(/_/g, ' ')}
                   </span>
                 </div>
                 <div className="text-sm text-zinc-500">
-                  {so.items.length} item(s) • {so.items.reduce((sum, i) => sum + i.quantity, 0)} units
+                  {so.items.length} item(s) • {so.items.reduce((sum, i) => sum + i.quantity, 0)}{' '}
+                  units
                 </div>
                 {so.carrier && (
                   <div className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
@@ -279,7 +332,8 @@ export default function AdminOrderDetailPage() {
           🎛️ Manual Fulfillment Controls
         </h2>
         <p className="text-sm text-zinc-500 mb-4">
-          Step through the order lifecycle manually. Each button sends a Temporal Update to the order workflow.
+          Step through the order lifecycle manually. Each button sends a Temporal Update to the
+          order workflow.
         </p>
 
         {isTerminal ? (
@@ -346,11 +400,19 @@ export default function AdminOrderDetailPage() {
             (step, idx) => {
               const isActive = status === step;
               const isPast =
-                ['pending_assignment', 'ready_to_fulfill', 'processing', 'shipped', 'delivered'].indexOf(status) > idx;
+                [
+                  'pending_assignment',
+                  'ready_to_fulfill',
+                  'processing',
+                  'shipped',
+                  'delivered',
+                ].indexOf(status) > idx;
               return (
                 <div key={step} className="flex items-center gap-1">
                   {idx > 0 && (
-                    <div className={`w-8 h-0.5 ${isPast ? 'bg-green-400' : 'bg-zinc-300 dark:bg-zinc-600'}`} />
+                    <div
+                      className={`w-8 h-0.5 ${isPast ? 'bg-green-400' : 'bg-zinc-300 dark:bg-zinc-600'}`}
+                    />
                   )}
                   <div
                     className={`px-2 py-1 rounded-md whitespace-nowrap font-medium ${
@@ -365,18 +427,23 @@ export default function AdminOrderDetailPage() {
                   </div>
                 </div>
               );
-            }
+            },
           )}
         </div>
       </div>
 
       {/* Status History */}
       <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-        <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">Status History</h2>
+        <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">
+          Status History
+        </h2>
         {statusHistory && statusHistory.length > 0 ? (
           <div className="space-y-2">
             {statusHistory.map((entry, idx) => (
-              <div key={idx} className="flex items-center gap-4 p-3 bg-zinc-50 dark:bg-zinc-750 rounded">
+              <div
+                key={idx}
+                className="flex items-center gap-4 p-3 bg-zinc-50 dark:bg-zinc-750 rounded"
+              >
                 <span className="w-36 font-medium capitalize text-sm text-zinc-700 dark:text-zinc-300">
                   {entry.status.replace(/_/g, ' ')}
                 </span>
@@ -384,9 +451,7 @@ export default function AdminOrderDetailPage() {
                 <span className="text-xs px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400">
                   {entry.updatedBy}
                 </span>
-                {entry.note && (
-                  <span className="text-zinc-500 text-sm italic">{entry.note}</span>
-                )}
+                {entry.note && <span className="text-zinc-500 text-sm italic">{entry.note}</span>}
               </div>
             ))}
           </div>

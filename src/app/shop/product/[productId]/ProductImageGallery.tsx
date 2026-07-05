@@ -22,11 +22,11 @@ export default function ProductImageGallery({ images, productName }: ProductImag
 
   // Default to the first image in the sorted list, or empty if none
   const [selectedImage, setSelectedImage] = useState<string | null>(
-    imageEntries.length > 0 ? imageEntries[0][1] : null
+    imageEntries.length > 0 ? imageEntries[0][1] : null,
   );
 
   const [selectedLabel, setSelectedLabel] = useState<string | null>(
-    imageEntries.length > 0 ? imageEntries[0][0] : null
+    imageEntries.length > 0 ? imageEntries[0][0] : null,
   );
 
   if (imageEntries.length === 0) {

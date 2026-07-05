@@ -27,30 +27,50 @@ import type {
 type LookupMode = 'orderId' | 'confirmation' | 'email';
 
 const MODES: { key: LookupMode; label: string; placeholder: string }[] = [
-  { key: 'orderId',      label: 'Order ID',       placeholder: 'e.g. 7c9e6679-7425-40de-944b-e07fc1f90ae7' },
-  { key: 'confirmation', label: 'Confirmation #',  placeholder: 'e.g. M5XCXU2Y' },
-  { key: 'email',        label: 'Customer Email',  placeholder: 'e.g. shopper@example.com' },
+  { key: 'orderId', label: 'Order ID', placeholder: 'e.g. 7c9e6679-7425-40de-944b-e07fc1f90ae7' },
+  { key: 'confirmation', label: 'Confirmation #', placeholder: 'e.g. M5XCXU2Y' },
+  { key: 'email', label: 'Customer Email', placeholder: 'e.g. shopper@example.com' },
 ];
 
 const DOMAIN_LABELS: Record<TraceDomain, string> = {
-  cart:              'Cart',
-  checkout:          'Checkout',
-  oms:               'Order (OMS)',
-  fulfillment:       'Fulfillment',
+  cart: 'Cart',
+  checkout: 'Checkout',
+  oms: 'Order (OMS)',
+  fulfillment: 'Fulfillment',
   'fulfiller-order': 'Fulfiller Order',
 };
 
 const DOMAIN_ACCENT: Record<TraceDomain, { border: string; badge: string; bar: string }> = {
-  cart:              { border: 'border-violet-700', badge: 'bg-violet-900 text-violet-200 border-violet-700', bar: 'bg-violet-600' },
-  checkout:          { border: 'border-blue-700',   badge: 'bg-blue-900 text-blue-200 border-blue-700',       bar: 'bg-blue-600'   },
-  oms:               { border: 'border-cyan-700',   badge: 'bg-cyan-900 text-cyan-200 border-cyan-700',       bar: 'bg-cyan-600'   },
-  fulfillment:       { border: 'border-amber-700',  badge: 'bg-amber-900 text-amber-200 border-amber-700',    bar: 'bg-amber-500'  },
-  'fulfiller-order': { border: 'border-orange-700', badge: 'bg-orange-900 text-orange-200 border-orange-700', bar: 'bg-orange-500' },
+  cart: {
+    border: 'border-violet-700',
+    badge: 'bg-violet-900 text-violet-200 border-violet-700',
+    bar: 'bg-violet-600',
+  },
+  checkout: {
+    border: 'border-blue-700',
+    badge: 'bg-blue-900 text-blue-200 border-blue-700',
+    bar: 'bg-blue-600',
+  },
+  oms: {
+    border: 'border-cyan-700',
+    badge: 'bg-cyan-900 text-cyan-200 border-cyan-700',
+    bar: 'bg-cyan-600',
+  },
+  fulfillment: {
+    border: 'border-amber-700',
+    badge: 'bg-amber-900 text-amber-200 border-amber-700',
+    bar: 'bg-amber-500',
+  },
+  'fulfiller-order': {
+    border: 'border-orange-700',
+    badge: 'bg-orange-900 text-orange-200 border-orange-700',
+    bar: 'bg-orange-500',
+  },
 };
 
 const STATUS_AUDIT_ACCENT = {
   border: 'border-emerald-700',
-  badge:  'bg-emerald-900 text-emerald-200 border-emerald-700',
+  badge: 'bg-emerald-900 text-emerald-200 border-emerald-700',
 };
 
 type TraceTab = 'event-history' | 'state-machines' | 'status-history';
@@ -70,7 +90,10 @@ function fmtTime(ts?: string | null): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
   return d.toLocaleTimeString(undefined, {
-    hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3,
   });
 }
 
@@ -84,10 +107,12 @@ function fmtDuration(ms: number): string {
 
 function statusBadge(status: string): string {
   const s = status.toLowerCase();
-  if (s.includes('running'))                                                     return 'bg-blue-900 text-blue-200 border border-blue-700';
-  if (s.includes('completed'))                                                   return 'bg-green-900 text-green-200 border border-green-700';
-  if (s.includes('failed') || s.includes('terminated') || s.includes('timedout')) return 'bg-red-900 text-red-200 border border-red-700';
-  if (s.includes('canceled') || s.includes('cancelled'))                        return 'bg-amber-900 text-amber-200 border border-amber-700';
+  if (s.includes('running')) return 'bg-blue-900 text-blue-200 border border-blue-700';
+  if (s.includes('completed')) return 'bg-green-900 text-green-200 border border-green-700';
+  if (s.includes('failed') || s.includes('terminated') || s.includes('timedout'))
+    return 'bg-red-900 text-red-200 border border-red-700';
+  if (s.includes('canceled') || s.includes('cancelled'))
+    return 'bg-amber-900 text-amber-200 border border-amber-700';
   return 'bg-gray-700 text-gray-200 border border-gray-600';
 }
 
@@ -112,13 +137,13 @@ function detectParallel(nodes: TraceNode[]): Map<string, TraceNode[]> {
 
   for (const a of nodes) {
     const aStart = a.startTime ? new Date(a.startTime).getTime() : now;
-    const aEnd   = a.closeTime ? new Date(a.closeTime).getTime() : now;
+    const aEnd = a.closeTime ? new Date(a.closeTime).getTime() : now;
     const peers: TraceNode[] = [];
 
     for (const b of nodes) {
       if (a.workflowId === b.workflowId) continue;
       const bStart = b.startTime ? new Date(b.startTime).getTime() : now;
-      const bEnd   = b.closeTime ? new Date(b.closeTime).getTime() : now;
+      const bEnd = b.closeTime ? new Date(b.closeTime).getTime() : now;
       // Overlap: a starts before b ends AND a ends after b starts
       if (aStart < bEnd && aEnd > bStart) peers.push(b);
     }
@@ -134,10 +159,12 @@ function detectParallel(nodes: TraceNode[]): Map<string, TraceNode[]> {
 function GanttChart({ nodes }: { nodes: TraceNode[] }) {
   const now = useRenderNow();
 
-  const times = nodes.flatMap((n) => [
-    n.startTime ? new Date(n.startTime).getTime() : null,
-    n.closeTime ? new Date(n.closeTime).getTime() : null,
-  ]).filter((t): t is number => t !== null);
+  const times = nodes
+    .flatMap((n) => [
+      n.startTime ? new Date(n.startTime).getTime() : null,
+      n.closeTime ? new Date(n.closeTime).getTime() : null,
+    ])
+    .filter((t): t is number => t !== null);
 
   if (times.length === 0) return null;
 
@@ -154,12 +181,12 @@ function GanttChart({ nodes }: { nodes: TraceNode[] }) {
 
       <div className="space-y-2">
         {nodes.map((node) => {
-          const start   = node.startTime ? new Date(node.startTime).getTime() : minT;
-          const end     = node.closeTime ? new Date(node.closeTime).getTime() : now;
+          const start = node.startTime ? new Date(node.startTime).getTime() : minT;
+          const end = node.closeTime ? new Date(node.closeTime).getTime() : now;
           const leftPct = ((start - minT) / span) * 100;
-          const widPct  = Math.max(((end - start) / span) * 100, 0.4);
+          const widPct = Math.max(((end - start) / span) * 100, 0.4);
           const duration = end - start;
-          const accent  = DOMAIN_ACCENT[node.domain];
+          const accent = DOMAIN_ACCENT[node.domain];
           const isRunning = !node.closeTime;
 
           return (
@@ -186,7 +213,8 @@ function GanttChart({ nodes }: { nodes: TraceNode[] }) {
 
               {/* Duration */}
               <div className="w-16 shrink-0 text-[10px] text-gray-500 text-left font-mono">
-                {fmtDuration(duration)}{isRunning ? ' ⟳' : ''}
+                {fmtDuration(duration)}
+                {isRunning ? ' ⟳' : ''}
               </div>
             </div>
           );
@@ -238,7 +266,9 @@ function StateRow({
         <td className="px-3 py-2 w-5 text-gray-500 text-xs">{open ? '▾' : '▸'}</td>
         <td className="px-3 py-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`inline-block px-2 py-0.5 rounded-full border text-xs font-mono ${DOMAIN_ACCENT[node.domain].badge}`}>
+            <span
+              className={`inline-block px-2 py-0.5 rounded-full border text-xs font-mono ${DOMAIN_ACCENT[node.domain].badge}`}
+            >
               {DOMAIN_LABELS[node.domain]}
             </span>
             {parallelPeers.length > 0 && (
@@ -249,7 +279,9 @@ function StateRow({
           </div>
         </td>
         <td className="px-3 py-2">
-          <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${statusBadge(node.status)}`}>
+          <span
+            className={`inline-block px-2 py-0.5 rounded-full text-xs ${statusBadge(node.status)}`}
+          >
             {node.status}
           </span>
         </td>
@@ -259,8 +291,12 @@ function StateRow({
         >
           <ExpandableCell text={node.workflowId} />
         </td>
-        <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtTime(node.startTime)}</td>
-        <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{fmtTime(node.closeTime)}</td>
+        <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+          {fmtTime(node.startTime)}
+        </td>
+        <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+          {fmtTime(node.closeTime)}
+        </td>
         <td className="px-3 py-2 text-xs text-gray-500">{node.historyLength ?? '—'}</td>
         <td className="px-3 py-2 text-xs">
           <a
@@ -284,7 +320,9 @@ function StateRow({
 
             <div className="text-xs text-gray-400 mt-4 mb-1 font-medium uppercase tracking-wide">
               Live workflow state
-              {node.state == null && <span className="ml-2 text-gray-600 normal-case">(unavailable)</span>}
+              {node.state == null && (
+                <span className="ml-2 text-gray-600 normal-case">(unavailable)</span>
+              )}
             </div>
             <CodeBlock
               text={node.state == null ? 'null' : JSON.stringify(node.state, null, 2)}
@@ -298,7 +336,9 @@ function StateRow({
 }
 
 // Domain workflows that expose a real state-name history in their queried state.
-function extractStateHistory(state: unknown): { status: string; timestamp?: string; note?: string | null }[] | undefined {
+function extractStateHistory(
+  state: unknown,
+): { status: string; timestamp?: string; note?: string | null }[] | undefined {
   const sh = (state as { statusHistory?: unknown } | null)?.statusHistory;
   if (!Array.isArray(sh)) return undefined;
   return sh.filter(
@@ -308,11 +348,11 @@ function extractStateHistory(state: unknown): { status: string; timestamp?: stri
 }
 
 const TRANSITION_STYLE: Record<TransitionKind, { dot: string; tag: string; label: string }> = {
-  start:    { dot: 'bg-gray-400',    tag: 'text-gray-400',    label: 'start' },
-  state:    { dot: 'bg-cyan-400',    tag: 'text-cyan-300',    label: 'state' },
-  update:   { dot: 'bg-blue-400',    tag: 'text-blue-300',    label: 'update' },
-  signal:   { dot: 'bg-amber-400',   tag: 'text-amber-300',   label: 'signal' },
-  child:    { dot: 'bg-orange-400',  tag: 'text-orange-300',  label: 'child' },
+  start: { dot: 'bg-gray-400', tag: 'text-gray-400', label: 'start' },
+  state: { dot: 'bg-cyan-400', tag: 'text-cyan-300', label: 'state' },
+  update: { dot: 'bg-blue-400', tag: 'text-blue-300', label: 'update' },
+  signal: { dot: 'bg-amber-400', tag: 'text-amber-300', label: 'signal' },
+  child: { dot: 'bg-orange-400', tag: 'text-orange-300', label: 'child' },
   terminal: { dot: 'bg-emerald-400', tag: 'text-emerald-300', label: 'end' },
 };
 
@@ -323,13 +363,17 @@ function TransitionRow({ step }: { step: TransitionStep }) {
 
   return (
     <li className="relative pl-4">
-      <span className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${style.dot} ring-2 ring-gray-950`} />
+      <span
+        className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${style.dot} ring-2 ring-gray-950`}
+      />
       <div className="flex items-baseline gap-2 flex-wrap">
-        <span className={`text-[10px] uppercase tracking-wide font-semibold w-12 shrink-0 ${style.tag}`}>
+        <span
+          className={`text-[10px] uppercase tracking-wide font-semibold w-12 shrink-0 ${style.tag}`}
+        >
           {style.label}
         </span>
         <span className="text-xs font-mono text-gray-200">
-          {step.kind === 'state' ? step.delta ?? `→ ${step.label}` : step.label}
+          {step.kind === 'state' ? (step.delta ?? `→ ${step.label}`) : step.label}
         </span>
         <span className="text-[10px] text-gray-600 font-mono">{fmtTime(step.at)}</span>
         {step.kind === 'state' && step.cause && (
@@ -349,7 +393,10 @@ function TransitionRow({ step }: { step: TransitionStep }) {
       </div>
       {hasPayload && showPayload && (
         <div className="mt-1 mb-1">
-          <CodeBlock text={JSON.stringify(step.payload, null, 2)} className="text-[11px] text-gray-300 max-h-64" />
+          <CodeBlock
+            text={JSON.stringify(step.payload, null, 2)}
+            className="text-[11px] text-gray-300 max-h-64"
+          />
         </div>
       )}
     </li>
@@ -393,7 +440,9 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
         );
       }}
       className={`text-[10px] leading-none px-1 py-0.5 rounded border bg-gray-900/80 ${
-        copied ? 'text-emerald-400 border-emerald-700' : 'text-gray-500 border-gray-700 hover:text-gray-200'
+        copied
+          ? 'text-emerald-400 border-emerald-700'
+          : 'text-gray-500 border-gray-700 hover:text-gray-200'
       } ${className ?? ''}`}
     >
       {copied ? '✓' : '⧉'}
@@ -406,7 +455,9 @@ function CodeBlock({ text, className }: { text: string; className?: string }) {
   return (
     <div className="relative">
       <CopyButton text={text} className="absolute top-1 right-1 z-10" />
-      <pre className={`font-mono overflow-x-auto whitespace-pre-wrap break-words p-2 pr-10 bg-black/50 rounded border border-gray-800 ${className ?? ''}`}>
+      <pre
+        className={`font-mono overflow-x-auto whitespace-pre-wrap break-words p-2 pr-10 bg-black/50 rounded border border-gray-800 ${className ?? ''}`}
+      >
         {text}
       </pre>
     </div>
@@ -414,7 +465,7 @@ function CodeBlock({ text, className }: { text: string; className?: string }) {
 }
 
 function JsonBlock({ value, emptyLabel }: { value: unknown; emptyLabel?: string }) {
-  const text = value === undefined ? emptyLabel ?? '∅ (none)' : JSON.stringify(value, null, 2);
+  const text = value === undefined ? (emptyLabel ?? '∅ (none)') : JSON.stringify(value, null, 2);
   return (
     <div className="mt-0.5 mb-1">
       <CodeBlock text={text} className="text-[11px] text-gray-300 max-h-72" />
@@ -500,14 +551,19 @@ function ActivityValue({ value, color }: { value: unknown; color: string }) {
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">{children}</div>;
+  return (
+    <div className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">
+      {children}
+    </div>
+  );
 }
 
 function DiffLines({ changes }: { changes: SnapshotChange[] }) {
   const copyText = changes
     .map((c) => {
       const sym = c.kind === 'changed' ? '~' : c.kind === 'added' ? '+' : '-';
-      if (c.kind === 'changed') return `${sym} ${c.path}: ${fullStr(c.before)} → ${fullStr(c.after)}`;
+      if (c.kind === 'changed')
+        return `${sym} ${c.path}: ${fullStr(c.before)} → ${fullStr(c.after)}`;
       if (c.kind === 'added') return `${sym} ${c.path}: ${fullStr(c.after)}`;
       return `${sym} ${c.path}: ${fullStr(c.before)}`;
     })
@@ -546,7 +602,15 @@ function DiffLines({ changes }: { changes: SnapshotChange[] }) {
   );
 }
 
-function ActivityList({ label, calls, accent }: { label: string; calls: TraceActivityCall[]; accent: string }) {
+function ActivityList({
+  label,
+  calls,
+  accent,
+}: {
+  label: string;
+  calls: TraceActivityCall[];
+  accent: string;
+}) {
   if (calls.length === 0) return null;
   return (
     <div className="mt-1">
@@ -609,7 +673,9 @@ function PersistedTransitionRow({
 
   return (
     <li className="relative pl-4">
-      <span className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${style.dot} ring-2 ring-gray-950`} />
+      <span
+        className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${style.dot} ring-2 ring-gray-950`}
+      />
       <button
         onClick={onToggle}
         className="w-full text-left flex items-baseline gap-2 flex-wrap hover:bg-gray-800/40 rounded px-1 -mx-1"
@@ -627,7 +693,9 @@ function PersistedTransitionRow({
           </span>
         )}
         <span className="text-[10px] text-gray-600 font-mono">{fmtTime(txn.at)}</span>
-        {changes.length > 0 && <span className="text-[10px] text-amber-400/80">Δ{changes.length}</span>}
+        {changes.length > 0 && (
+          <span className="text-[10px] text-amber-400/80">Δ{changes.length}</span>
+        )}
         {nActs > 0 && <span className="text-[10px] text-gray-600">⚙ {nActs}</span>}
       </button>
 
@@ -642,7 +710,9 @@ function PersistedTransitionRow({
             {hasPayload ? (
               <JsonBlock value={txn.triggerPayload} />
             ) : (
-              <div className="text-[11px] text-gray-600 italic mt-0.5">no command payload ({txn.triggerKind})</div>
+              <div className="text-[11px] text-gray-600 italic mt-0.5">
+                no command payload ({txn.triggerKind})
+              </div>
             )}
           </div>
           <div>
@@ -663,7 +733,11 @@ function PersistedTransitionRow({
             ) : (
               <>
                 <ActivityList label="decide" calls={txn.prepareActivities} accent="text-cyan-300" />
-                <ActivityList label="evolve" calls={txn.finalizeActivities} accent="text-orange-300" />
+                <ActivityList
+                  label="evolve"
+                  calls={txn.finalizeActivities}
+                  accent="text-orange-300"
+                />
               </>
             )}
           </div>
@@ -852,7 +926,10 @@ function WorkflowEventTable({ node }: { node: TraceNode }) {
         </thead>
         <tbody>
           {node.events.map((ev, i) => (
-            <tr key={`${ev.eventId}-${i}`} className="border-t border-gray-800/60 hover:bg-gray-800/30">
+            <tr
+              key={`${ev.eventId}-${i}`}
+              className="border-t border-gray-800/60 hover:bg-gray-800/30"
+            >
               <td className="px-3 py-1 text-gray-600">{ev.eventId}</td>
               <td className="px-3 py-1 text-gray-500 whitespace-nowrap">{fmtTime(ev.timestamp)}</td>
               <td className="px-3 py-1 text-gray-200">{ev.eventType}</td>
@@ -869,7 +946,9 @@ function WorkflowEventTable({ node }: { node: TraceNode }) {
 
 function StatusAuditTable({ rows }: { rows: TraceStatusHistoryRow[] }) {
   if (rows.length === 0) {
-    return <div className="px-4 py-2 text-xs text-gray-600 italic">No status history in Cassandra.</div>;
+    return (
+      <div className="px-4 py-2 text-xs text-gray-600 italic">No status history in Cassandra.</div>
+    );
   }
   return (
     <div className="overflow-x-auto">
@@ -887,7 +966,9 @@ function StatusAuditTable({ rows }: { rows: TraceStatusHistoryRow[] }) {
             <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30">
               <td className="px-3 py-1 text-gray-500 whitespace-nowrap">{fmt(h.eventTime)}</td>
               <td className="px-3 py-1">
-                <span className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] ${statusBadge(h.status)}`}>
+                <span
+                  className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] ${statusBadge(h.status)}`}
+                >
                   {h.status}
                 </span>
               </td>
@@ -916,7 +997,7 @@ function WorkflowGroupHeader({
   const accent = DOMAIN_ACCENT[node.domain];
   const now = useRenderNow();
   const start = node.startTime ? new Date(node.startTime).getTime() : now;
-  const end   = node.closeTime ? new Date(node.closeTime).getTime() : now;
+  const end = node.closeTime ? new Date(node.closeTime).getTime() : now;
 
   return (
     <button
@@ -925,11 +1006,15 @@ function WorkflowGroupHeader({
     >
       <span className="text-gray-400 text-xs w-4 shrink-0">{open ? '▾' : '▸'}</span>
 
-      <span className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${accent.badge}`}>
+      <span
+        className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${accent.badge}`}
+      >
         {DOMAIN_LABELS[node.domain]}
       </span>
 
-      <span className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] shrink-0 ${statusBadge(node.status)}`}>
+      <span
+        className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] shrink-0 ${statusBadge(node.status)}`}
+      >
         {node.status}
       </span>
 
@@ -968,8 +1053,14 @@ function EventHistoryTab({ trace }: { trace: OrderTrace }) {
 
   const isOpen = (id: string) => openMap[id] ?? globalOpen;
   const toggle = (id: string) => setOpenMap((prev) => ({ ...prev, [id]: !isOpen(id) }));
-  const expandAll  = () => { setGlobalOpen(true);  setOpenMap({}); };
-  const collapseAll = () => { setGlobalOpen(false); setOpenMap({}); };
+  const expandAll = () => {
+    setGlobalOpen(true);
+    setOpenMap({});
+  };
+  const collapseAll = () => {
+    setGlobalOpen(false);
+    setOpenMap({});
+  };
 
   const totalEvents = trace.nodes.reduce((s, n) => s + n.events.length, 0);
 
@@ -980,11 +1071,22 @@ function EventHistoryTab({ trace }: { trace: OrderTrace }) {
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-700 bg-gray-800/30">
-        <button onClick={expandAll}    className="text-xs text-blue-400 hover:text-blue-300 hover:underline">Expand All</button>
+        <button
+          onClick={expandAll}
+          className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
+        >
+          Expand All
+        </button>
         <span className="text-gray-700 text-xs">|</span>
-        <button onClick={collapseAll}  className="text-xs text-blue-400 hover:text-blue-300 hover:underline">Collapse All</button>
+        <button
+          onClick={collapseAll}
+          className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
+        >
+          Collapse All
+        </button>
         <span className="ml-auto text-xs text-gray-600">
-          {totalEvents} Temporal events · {trace.statusHistory.length} audit entries · {trace.nodes.length} workflows
+          {totalEvents} Temporal events · {trace.statusHistory.length} audit entries ·{' '}
+          {trace.nodes.length} workflows
         </span>
       </div>
 
@@ -1012,7 +1114,9 @@ function EventHistoryTab({ trace }: { trace: OrderTrace }) {
               <span className="text-gray-400 text-xs w-4 shrink-0">
                 {isOpen('__audit__') ? '▾' : '▸'}
               </span>
-              <span className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${STATUS_AUDIT_ACCENT.badge}`}>
+              <span
+                className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${STATUS_AUDIT_ACCENT.badge}`}
+              >
                 OMS Audit
               </span>
               <span className="text-xs text-gray-500 ml-2">Cassandra status history</span>
@@ -1034,7 +1138,11 @@ function EventHistoryTab({ trace }: { trace: OrderTrace }) {
 
 function StatusHistoryTab({ trace }: { trace: OrderTrace }) {
   if (trace.statusHistory.length === 0) {
-    return <p className="text-gray-400 text-sm py-8 text-center">No OMS status history found in Cassandra.</p>;
+    return (
+      <p className="text-gray-400 text-sm py-8 text-center">
+        No OMS status history found in Cassandra.
+      </p>
+    );
   }
   return (
     <div className="overflow-x-auto">
@@ -1052,7 +1160,9 @@ function StatusHistoryTab({ trace }: { trace: OrderTrace }) {
             <tr key={i} className="border-t border-gray-800 hover:bg-gray-800/40">
               <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{fmt(h.eventTime)}</td>
               <td className="px-3 py-2">
-                <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${statusBadge(h.status)}`}>
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full text-xs ${statusBadge(h.status)}`}
+                >
                   {h.status}
                 </span>
               </td>
@@ -1076,7 +1186,11 @@ function TraceTabs({ trace }: { trace: OrderTrace }) {
 
   const tabs: { key: TraceTab; label: string; count?: number }[] = [
     { key: 'state-machines', label: 'State Machines', count: trace.nodes.length },
-    { key: 'event-history',  label: 'Event History',  count: totalEvents + trace.statusHistory.length },
+    {
+      key: 'event-history',
+      label: 'Event History',
+      count: totalEvents + trace.statusHistory.length,
+    },
     { key: 'status-history', label: 'Status History', count: trace.statusHistory.length },
   ];
 
@@ -1084,11 +1198,23 @@ function TraceTabs({ trace }: { trace: OrderTrace }) {
     <div>
       {/* Order metadata */}
       <div className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-400">
-        <span className="inline-flex items-center gap-1"><span className="text-gray-500 mr-1">Order</span><code className="text-gray-200">{trace.orderId}</code><CopyButton text={trace.orderId} /></span>
+        <span className="inline-flex items-center gap-1">
+          <span className="text-gray-500 mr-1">Order</span>
+          <code className="text-gray-200">{trace.orderId}</code>
+          <CopyButton text={trace.orderId} />
+        </span>
         {trace.confirmationNumber && (
-          <span className="inline-flex items-center gap-1"><span className="text-gray-500 mr-1">Confirmation</span><code className="text-gray-200">{trace.confirmationNumber}</code><CopyButton text={trace.confirmationNumber} /></span>
+          <span className="inline-flex items-center gap-1">
+            <span className="text-gray-500 mr-1">Confirmation</span>
+            <code className="text-gray-200">{trace.confirmationNumber}</code>
+            <CopyButton text={trace.confirmationNumber} />
+          </span>
         )}
-        <span className="inline-flex items-center gap-1"><span className="text-gray-500 mr-1">Store</span><code className="text-gray-200">{trace.storeId}</code><CopyButton text={trace.storeId} /></span>
+        <span className="inline-flex items-center gap-1">
+          <span className="text-gray-500 mr-1">Store</span>
+          <code className="text-gray-200">{trace.storeId}</code>
+          <CopyButton text={trace.storeId} />
+        </span>
       </div>
 
       {/* Tab bar */}
@@ -1106,7 +1232,9 @@ function TraceTabs({ trace }: { trace: OrderTrace }) {
           >
             {t.label}
             {t.count !== undefined && (
-              <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${tab === t.key ? 'bg-gray-700 text-gray-300' : 'bg-gray-800 text-gray-500'}`}>
+              <span
+                className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${tab === t.key ? 'bg-gray-700 text-gray-300' : 'bg-gray-800 text-gray-500'}`}
+              >
                 {t.count}
               </span>
             )}
@@ -1116,7 +1244,7 @@ function TraceTabs({ trace }: { trace: OrderTrace }) {
 
       {/* Panel */}
       <div className="bg-gray-800 rounded-b-lg rounded-tr-lg border border-gray-700 border-t-0 min-h-[300px] overflow-hidden">
-        {tab === 'event-history'  && <EventHistoryTab  trace={trace} />}
+        {tab === 'event-history' && <EventHistoryTab trace={trace} />}
         {tab === 'state-machines' && <StateMachinesTab trace={trace} />}
         {tab === 'status-history' && <StatusHistoryTab trace={trace} />}
       </div>
@@ -1129,11 +1257,11 @@ function TraceTabs({ trace }: { trace: OrderTrace }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function OrderTracePage() {
-  const [mode, setMode]           = useState<LookupMode>('orderId');
-  const [value, setValue]         = useState('');
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [trace, setTrace]         = useState<OrderTrace | null>(null);
+  const [mode, setMode] = useState<LookupMode>('orderId');
+  const [value, setValue] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [trace, setTrace] = useState<OrderTrace | null>(null);
   const [candidates, setCandidates] = useState<OrderCandidate[] | null>(null);
 
   const fetchTrace = useCallback(async (params: Record<string, string>) => {
@@ -1190,7 +1318,7 @@ export default function OrderTracePage() {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (trace)             await fetchTrace({ orderId: trace.orderId });
+    if (trace) await fetchTrace({ orderId: trace.orderId });
     else if (value.trim()) await fetchTrace({ [mode]: value.trim() });
   }, [fetchTrace, mode, trace, value]);
 
@@ -1201,7 +1329,9 @@ export default function OrderTracePage() {
           <h1 className="text-3xl font-bold">Order Trace</h1>
           <div className="flex items-center gap-3">
             {(trace || candidates) && <RefreshButton onRefresh={refresh} variant="dev" />}
-            <Link href="/admin" className="text-blue-400 hover:underline text-sm">← Admin and Dev Tools</Link>
+            <Link href="/admin" className="text-blue-400 hover:underline text-sm">
+              ← Admin and Dev Tools
+            </Link>
           </div>
         </div>
         <p className="text-gray-400 mb-6">
@@ -1217,7 +1347,9 @@ export default function OrderTracePage() {
                 id={`lookup-mode-${m.key}`}
                 onClick={() => setMode(m.key)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  mode === m.key ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  mode === m.key
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
               >
                 {m.label}
@@ -1245,12 +1377,16 @@ export default function OrderTracePage() {
         </div>
 
         {error && (
-          <div className="mb-6 p-3 bg-red-950 border border-red-800 rounded-lg text-red-200 text-sm">{error}</div>
+          <div className="mb-6 p-3 bg-red-950 border border-red-800 rounded-lg text-red-200 text-sm">
+            {error}
+          </div>
         )}
 
         {candidates && (
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-4 mb-6">
-            <h2 className="text-lg font-semibold mb-3">{candidates.length} orders found — pick one</h2>
+            <h2 className="text-lg font-semibold mb-3">
+              {candidates.length} orders found — pick one
+            </h2>
             {candidates.length === 0 ? (
               <p className="text-gray-400 text-sm">No orders for that email.</p>
             ) : (

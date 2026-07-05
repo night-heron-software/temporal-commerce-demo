@@ -8,9 +8,11 @@ import { getCassandraClient, cassandraTypes as types, getElasticsearchClient } f
 import { Order, OrderState, OrderStatus, OrderAssignment } from './types';
 import type { Elasticsearch } from '../contracts';
 import { ES_INDICES } from '../contracts/elasticsearch';
-import type { OrderLineItem, FulfillerResolutionContext, FulfillerAssignment } from '../contracts/product-type';
-
-
+import type {
+  OrderLineItem,
+  FulfillerResolutionContext,
+  FulfillerAssignment,
+} from '../contracts/product-type';
 
 /**
  * Save order to database (writes to all three order tables)
@@ -30,7 +32,7 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
     price: item.price,
     properties: item.properties
       ? Object.fromEntries(Object.entries(item.properties).map(([k, v]) => [k, String(v)]))
-      : {}
+      : {},
   }));
 
   // Prepare shipping address as frozen UDT
@@ -44,14 +46,14 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
     postal_code: order.shippingAddress.postalCode,
     country: order.shippingAddress.country,
     phone: order.shippingAddress.phone || '',
-    email: order.shippingAddress.email
+    email: order.shippingAddress.email,
   };
 
   // Prepare payment method as frozen UDT
   const paymentMethod = {
     type: order.paymentMethod.type,
     last4: order.paymentMethod.last4 || '',
-    payment_token: order.paymentMethod.token
+    payment_token: order.paymentMethod.token,
   };
 
   // Prepare assignments (if any - typically empty on initial save)
@@ -65,7 +67,7 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
       fulfiller_name: a.fulfillerName || '',
       quantity: a.quantity,
       status: a.status,
-      fulfiller_order_id: a.fulfillerOrderId || ''
+      fulfiller_order_id: a.fulfillerOrderId || '',
     })) || [];
 
   // Execute all three inserts as an atomic logged batch
@@ -94,8 +96,8 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
         order.currency,
         order.status,
         now,
-        now
-      ]
+        now,
+      ],
     },
     {
       query: `INSERT INTO orders_by_customer (
@@ -109,15 +111,15 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
         order.confirmationNumber,
         order.total,
         order.currency,
-        order.status
-      ]
+        order.status,
+      ],
     },
     {
       query: `INSERT INTO orders_by_confirmation (
         confirmation_number, order_id, customer_email
       ) VALUES (?, ?, ?)`,
-      params: [order.confirmationNumber, orderIdUuid, order.customerEmail]
-    }
+      params: [order.confirmationNumber, orderIdUuid, order.customerEmail],
+    },
   ];
 
   await client.batch(queries, { prepare: true, logged: true });
@@ -130,7 +132,7 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
  */
 export async function updateOrderInDatabase(
   orderId: string,
-  updates: Partial<OrderState>
+  updates: Partial<OrderState>,
 ): Promise<void> {
   log.info(`[Activity] Updating order ${orderId}`, { updates });
 
@@ -143,7 +145,7 @@ export async function updateOrderInDatabase(
     const result = await client.execute(
       `SELECT customer_email, created_at FROM orders WHERE order_id = ?`,
       [orderIdUuid],
-      { prepare: true }
+      { prepare: true },
     );
 
     if (result.rows.length > 0) {
@@ -152,20 +154,20 @@ export async function updateOrderInDatabase(
         [
           {
             query: `UPDATE orders SET status = ?, updated_at = ? WHERE order_id = ?`,
-            params: [updates.status, now, orderIdUuid]
+            params: [updates.status, now, orderIdUuid],
           },
           {
             query: `UPDATE orders_by_customer SET status = ? WHERE customer_email = ? AND created_at = ? AND order_id = ?`,
-            params: [updates.status, row.customer_email, row.created_at, orderIdUuid]
-          }
+            params: [updates.status, row.customer_email, row.created_at, orderIdUuid],
+          },
         ],
-        { prepare: true, logged: true }
+        { prepare: true, logged: true },
       );
     } else {
       await client.execute(
         `UPDATE orders SET status = ?, updated_at = ? WHERE order_id = ?`,
         [updates.status, now, orderIdUuid],
-        { prepare: true }
+        { prepare: true },
       );
     }
   }
@@ -180,13 +182,13 @@ export async function updateOrderInDatabase(
       fulfiller_name: a.fulfillerName || '',
       quantity: a.quantity,
       status: a.status,
-      fulfiller_order_id: a.fulfillerOrderId || ''
+      fulfiller_order_id: a.fulfillerOrderId || '',
     }));
 
     await client.execute(
       `UPDATE orders SET assignments = ?, updated_at = ? WHERE order_id = ?`,
       [assignmentsCql, now, orderIdUuid],
-      { prepare: true }
+      { prepare: true },
     );
   }
 
@@ -201,19 +203,19 @@ export async function updateOrderInDatabase(
       items: so.items.map((item) => ({
         assignment_id: item.assignmentId,
         variant_id: item.variantId,
-        quantity: item.quantity
+        quantity: item.quantity,
       })),
       carrier: so.carrier || '',
       tracking_number: so.trackingNumber || '',
       created_at: so.createdAt,
       updated_at: so.updatedAt,
-      rejection_reason: so.rejectionReason || ''
+      rejection_reason: so.rejectionReason || '',
     }));
 
     await client.execute(
       `UPDATE orders SET fulfiller_orders = ?, updated_at = ? WHERE order_id = ?`,
       [fulfillerOrdersCql, now, orderIdUuid],
-      { prepare: true }
+      { prepare: true },
     );
   }
 }
@@ -225,7 +227,7 @@ export async function sendOrderStatusEmail(
   email: string,
   _orderId: string,
   status: OrderStatus,
-  _details?: { trackingNumber?: string; carrier?: string }
+  _details?: { trackingNumber?: string; carrier?: string },
 ): Promise<void> {
   log.info(`[Activity] 📧 [DEMO] Order status email: ${status} to ${email}`);
 }
@@ -258,17 +260,19 @@ export async function indexOrder(doc: Elasticsearch.OrderDocument): Promise<void
   await client.index({
     index: ES_INDICES.orders,
     id: doc.orderId,
-    document: doc
+    document: doc,
   });
   log.info(`[Activity] Indexed order ${doc.orderId} to Elasticsearch`);
 }
 
-export async function indexFulfillerOrder(doc: Elasticsearch.FulfillerOrderDocument): Promise<void> {
+export async function indexFulfillerOrder(
+  doc: Elasticsearch.FulfillerOrderDocument,
+): Promise<void> {
   const client = getElasticsearchClient();
   await client.index({
     index: ES_INDICES.fulfillerOrders,
     id: doc.fulfillerOrderId,
-    document: doc
+    document: doc,
   });
   log.info(`[Activity] Indexed fulfiller order ${doc.fulfillerOrderId} to Elasticsearch`);
 }
@@ -278,7 +282,7 @@ export async function indexCustomer(doc: Elasticsearch.CustomerDocument): Promis
   await client.index({
     index: ES_INDICES.customers,
     id: doc.email,
-    document: doc
+    document: doc,
   });
   log.info(`[Activity] Indexed customer ${doc.email} to Elasticsearch`);
 }
@@ -288,7 +292,7 @@ export async function indexCustomer(doc: Elasticsearch.CustomerDocument): Promis
  */
 export async function insertStatusHistoryEntry(
   orderId: string,
-  entry: { status: string; timestamp: string; note?: string; updatedBy: string }
+  entry: { status: string; timestamp: string; note?: string; updatedBy: string },
 ): Promise<void> {
   const client = getCassandraClient();
   const orderIdUuid = types.Uuid.fromString(orderId);
@@ -299,7 +303,7 @@ export async function insertStatusHistoryEntry(
     `INSERT INTO order_status_history (order_id, event_time, id, status, note, updated_by)
      VALUES (?, ?, ?, ?, ?, ?)`,
     [orderIdUuid, eventTime, timeUuid, entry.status, entry.note ?? null, entry.updatedBy],
-    { prepare: true }
+    { prepare: true },
   );
 
   log.info(`[Activity] Inserted status history: ${entry.status} for order ${orderId}`);
@@ -314,18 +318,21 @@ export async function getOrdersByEmail(email: string): Promise<Order[]> {
     `SELECT order_id, confirmation_number, total, currency, status, created_at
      FROM orders_by_customer WHERE customer_email = ?`,
     [email],
-    { prepare: true }
+    { prepare: true },
   );
 
-  return result.rows.map(row => ({
-    orderId: row.order_id.toString(),
-    confirmationNumber: row.confirmation_number,
-    customerEmail: email,
-    total: row.total,
-    currency: row.currency,
-    status: row.status,
-    createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
-  } as unknown as Order));
+  return result.rows.map(
+    (row) =>
+      ({
+        orderId: row.order_id.toString(),
+        confirmationNumber: row.confirmation_number,
+        customerEmail: email,
+        total: row.total,
+        currency: row.currency,
+        status: row.status,
+        createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
+      }) as unknown as Order,
+  );
 }
 
 /**
@@ -334,11 +341,9 @@ export async function getOrdersByEmail(email: string): Promise<Order[]> {
 export async function getOrderById(orderId: string): Promise<Order | null> {
   const client = getCassandraClient();
   const orderIdUuid = types.Uuid.fromString(orderId);
-  const result = await client.execute(
-    `SELECT * FROM orders WHERE order_id = ?`,
-    [orderIdUuid],
-    { prepare: true }
-  );
+  const result = await client.execute(`SELECT * FROM orders WHERE order_id = ?`, [orderIdUuid], {
+    prepare: true,
+  });
 
   if (result.rows.length === 0) return null;
 

@@ -99,11 +99,7 @@ export const WORKFLOW_ID_DELIMITER = '.';
  * Throws if `storeId` or `entityId` contains the delimiter — that would make the ID
  * ambiguous to parse and is always a bug.
  */
-export function buildWorkflowId(
-  storeId: string,
-  domain: WorkflowDomain,
-  entityId: string,
-): string {
+export function buildWorkflowId(storeId: string, domain: WorkflowDomain, entityId: string): string {
   if (storeId.includes(WORKFLOW_ID_DELIMITER) || entityId.includes(WORKFLOW_ID_DELIMITER)) {
     throw new Error(
       `Workflow ID components must not contain '${WORKFLOW_ID_DELIMITER}': ` +

@@ -13,9 +13,40 @@ import type { Cart } from '@/temporal/contracts';
 function generateTestAddress(): Cart.ShippingAddress {
   const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-  const firstNames = ['Alice', 'Bob', 'Charlie', 'Diana', 'Ethan', 'Fiona', 'George', 'Hannah', 'Ivan', 'Julia'];
-  const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
-  const streets = ['123 Main St', '456 Oak Ave', '789 Elm Blvd', '321 Pine Dr', '654 Maple Ln', '987 Cedar Way', '111 Birch Ct', '222 Spruce Rd'];
+  const firstNames = [
+    'Alice',
+    'Bob',
+    'Charlie',
+    'Diana',
+    'Ethan',
+    'Fiona',
+    'George',
+    'Hannah',
+    'Ivan',
+    'Julia',
+  ];
+  const lastNames = [
+    'Smith',
+    'Johnson',
+    'Williams',
+    'Brown',
+    'Jones',
+    'Garcia',
+    'Miller',
+    'Davis',
+    'Rodriguez',
+    'Martinez',
+  ];
+  const streets = [
+    '123 Main St',
+    '456 Oak Ave',
+    '789 Elm Blvd',
+    '321 Pine Dr',
+    '654 Maple Ln',
+    '987 Cedar Way',
+    '111 Birch Ct',
+    '222 Spruce Rd',
+  ];
   const units = ['', '', '', 'Apt 2B', 'Suite 100', 'Unit 4', '#301'];
   const locations = [
     { city: 'San Francisco', state: 'CA', zip: '94102' },
@@ -41,7 +72,7 @@ function generateTestAddress(): Cart.ShippingAddress {
     postalCode: loc.zip,
     country: 'US',
     phone: `555-${String(Math.floor(Math.random() * 900) + 100)}-${String(Math.floor(Math.random() * 9000) + 1000)}`,
-    email: `${first.toLowerCase()}.${last.toLowerCase()}@example.com`
+    email: `${first.toLowerCase()}.${last.toLowerCase()}@example.com`,
   };
 }
 
@@ -65,7 +96,7 @@ export default function ShippingPage() {
     postalCode: '',
     country: 'US',
     phone: '',
-    email: ''
+    email: '',
   });
 
   // Track whether we've already applied initial data to avoid re-running
@@ -178,22 +209,25 @@ export default function ShippingPage() {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleShippingSignIn = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!signInEmail.trim()) return;
-    setSigningIn(true);
-    setError(null);
-    const result = await signIn(signInEmail.trim());
-    if (result.ok) {
-      setShowSignIn(false);
-      setSignInEmail('');
-      // Reset initialized so the useEffect re-applies saved address
-      setInitialized(false);
-    } else {
-      setError(result.error || 'Sign in failed');
-    }
-    setSigningIn(false);
-  }, [signInEmail, signIn]);
+  const handleShippingSignIn = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!signInEmail.trim()) return;
+      setSigningIn(true);
+      setError(null);
+      const result = await signIn(signInEmail.trim());
+      if (result.ok) {
+        setShowSignIn(false);
+        setSignInEmail('');
+        // Reset initialized so the useEffect re-applies saved address
+        setInitialized(false);
+      } else {
+        setError(result.error || 'Sign in failed');
+      }
+      setSigningIn(false);
+    },
+    [signInEmail, signIn],
+  );
 
   const handleSignOut = async () => {
     await signOut();
@@ -212,7 +246,10 @@ export default function ShippingPage() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-8">
       <div className="max-w-2xl mx-auto">
-        <Link href="/shop" className="text-indigo-600 dark:text-indigo-400 hover:underline mb-4 inline-block">
+        <Link
+          href="/shop"
+          className="text-indigo-600 dark:text-indigo-400 hover:underline mb-4 inline-block"
+        >
           ← Back to Shop
         </Link>
 
@@ -246,47 +283,51 @@ export default function ShippingPage() {
               Sign Out
             </button>
           </div>
+        ) : !showSignIn ? (
+          <div className="mb-6">
+            <button
+              type="button"
+              onClick={() => setShowSignIn(true)}
+              className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              Already have an account? Sign in for faster checkout →
+            </button>
+          </div>
         ) : (
-          !showSignIn ? (
-            <div className="mb-6">
+          <form
+            onSubmit={handleShippingSignIn}
+            className="mb-6 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4"
+          >
+            <div className="text-sm font-medium mb-2">Sign in with email</div>
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={signInEmail}
+                onChange={(e) => setSignInEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+                className="flex-1 px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:border-indigo-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={signingIn}
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors font-medium"
+              >
+                {signingIn ? '…' : 'Sign In'}
+              </button>
               <button
                 type="button"
-                onClick={() => setShowSignIn(true)}
-                className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+                onClick={() => {
+                  setShowSignIn(false);
+                  setSignInEmail('');
+                }}
+                className="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
               >
-                Already have an account? Sign in for faster checkout →
+                ✕
               </button>
             </div>
-          ) : (
-            <form onSubmit={handleShippingSignIn} className="mb-6 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-lg p-4">
-              <div className="text-sm font-medium mb-2">Sign in with email</div>
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  value={signInEmail}
-                  onChange={(e) => setSignInEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  required
-                  className="flex-1 px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:border-indigo-500 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={signingIn}
-                  className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors font-medium"
-                >
-                  {signingIn ? '…' : 'Sign In'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowSignIn(false); setSignInEmail(''); }}
-                  className="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-                >
-                  ✕
-                </button>
-              </div>
-              <p className="text-xs text-zinc-400 mt-2">No password needed — just enter your email</p>
-            </form>
-          )
+            <p className="text-xs text-zinc-400 mt-2">No password needed — just enter your email</p>
+          </form>
         )}
 
         {error && (
@@ -300,17 +341,29 @@ export default function ShippingPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">First Name *</label>
+              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+                First Name *
+              </label>
               <input
-                type="text" name="firstName" value={formData.firstName} onChange={handleChange} required
+                type="text"
+                name="firstName"
+                value={formData.firstName}
+                onChange={handleChange}
+                required
                 autoComplete="shipping given-name"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
             </div>
             <div>
-              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Last Name *</label>
+              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+                Last Name *
+              </label>
               <input
-                type="text" name="lastName" value={formData.lastName} onChange={handleChange} required
+                type="text"
+                name="lastName"
+                value={formData.lastName}
+                onChange={handleChange}
+                required
                 autoComplete="shipping family-name"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
@@ -320,7 +373,11 @@ export default function ShippingPage() {
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Email *</label>
             <input
-              type="email" name="email" value={formData.email} onChange={handleChange} required
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              required
               autoComplete="shipping email"
               readOnly={!!shopper}
               className={`w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none ${shopper ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 cursor-not-allowed' : ''}`}
@@ -330,16 +387,25 @@ export default function ShippingPage() {
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Address *</label>
             <input
-              type="text" name="address1" value={formData.address1} onChange={handleChange} required
+              type="text"
+              name="address1"
+              value={formData.address1}
+              onChange={handleChange}
+              required
               autoComplete="shipping address-line1"
               className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Apartment, suite, etc.</label>
+            <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
+              Apartment, suite, etc.
+            </label>
             <input
-              type="text" name="address2" value={formData.address2} onChange={handleChange}
+              type="text"
+              name="address2"
+              value={formData.address2}
+              onChange={handleChange}
               autoComplete="shipping address-line2"
               className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
             />
@@ -349,7 +415,11 @@ export default function ShippingPage() {
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">City *</label>
               <input
-                type="text" name="city" value={formData.city} onChange={handleChange} required
+                type="text"
+                name="city"
+                value={formData.city}
+                onChange={handleChange}
+                required
                 autoComplete="shipping address-level2"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
@@ -357,15 +427,25 @@ export default function ShippingPage() {
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">State *</label>
               <input
-                type="text" name="state" value={formData.state} onChange={handleChange} required
-                placeholder="CA" maxLength={2} autoComplete="shipping address-level1"
+                type="text"
+                name="state"
+                value={formData.state}
+                onChange={handleChange}
+                required
+                placeholder="CA"
+                maxLength={2}
+                autoComplete="shipping address-level1"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none uppercase"
               />
             </div>
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">ZIP *</label>
               <input
-                type="text" name="postalCode" value={formData.postalCode} onChange={handleChange} required
+                type="text"
+                name="postalCode"
+                value={formData.postalCode}
+                onChange={handleChange}
+                required
                 autoComplete="shipping postal-code"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
@@ -375,7 +455,10 @@ export default function ShippingPage() {
           <div>
             <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Phone</label>
             <input
-              type="tel" name="phone" value={formData.phone} onChange={handleChange}
+              type="tel"
+              name="phone"
+              value={formData.phone}
+              onChange={handleChange}
               autoComplete="shipping tel"
               className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
             />

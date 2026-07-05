@@ -16,10 +16,13 @@ const VALID_INDICES = Object.keys(INDEX_MAPPINGS);
 
 export async function POST(request: NextRequest) {
   try {
-    const { index } = await request.json() as { index: string };
+    const { index } = (await request.json()) as { index: string };
 
     if (index !== 'all' && !VALID_INDICES.includes(index)) {
-      return createErrorResponse(400, `Unknown index: ${index}. Valid: ${VALID_INDICES.join(', ')}, all`);
+      return createErrorResponse(
+        400,
+        `Unknown index: ${index}. Valid: ${VALID_INDICES.join(', ')}, all`,
+      );
     }
 
     const indicesToReindex = index === 'all' ? VALID_INDICES : [index];
@@ -39,7 +42,7 @@ export async function POST(request: NextRequest) {
 
       await esClient.indices.create({
         index: idx,
-        mappings: INDEX_MAPPINGS[idx]
+        mappings: INDEX_MAPPINGS[idx],
       });
 
       try {
@@ -142,7 +145,7 @@ async function reindexProducts(esClient: EsClient, errors: string[]): Promise<nu
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       options: (v.options ?? []).map((o: any) => ({
         optionType: o.option_type,
-        value: { label: o.label, hex: o.attributes?.hex }
+        value: { label: o.label, hex: o.attributes?.hex },
       })),
       frontImageUrl:
         (v.images as Record<string, string> | null)?.['front'] ??
@@ -165,13 +168,13 @@ async function reindexProducts(esClient: EsClient, errors: string[]): Promise<nu
         description: row.description,
         type: row.type,
         price: { amount: row.base_price_amount, currency: row.base_price_currency },
-        collectionIds: row.collection_ids?.map(id => id.toString()),
+        collectionIds: row.collection_ids?.map((id) => id.toString()),
         collectionNames: row.collection_names,
         defaultVariantId: row.default_variant_id?.toString(),
         defaultVariantImageUrl: row.default_variant_image_url,
         variants: variantsByProduct.get(productId) ?? [],
         createdAt: row.created_at?.toISOString(),
-        updatedAt: row.updated_at?.toISOString()
+        updatedAt: row.updated_at?.toISOString(),
       };
 
       await esClient.index({ index: 'products', id: productId, document: doc });
@@ -196,7 +199,7 @@ async function reindexCollections(esClient: EsClient, errors: string[]): Promise
       const doc = {
         id: row.id.toString(),
         name: row.name,
-        productCount: 0
+        productCount: 0,
       };
       await esClient.index({ index: 'collections', id: doc.id, document: doc });
       indexed++;
@@ -239,19 +242,23 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
   for (const row of rows) {
     try {
       const orderId = row.order_id.toString();
-      const items = (row.items ?? []).map((i: { line_item_id: string; variant_id: string; quantity: number; price: number }) => ({
-        lineItemId: i.line_item_id,
-        variantId: i.variant_id,
-        quantity: i.quantity,
-        price: i.price
-      }));
+      const items = (row.items ?? []).map(
+        (i: { line_item_id: string; variant_id: string; quantity: number; price: number }) => ({
+          lineItemId: i.line_item_id,
+          variantId: i.variant_id,
+          quantity: i.quantity,
+          price: i.price,
+        }),
+      );
 
       const doc = {
         orderId,
         cartId: row.cart_id,
         confirmationNumber: row.confirmation_number,
         customerEmail: row.customer_email,
-        customerName: row.shipping_address ? `${row.shipping_address.first_name} ${row.shipping_address.last_name}` : '',
+        customerName: row.shipping_address
+          ? `${row.shipping_address.first_name} ${row.shipping_address.last_name}`
+          : '',
         status: row.status,
         subtotal: row.subtotal,
         shippingCost: row.shipping_cost,
@@ -259,51 +266,80 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
         totalDiscounts: row.total_discounts,
         total: row.total,
         currency: row.currency,
-        shippingAddress: row.shipping_address ? {
-          firstName: row.shipping_address.first_name,
-          lastName: row.shipping_address.last_name,
-          address1: row.shipping_address.address1,
-          address2: row.shipping_address.address2,
-          city: row.shipping_address.city,
-          state: row.shipping_address.state,
-          postalCode: row.shipping_address.postal_code,
-          country: row.shipping_address.country,
-          phone: row.shipping_address.phone,
-          email: row.shipping_address.email
-        } : undefined,
-        paymentMethod: row.payment_method ? {
-          type: row.payment_method.type,
-          last4: row.payment_method.last4
-        } : undefined,
+        shippingAddress: row.shipping_address
+          ? {
+              firstName: row.shipping_address.first_name,
+              lastName: row.shipping_address.last_name,
+              address1: row.shipping_address.address1,
+              address2: row.shipping_address.address2,
+              city: row.shipping_address.city,
+              state: row.shipping_address.state,
+              postalCode: row.shipping_address.postal_code,
+              country: row.shipping_address.country,
+              phone: row.shipping_address.phone,
+              email: row.shipping_address.email,
+            }
+          : undefined,
+        paymentMethod: row.payment_method
+          ? {
+              type: row.payment_method.type,
+              last4: row.payment_method.last4,
+            }
+          : undefined,
         items,
         itemCount: items.length,
         variantIds: items.map((i: { variantId: string }) => i.variantId),
-        assignments: (row.assignments ?? []).map((a: { assignment_id: string; line_item_id: string; variant_id: string; fulfiller_id: string; fulfiller_name: string; quantity: number; status: string; fulfiller_order_id: string; carrier: string }) => ({
-          assignmentId: a.assignment_id,
-          lineItemId: a.line_item_id,
-          variantId: a.variant_id,
-          fulfillerId: a.fulfiller_id,
-          fulfillerName: a.fulfiller_name,
-          quantity: a.quantity,
-          status: a.status,
-          fulfillerOrderId: a.fulfiller_order_id,
-          carrier: a.carrier
-        })),
-        fulfillerOrders: (row.fulfiller_orders ?? []).map((so: { fulfiller_order_id: string; fulfiller_id: string; fulfiller_name: string; status: string; items: { assignment_id: string; variant_id: string; quantity: number }[]; carrier: string; tracking_number: string; rejection_reason: string; created_at: Date; updated_at: Date }) => ({
-          fulfillerOrderId: so.fulfiller_order_id,
-          fulfillerId: so.fulfiller_id,
-          fulfillerName: so.fulfiller_name,
-          status: so.status,
-          itemCount: (so.items ?? []).length,
-          carrier: so.carrier,
-          trackingNumber: so.tracking_number,
-          rejectionReason: so.rejection_reason,
-          createdAt: so.created_at ? new Date(so.created_at).toISOString() : undefined,
-          updatedAt: so.updated_at ? new Date(so.updated_at).toISOString() : undefined
-        })),
+        assignments: (row.assignments ?? []).map(
+          (a: {
+            assignment_id: string;
+            line_item_id: string;
+            variant_id: string;
+            fulfiller_id: string;
+            fulfiller_name: string;
+            quantity: number;
+            status: string;
+            fulfiller_order_id: string;
+            carrier: string;
+          }) => ({
+            assignmentId: a.assignment_id,
+            lineItemId: a.line_item_id,
+            variantId: a.variant_id,
+            fulfillerId: a.fulfiller_id,
+            fulfillerName: a.fulfiller_name,
+            quantity: a.quantity,
+            status: a.status,
+            fulfillerOrderId: a.fulfiller_order_id,
+            carrier: a.carrier,
+          }),
+        ),
+        fulfillerOrders: (row.fulfiller_orders ?? []).map(
+          (so: {
+            fulfiller_order_id: string;
+            fulfiller_id: string;
+            fulfiller_name: string;
+            status: string;
+            items: { assignment_id: string; variant_id: string; quantity: number }[];
+            carrier: string;
+            tracking_number: string;
+            rejection_reason: string;
+            created_at: Date;
+            updated_at: Date;
+          }) => ({
+            fulfillerOrderId: so.fulfiller_order_id,
+            fulfillerId: so.fulfiller_id,
+            fulfillerName: so.fulfiller_name,
+            status: so.status,
+            itemCount: (so.items ?? []).length,
+            carrier: so.carrier,
+            trackingNumber: so.tracking_number,
+            rejectionReason: so.rejection_reason,
+            createdAt: so.created_at ? new Date(so.created_at).toISOString() : undefined,
+            updatedAt: so.updated_at ? new Date(so.updated_at).toISOString() : undefined,
+          }),
+        ),
         statusHistory: [],
         createdAt: row.created_at?.toISOString(),
-        updatedAt: row.updated_at?.toISOString()
+        updatedAt: row.updated_at?.toISOString(),
       };
 
       await esClient.index({ index: 'orders', id: orderId, document: doc });
@@ -329,7 +365,10 @@ async function reindexCustomers(esClient: EsClient, errors: string[]): Promise<n
   const rows = await executeCql<CustomerRow>('SELECT * FROM orders_by_customer');
 
   // Group by email
-  const customers = new Map<string, { totalSpent: number; orderCount: number; lastOrderAt: string }>();
+  const customers = new Map<
+    string,
+    { totalSpent: number; orderCount: number; lastOrderAt: string }
+  >();
   for (const row of rows) {
     const existing = customers.get(row.customer_email);
     if (existing) {
@@ -342,7 +381,7 @@ async function reindexCustomers(esClient: EsClient, errors: string[]): Promise<n
       customers.set(row.customer_email, {
         totalSpent: row.total ?? 0,
         orderCount: 1,
-        lastOrderAt: row.created_at?.toISOString() ?? new Date().toISOString()
+        lastOrderAt: row.created_at?.toISOString() ?? new Date().toISOString(),
       });
     }
   }
@@ -356,7 +395,7 @@ async function reindexCustomers(esClient: EsClient, errors: string[]): Promise<n
         lastName: '',
         totalSpent: data.totalSpent,
         orderCount: data.orderCount,
-        lastOrderAt: data.lastOrderAt
+        lastOrderAt: data.lastOrderAt,
       };
       await esClient.index({ index: 'customers', id: email, document: doc });
       indexed++;
@@ -403,7 +442,7 @@ async function reindexFulfillers(esClient: EsClient, errors: string[]): Promise<
       const doc = {
         fulfillerId: row.id,
         name: row.name,
-        locations: (locationsByFulfiller.get(row.id) ?? []).map(loc => ({
+        locations: (locationsByFulfiller.get(row.id) ?? []).map((loc) => ({
           locationId: loc.location_id,
           name: loc.name,
           cost: loc.cost,
@@ -413,8 +452,8 @@ async function reindexFulfillers(esClient: EsClient, errors: string[]): Promise<
           state: loc.state,
           postalCode: loc.postal_code,
           country: loc.country,
-          isPrimary: loc.is_primary
-        }))
+          isPrimary: loc.is_primary,
+        })),
       };
       await esClient.index({ index: 'fulfillers', id: row.id, document: doc });
       indexed++;
@@ -456,7 +495,7 @@ async function reindexInventory(esClient: EsClient, errors: string[]): Promise<n
         reservedStock,
         availableStock: totalStock - reservedStock,
         fulfillerCount: fulfillers.length,
-        fulfillerLocations: fulfillers.map(s => ({
+        fulfillerLocations: fulfillers.map((s) => ({
           fulfillerId: s.fulfiller_id,
           fulfillerName: s.fulfiller_name,
           totalStock: s.total_stock,
@@ -465,11 +504,11 @@ async function reindexInventory(esClient: EsClient, errors: string[]): Promise<n
           city: '',
           state: '',
           country: '',
-          reservations: []
+          reservations: [],
         })),
         reservations: [],
         reservationIds: [],
-        cartIds: []
+        cartIds: [],
       };
       await esClient.index({ index: 'inventory', id: blankSku, document: doc });
       indexed++;
@@ -500,24 +539,32 @@ async function reindexFulfillerOrders(esClient: EsClient, errors: string[]): Pro
           fulfillerId: so.fulfiller_id,
           fulfillerName: so.fulfiller_name,
           status: so.status,
-          items: (so.items ?? []).map((i: { assignment_id: string; variant_id: string; quantity: number }) => ({
-            assignmentId: i.assignment_id,
-            variantId: i.variant_id,
-            quantity: i.quantity
-          })),
+          items: (so.items ?? []).map(
+            (i: { assignment_id: string; variant_id: string; quantity: number }) => ({
+              assignmentId: i.assignment_id,
+              variantId: i.variant_id,
+              quantity: i.quantity,
+            }),
+          ),
           itemCount: (so.items ?? []).length,
           carrier: so.carrier,
           trackingNumber: so.tracking_number,
           createdAt: so.created_at ? new Date(so.created_at).toISOString() : undefined,
           updatedAt: so.updated_at ? new Date(so.updated_at).toISOString() : undefined,
           rejectionReason: so.rejection_reason,
-          statusHistory: (so.status_history ?? []).map((h: { status: string; timestamp: Date; note: string }) => ({
-            status: h.status,
-            timestamp: h.timestamp ? new Date(h.timestamp).toISOString() : undefined,
-            note: h.note
-          }))
+          statusHistory: (so.status_history ?? []).map(
+            (h: { status: string; timestamp: Date; note: string }) => ({
+              status: h.status,
+              timestamp: h.timestamp ? new Date(h.timestamp).toISOString() : undefined,
+              note: h.note,
+            }),
+          ),
         };
-        await esClient.index({ index: 'fulfiller_orders', id: so.fulfiller_order_id, document: doc });
+        await esClient.index({
+          index: 'fulfiller_orders',
+          id: so.fulfiller_order_id,
+          document: doc,
+        });
         indexed++;
       } catch (err) {
         errors.push(`FulfillerOrder ${so.fulfiller_order_id}: ${err}`);
@@ -551,7 +598,7 @@ async function reindexReservations(esClient: EsClient, errors: string[]): Promis
         quantity: row.quantity,
         status: row.status,
         expiresAt: row.expires_at?.toISOString(),
-        createdAt: row.created_at?.toISOString()
+        createdAt: row.created_at?.toISOString(),
       };
       await esClient.index({ index: 'reservations', id: row.reservation_id, document: doc });
       indexed++;

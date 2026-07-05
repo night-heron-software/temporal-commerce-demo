@@ -32,12 +32,15 @@ export async function getTemporalClient(): Promise<Client> {
 
   const connection = await Connection.connect({
     address: TEMPORAL_ADDRESS,
-    tls: tlsCert && tlsKey ? {
-      clientCertPair: {
-        crt: Buffer.from(tlsCert, 'base64'),
-        key: Buffer.from(tlsKey, 'base64'),
-      }
-    } : undefined,
+    tls:
+      tlsCert && tlsKey
+        ? {
+            clientCertPair: {
+              crt: Buffer.from(tlsCert, 'base64'),
+              key: Buffer.from(tlsKey, 'base64'),
+            },
+          }
+        : undefined,
   });
 
   const interceptors = await getOtelInterceptors();

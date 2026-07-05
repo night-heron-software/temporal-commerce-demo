@@ -9,13 +9,10 @@ import { proxyActivities } from '@temporalio/workflow';
 import type { Identity } from '../contracts';
 
 // Identity Activities (Shopper only)
-export const {
-  createShopper,
-  updateShopperProfile,
-  updateShopperPassword
-} = proxyActivities<Identity.IdentityActivities>({
-  startToCloseTimeout: '10s',
-  retry: {
-    maximumAttempts: 3
-  }
-});
+export const { createShopper, updateShopperProfile, updateShopperPassword } =
+  proxyActivities<Identity.IdentityActivities>({
+    startToCloseTimeout: '10s',
+    retry: {
+      maximumAttempts: 3,
+    },
+  });

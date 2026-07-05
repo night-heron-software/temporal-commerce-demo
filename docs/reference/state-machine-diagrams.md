@@ -81,9 +81,12 @@ stateDiagram-v2
 | `update: linkUser` | `checkout` |  |
 | `update: beginCheckout` | `checkout` |  |
 | `timeout` | `active` |  |
-| `signal` | `checkout` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
-| `signal` | ⇒ completed | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
-| `signal` | `active` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `signal` | `checkout` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined &&
+          result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `signal` | ⇒ completed | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined &&
+          result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `signal` | `active` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined &&
+          result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
 
 **Timeout:** 1 hour
 

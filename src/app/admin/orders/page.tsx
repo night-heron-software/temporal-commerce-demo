@@ -26,8 +26,8 @@ export default function AdminOrdersPage() {
   // Load feature flags on mount
   useEffect(() => {
     fetch('/api/admin/feature-flags')
-      .then(r => r.json())
-      .then(flags => {
+      .then((r) => r.json())
+      .then((flags) => {
         setManualFulfillment(flags.MANUAL_FULFILLMENT ?? false);
       })
       .catch(() => {});
@@ -83,9 +83,7 @@ export default function AdminOrdersPage() {
     <div className="max-w-6xl mx-auto p-8">
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-            Orders
-          </h1>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Orders</h1>
           <button
             onClick={fetchOrders}
             disabled={isLoading}
@@ -117,16 +115,16 @@ export default function AdminOrdersPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`text-xs font-medium ${!manualFulfillment ? 'text-green-600 dark:text-green-400' : 'text-zinc-400'}`}>
+          <span
+            className={`text-xs font-medium ${!manualFulfillment ? 'text-green-600 dark:text-green-400' : 'text-zinc-400'}`}
+          >
             Auto
           </span>
           <button
             onClick={toggleFulfillmentMode}
             disabled={isTogglingFlag}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50 ${
-              manualFulfillment
-                ? 'bg-purple-600'
-                : 'bg-green-500'
+              manualFulfillment ? 'bg-purple-600' : 'bg-green-500'
             }`}
             role="switch"
             aria-checked={manualFulfillment}
@@ -138,7 +136,9 @@ export default function AdminOrdersPage() {
               }`}
             />
           </button>
-          <span className={`text-xs font-medium ${manualFulfillment ? 'text-purple-600 dark:text-purple-400' : 'text-zinc-400'}`}>
+          <span
+            className={`text-xs font-medium ${manualFulfillment ? 'text-purple-600 dark:text-purple-400' : 'text-zinc-400'}`}
+          >
             Manual
           </span>
         </div>

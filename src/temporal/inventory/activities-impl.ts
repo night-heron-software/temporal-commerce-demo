@@ -28,9 +28,7 @@ export async function expireReservations(): Promise<number> {
   const expired = await InventoryCommandRepository.getExpiredReservations();
   if (expired.length === 0) return 0;
 
-  await Promise.all(
-    expired.map((r) => InventoryCommandRepository.release(r.reservationId))
-  );
+  await Promise.all(expired.map((r) => InventoryCommandRepository.release(r.reservationId)));
 
   logger.info({ count: expired.length }, 'Expired reservations released');
   return expired.length;
@@ -74,9 +72,7 @@ const LOW_STOCK_THRESHOLD = 10;
  * Read all stock from write tables, aggregate per SKU, and upsert into read tables.
  */
 export async function projectStockSummaries(): Promise<void> {
-  const stockRows = await executeCql<StockWriteRow>(
-    `SELECT * FROM inventory_stock_w`
-  );
+  const stockRows = await executeCql<StockWriteRow>(`SELECT * FROM inventory_stock_w`);
 
   if (stockRows.length === 0) return;
 
@@ -104,8 +100,15 @@ export async function projectStockSummaries(): Promise<void> {
         blank_sku, total_stock, reserved_stock, available_stock,
         fulfiller_count, low_stock, last_projected_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      params: [blankSku, totalStock, reservedStock, availableStock,
-               fulfillers.length, lowStock, now],
+      params: [
+        blankSku,
+        totalStock,
+        reservedStock,
+        availableStock,
+        fulfillers.length,
+        lowStock,
+        now,
+      ],
     });
 
     // Upsert each fulfiller into inventory_stock_by_fulfiller
@@ -117,9 +120,19 @@ export async function projectStockSummaries(): Promise<void> {
           reserved_stock, available_stock, cost, city, state,
           country, last_projected_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [sup.fulfiller_id, blankSku, sup.fulfiller_name,
-                 sup.total_stock, sup.reserved_stock, supAvailable,
-                 sup.cost, sup.city, sup.state, sup.country, now],
+        params: [
+          sup.fulfiller_id,
+          blankSku,
+          sup.fulfiller_name,
+          sup.total_stock,
+          sup.reserved_stock,
+          supAvailable,
+          sup.cost,
+          sup.city,
+          sup.state,
+          sup.country,
+          now,
+        ],
       });
     }
   }
@@ -135,7 +148,7 @@ export async function projectStockSummaries(): Promise<void> {
 
   logger.info(
     { skuCount: bySkuMap.size, fulfillerRows: fulfillerBatch.length },
-    'Projected stock summaries'
+    'Projected stock summaries',
   );
 }
 
@@ -145,7 +158,7 @@ export async function projectStockSummaries(): Promise<void> {
 export async function projectReservationViews(): Promise<void> {
   const activeReservations = await executeCql<ReservationWriteRow>(
     `SELECT * FROM inventory_reservations_w
-     WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`
+     WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
   );
 
   if (activeReservations.length === 0) return;
@@ -162,8 +175,17 @@ export async function projectReservationViews(): Promise<void> {
         blank_sku, reservation_id, cart_id, variant_id, quantity,
         status, fulfiller_id, expires_at, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [r.blank_sku, r.reservation_id, r.cart_id, r.variant_id,
-               r.quantity, r.status, r.fulfiller_id, r.expires_at, r.created_at],
+      params: [
+        r.blank_sku,
+        r.reservation_id,
+        r.cart_id,
+        r.variant_id,
+        r.quantity,
+        r.status,
+        r.fulfiller_id,
+        r.expires_at,
+        r.created_at,
+      ],
     });
   }
 
@@ -172,10 +194,7 @@ export async function projectReservationViews(): Promise<void> {
     await executeBatch(batch.slice(i, i + BATCH_SIZE));
   }
 
-  logger.info(
-    { reservationCount: activeReservations.length },
-    'Projected reservation views'
-  );
+  logger.info({ reservationCount: activeReservations.length }, 'Projected reservation views');
 }
 
 /**
@@ -190,7 +209,7 @@ export async function projectLowStockAlerts(): Promise<void> {
   }
 
   const summaries = await executeCql<SummaryRow>(
-    `SELECT blank_sku, available_stock, total_stock FROM inventory_stock_summary`
+    `SELECT blank_sku, available_stock, total_stock FROM inventory_stock_summary`,
   );
 
   // Truncate and repopulate
@@ -217,7 +236,7 @@ export async function projectLowStockAlerts(): Promise<void> {
 
   logger.info(
     { lowStockCount: lowStockSkus.length, threshold: LOW_STOCK_THRESHOLD },
-    'Projected low stock alerts'
+    'Projected low stock alerts',
   );
 }
 
@@ -278,7 +297,7 @@ export async function syncInventoryToES(): Promise<void> {
   const stockRows = await executeCql<StockWriteRow>(`SELECT * FROM inventory_stock_w`);
   const reservationRows = await executeCql<ReservationWriteRow>(
     `SELECT * FROM inventory_reservations_w
-     WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`
+     WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
   );
 
   if (stockRows.length === 0) return;
@@ -310,10 +329,7 @@ export async function syncInventoryToES(): Promise<void> {
 
   if (operations.length > 0) {
     await client.bulk({ operations, refresh: false });
-    logger.info(
-      { documentCount: stockBySku.size },
-      'Synced inventory to Elasticsearch'
-    );
+    logger.info({ documentCount: stockBySku.size }, 'Synced inventory to Elasticsearch');
   }
 }
 
@@ -336,7 +352,7 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
   for (const blankSku of blankSkus) {
     const fulfillers = await executeCql<StockWriteRow>(
       `SELECT * FROM inventory_stock_w WHERE blank_sku = ?`,
-      [blankSku]
+      [blankSku],
     );
 
     if (fulfillers.length === 0) {
@@ -358,8 +374,15 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
         blank_sku, total_stock, reserved_stock, available_stock,
         fulfiller_count, low_stock, last_projected_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      params: [blankSku, totalStock, reservedStock, availableStock,
-               fulfillers.length, lowStock, now],
+      params: [
+        blankSku,
+        totalStock,
+        reservedStock,
+        availableStock,
+        fulfillers.length,
+        lowStock,
+        now,
+      ],
     });
 
     for (const sup of fulfillers) {
@@ -370,9 +393,19 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
           reserved_stock, available_stock, cost, city, state,
           country, last_projected_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [sup.fulfiller_id, blankSku, sup.fulfiller_name,
-                 sup.total_stock, sup.reserved_stock, supAvailable,
-                 sup.cost, sup.city, sup.state, sup.country, now],
+        params: [
+          sup.fulfiller_id,
+          blankSku,
+          sup.fulfiller_name,
+          sup.total_stock,
+          sup.reserved_stock,
+          supAvailable,
+          sup.cost,
+          sup.city,
+          sup.state,
+          sup.country,
+          now,
+        ],
       });
     }
 
@@ -391,7 +424,7 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
       const existingRows = await executeCql<{ available_stock: number }>(
         `SELECT available_stock FROM inventory_low_stock
          WHERE threshold_bucket = 'default' AND available_stock >= 0 AND blank_sku = ? ALLOW FILTERING`,
-        [blankSku]
+        [blankSku],
       );
       for (const row of existingRows) {
         lowStockBatch.push({
@@ -410,10 +443,7 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
     }
   }
 
-  logger.info(
-    { skuCount: blankSkus.length },
-    'Projected stock for targeted SKUs'
-  );
+  logger.info({ skuCount: blankSkus.length }, 'Projected stock for targeted SKUs');
 }
 
 /**
@@ -436,7 +466,7 @@ export async function projectReservationsForSkus(blankSkus: string[]): Promise<v
     const activeReservations = await executeCql<ReservationWriteRow>(
       `SELECT * FROM inventory_reservations_w
        WHERE blank_sku = ? AND status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
-      [blankSku]
+      [blankSku],
     );
 
     for (const r of activeReservations) {
@@ -445,8 +475,17 @@ export async function projectReservationsForSkus(blankSkus: string[]): Promise<v
           blank_sku, reservation_id, cart_id, variant_id, quantity,
           status, fulfiller_id, expires_at, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [r.blank_sku, r.reservation_id, r.cart_id, r.variant_id,
-                 r.quantity, r.status, r.fulfiller_id, r.expires_at, r.created_at],
+        params: [
+          r.blank_sku,
+          r.reservation_id,
+          r.cart_id,
+          r.variant_id,
+          r.quantity,
+          r.status,
+          r.fulfiller_id,
+          r.expires_at,
+          r.created_at,
+        ],
       });
     }
   }
@@ -456,10 +495,7 @@ export async function projectReservationsForSkus(blankSkus: string[]): Promise<v
     await executeBatch(batch.slice(i, i + BATCH_SIZE));
   }
 
-  logger.info(
-    { skuCount: blankSkus.length },
-    'Projected reservations for targeted SKUs'
-  );
+  logger.info({ skuCount: blankSkus.length }, 'Projected reservations for targeted SKUs');
 }
 
 /**
@@ -474,7 +510,7 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
   for (const blankSku of blankSkus) {
     const fulfillers = await executeCql<StockWriteRow>(
       `SELECT * FROM inventory_stock_w WHERE blank_sku = ?`,
-      [blankSku]
+      [blankSku],
     );
 
     if (fulfillers.length === 0) {
@@ -486,7 +522,7 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
     const reservations = await executeCql<ReservationWriteRow>(
       `SELECT * FROM inventory_reservations_w
        WHERE blank_sku = ? AND status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
-      [blankSku]
+      [blankSku],
     );
 
     operations.push({ index: { _index: ES_INDICES.inventory, _id: blankSku } });
@@ -495,10 +531,6 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
 
   if (operations.length > 0) {
     await client.bulk({ operations, refresh: false });
-    logger.info(
-      { skuCount: blankSkus.length },
-      'Synced targeted SKUs to Elasticsearch'
-    );
+    logger.info({ skuCount: blankSkus.length }, 'Synced targeted SKUs to Elasticsearch');
   }
 }
-

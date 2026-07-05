@@ -5,11 +5,7 @@
  * workflows report status via the `childStatus` signal; OMS can `cancel`. Routing to
  * a terminal happens here from the decider-aggregated status.
  */
-import type {
-  FulfillmentWorkflowState,
-  FulfillmentSignal,
-  FulfillmentStateName,
-} from './types';
+import type { FulfillmentWorkflowState, FulfillmentSignal, FulfillmentStateName } from './types';
 import type { FulfillmentResult } from './definitions';
 import { decide as fulfillmentDecide, evolve } from './fulfillment-decider';
 import type { FulfillmentCommand } from './fulfillment-decider';

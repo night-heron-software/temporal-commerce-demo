@@ -53,12 +53,21 @@ export async function signalInventoryChanged(blankSkus: string[]): Promise<void>
           signal: SIGNAL_NAME,
           signalArgs: [{ blankSkus }],
         });
-        logger.info({ skuCount: blankSkus.length }, 'Started INVENTORY_SERVICE_WORKFLOW_TYPE via signalWithStart');
+        logger.info(
+          { skuCount: blankSkus.length },
+          'Started INVENTORY_SERVICE_WORKFLOW_TYPE via signalWithStart',
+        );
       } catch (startErr) {
-        logger.warn({ err: startErr, skuCount: blankSkus.length }, 'Failed to signalWithStart INVENTORY_SERVICE_WORKFLOW_TYPE');
+        logger.warn(
+          { err: startErr, skuCount: blankSkus.length },
+          'Failed to signalWithStart INVENTORY_SERVICE_WORKFLOW_TYPE',
+        );
       }
     } else {
-      logger.warn({ err: e, skuCount: blankSkus.length }, 'Failed to signal INVENTORY_SERVICE_WORKFLOW_TYPE');
+      logger.warn(
+        { err: e, skuCount: blankSkus.length },
+        'Failed to signal INVENTORY_SERVICE_WORKFLOW_TYPE',
+      );
     }
   }
 }

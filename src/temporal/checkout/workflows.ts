@@ -1,9 +1,4 @@
-import {
-  defineSignal,
-  getExternalWorkflowHandle,
-  log,
-  setHandler,
-} from '@temporalio/workflow';
+import { defineSignal, getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
 import { releaseReservations } from './activities';
 import type {
   CheckoutState,
@@ -102,11 +97,17 @@ export async function checkoutWorkflow(
   > = {
     states: CHECKOUT_STATES,
     initialState: 'validating',
-    onContextUpdate: (newCtx: CheckoutContext, state: CheckoutStateName | `__terminal:${string}`) => {
+    onContextUpdate: (
+      newCtx: CheckoutContext,
+      state: CheckoutStateName | `__terminal:${string}`,
+    ) => {
       ctx = newCtx;
       currentStep = deriveDisplayStatus<CheckoutStep>(state);
     },
-    onCancellation: async (cancelCtx: CheckoutContext, _currentState: CheckoutStateName | `__terminal:${string}`) => {
+    onCancellation: async (
+      cancelCtx: CheckoutContext,
+      _currentState: CheckoutStateName | `__terminal:${string}`,
+    ) => {
       currentStep = 'cancelled';
       if (cancelCtx.reservations.length > 0) {
         await releaseReservations(cancelCtx.reservations);
@@ -138,7 +139,10 @@ export async function checkoutWorkflow(
   >[] = [
     {
       definition: setShippingUpdate,
-      toEvent: (s: SetShippingSignal) => ({ type: 'setShipping', shippingAddress: s.shippingAddress }),
+      toEvent: (s: SetShippingSignal) => ({
+        type: 'setShipping',
+        shippingAddress: s.shippingAddress,
+      }),
       ...stateFormatters,
     },
     {
@@ -158,7 +162,10 @@ export async function checkoutWorkflow(
     },
     {
       definition: acknowledgeCartChangeUpdate,
-      toEvent: (s: { cartVersion: number }) => ({ type: 'acknowledgeCartChange', cartVersion: s.cartVersion }),
+      toEvent: (s: { cartVersion: number }) => ({
+        type: 'acknowledgeCartChange',
+        cartVersion: s.cartVersion,
+      }),
       ...stateFormatters,
     },
     {

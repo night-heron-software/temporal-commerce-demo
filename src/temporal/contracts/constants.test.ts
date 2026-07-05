@@ -16,7 +16,9 @@ const ORDER = 'c3d40000-0000-4000-8000-000000000003';
 
 describe('buildWorkflowId', () => {
   it('joins components with the dot delimiter', () => {
-    expect(buildWorkflowId(STORE, 'cart', CART)).toBe([STORE, 'cart', CART].join(WORKFLOW_ID_DELIMITER));
+    expect(buildWorkflowId(STORE, 'cart', CART)).toBe(
+      [STORE, 'cart', CART].join(WORKFLOW_ID_DELIMITER),
+    );
   });
 
   it('accepts reserved singleton slugs as entityId', () => {

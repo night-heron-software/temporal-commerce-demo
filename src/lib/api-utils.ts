@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
+import { createLogger } from './logger';
+
+const log = createLogger('api');
 
 export interface ApiErrorResponse {
   error: string;
@@ -13,15 +16,11 @@ export function createErrorResponse(
   status: number,
   message: string,
   error?: unknown,
-  correlationId?: string
+  correlationId?: string,
 ): NextResponse {
   const cid = correlationId || uuidv4();
 
-  if (error instanceof Error) {
-    console.error(`[${cid}] API Error (${status}):`, message, error.stack);
-  } else {
-    console.error(`[${cid}] API Error (${status}):`, message, error);
-  }
+  log.error({ correlationId: cid, status, err: error }, message);
 
   const payload: ApiErrorResponse = {
     error: message,

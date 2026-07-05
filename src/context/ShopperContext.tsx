@@ -70,7 +70,8 @@ export function ShopperProvider({ children }: { children: React.ReactNode }) {
       if (!res.ok) return;
       const data = await res.json();
       const addresses = data.addresses || [];
-      const defaultAddr = addresses.find((a: Identity.SavedAddress) => a.isDefault) || addresses[0] || null;
+      const defaultAddr =
+        addresses.find((a: Identity.SavedAddress) => a.isDefault) || addresses[0] || null;
       setSavedAddress(defaultAddr);
     } catch {
       // ignore

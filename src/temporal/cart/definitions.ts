@@ -5,7 +5,7 @@ export {
   getCheckoutStateQuery,
   getCheckoutWorkflowIdQuery,
   getUserIdQuery,
-  checkoutCompletedSignal
+  checkoutCompletedSignal,
 } from '../contracts/cart';
 
 // Re-export types for convenience
@@ -13,5 +13,5 @@ export type {
   CartEvent,
   CartUpdateResponse,
   CartDetails,
-  CheckoutWorkflowResult
+  CheckoutWorkflowResult,
 } from '../contracts/cart';

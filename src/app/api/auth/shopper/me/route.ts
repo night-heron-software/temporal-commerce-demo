@@ -27,10 +27,7 @@ export async function GET() {
     id: types.Uuid;
     email: string;
     name: string;
-  }>(
-    `SELECT id, email, name FROM shoppers WHERE id = ? ALLOW FILTERING`,
-    [shopperId]
-  );
+  }>(`SELECT id, email, name FROM shoppers WHERE id = ? ALLOW FILTERING`, [shopperId]);
 
   if (rows.length === 0) {
     // Invalid cookie — clear it

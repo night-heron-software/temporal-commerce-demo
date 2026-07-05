@@ -32,6 +32,6 @@ export const {
   retry: {
     maximumAttempts: 3,
     initialInterval: '1s',
-    backoffCoefficient: 2
-  }
+    backoffCoefficient: 2,
+  },
 });

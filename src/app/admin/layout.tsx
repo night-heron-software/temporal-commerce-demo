@@ -41,10 +41,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               >
                 Order Trace
               </Link>
-              <Link
-                href="/docs"
-                className="text-zinc-300 hover:text-white transition-colors"
-              >
+              <Link href="/docs" className="text-zinc-300 hover:text-white transition-colors">
                 Docs
               </Link>
             </div>
@@ -58,10 +55,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             >
               <span>🔗</span> Temporal UI
             </a>
-            <Link
-              href="/shop"
-              className="text-zinc-400 hover:text-white transition-colors"
-            >
+            <Link href="/shop" className="text-zinc-400 hover:text-white transition-colors">
               → Storefront
             </Link>
           </div>

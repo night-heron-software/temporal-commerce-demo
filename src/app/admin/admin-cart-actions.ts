@@ -8,12 +8,13 @@
  */
 
 import { getTemporalClient } from '@/lib';
+import { createLogger } from '@/lib/logger';
 import { Cart } from '@/temporal/contracts';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
-export type ActionResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: string };
+const log = createLogger('admin-cart-actions');
+
+export type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
 export interface CartSummary {
   cartId: string;
@@ -81,7 +82,7 @@ export async function getActiveCarts(): Promise<ActionResult<CartSummary[]>> {
 
     return { success: true, data: carts };
   } catch (e) {
-    console.error('Failed to list active carts:', e);
+    log.error({ err: e }, 'Failed to list active carts');
     const message = e instanceof Error ? e.message : 'Unknown error';
     return { success: false, error: `Failed to load carts: ${message}` };
   }
@@ -97,7 +98,7 @@ export async function getCartDetails(cartId: string): Promise<ActionResult<Cart.
     const details = await handle.query(Cart.getCartQuery);
     return { success: true, data: details };
   } catch (e) {
-    console.error('Failed to get cart details:', e);
+    log.error({ cartId, err: e }, 'Failed to get cart details');
     const message = e instanceof Error ? e.message : 'Unknown error';
     const isNotFound = message.includes('not found') || message.includes('NOT_FOUND');
     return {

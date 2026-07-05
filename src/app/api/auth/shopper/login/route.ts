@@ -8,9 +8,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
+import { createLogger } from '@/lib/logger';
 import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
 import { ShopperRepository, AddressRepository } from '@/temporal/identity';
+
+const log = createLogger('api-auth-login');
 
 const SHOPPER_COOKIE = 'shopperId';
 const shopperRepo = new ShopperRepository();
@@ -65,15 +68,12 @@ export async function POST(request: NextRequest) {
       body: {
         query: {
           bool: {
-            must: [
-              { term: { 'email': shopper.email } },
-              { term: { 'status': 'active' } }
-            ]
-          }
+            must: [{ term: { email: shopper.email } }, { term: { status: 'active' } }],
+          },
         },
         sort: [{ updatedAt: 'desc' }],
-        size: 1
-      }
+        size: 1,
+      },
     });
 
     const hits = esResponse.hits?.hits ?? [];
@@ -81,32 +81,30 @@ export async function POST(request: NextRequest) {
     if (hits.length > 0 && hits[0]._source) {
       // 1. Recover existing active cart
       const recoveredCartId = hits[0]._source.cartId;
-      console.log(`Recovered active cart ${recoveredCartId} for user ${shopper.email}`);
-      
+      log.info({ cartId: recoveredCartId, email: shopper.email }, 'Recovered active cart');
+
       // Overwrite the guest cart ID with the recovered cart ID
       cookieStore.set('cartId', recoveredCartId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 30 * 24 * 60 * 60,
-        path: '/'
+        path: '/',
       });
     } else {
       // 2. Link current guest cart (if any) to the user
       const currentCartId = cookieStore.get('cartId')?.value;
       if (currentCartId) {
         const { executeCartUpdate } = await import('@/app/shop/cart-actions');
-        
-        console.log(`Linking guest cart ${currentCartId} to user ${shopper.email}`);
-        await executeCartUpdate(
-          currentCartId,
-          'cartUpdate',
-          [{ type: 'linkUser', email: shopper.email, userId: shopper.id }]
-        );
+
+        log.info({ cartId: currentCartId, email: shopper.email }, 'Linking guest cart to user');
+        await executeCartUpdate(currentCartId, 'cartUpdate', [
+          { type: 'linkUser', email: shopper.email, userId: shopper.id },
+        ]);
       }
     }
   } catch (error) {
-    console.error('Failed to link cart during login:', error);
+    log.error({ err: error }, 'Failed to link cart during login');
     // Non-fatal error, continue login process
   }
 

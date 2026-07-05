@@ -245,7 +245,13 @@ export function evolve(state: CartWorkflowContext, fact: CartFact): CartWorkflow
       cart.shippingCost = fact.finalState.shippingCost;
       cart.totalTax = fact.finalState.tax;
       cart.totalPrice =
-        cart.subtotalPrice - cart.totalDiscounts + fact.finalState.shippingCost + fact.finalState.tax;
+        cart.subtotalPrice -
+        cart.totalDiscounts +
+        fact.finalState.shippingCost +
+        fact.finalState.tax;
+      // The checkout child already closed (it sent this completion) — clear the link so
+      // terminal cleanup doesn't request-cancel a finished workflow.
+      next.checkoutWorkflowId = null;
       return next;
 
     case 'CheckoutFailed':

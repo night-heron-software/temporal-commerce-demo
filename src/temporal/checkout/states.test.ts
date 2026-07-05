@@ -7,7 +7,12 @@ vi.mock('@temporalio/workflow', () => ({
   defineSignal: vi.fn((name: string) => ({ type: 'signal', name })),
   getExternalWorkflowHandle: vi.fn(() => ({ signal: vi.fn(), cancel: vi.fn() })),
   proxyActivities: vi.fn(() => ({ persistWorkflowTransitions: vi.fn(async () => undefined) })),
-  workflowInfo: vi.fn(() => ({ workflowId: 'demo.checkout.c-1', runId: 'run-1', searchAttributes: {}, workflowType: 'checkoutWorkflow' })),
+  workflowInfo: vi.fn(() => ({
+    workflowId: 'demo.checkout.c-1',
+    runId: 'run-1',
+    searchAttributes: {},
+    workflowType: 'checkoutWorkflow',
+  })),
   condition: vi.fn(async () => true),
   uuid4: () => 'uuid-fixed',
 }));
@@ -124,7 +129,10 @@ describe('validating (transitional)', () => {
 
 describe('shipping', () => {
   it('setShipping prices the order, creates the intent, and advances to payment', async () => {
-    const out = await CHECKOUT_STATES.shipping.fn(makeCtx(), ev({ type: 'setShipping', shippingAddress: address }));
+    const out = await CHECKOUT_STATES.shipping.fn(
+      makeCtx(),
+      ev({ type: 'setShipping', shippingAddress: address }),
+    );
     expect(out.next).toBe('payment');
     expect(out.context.state.clientSecret).toBe('cs_1');
     expect(out.context.totalPrice).toBeCloseTo(15.8);
@@ -150,7 +158,13 @@ describe('shipping', () => {
 describe('payment', () => {
   const paidCtx = () =>
     makeCtx({
-      state: { step: 'payment', isGuest: true, shippingAddress: address, shippingCost: 5, tax: 0.8 },
+      state: {
+        step: 'payment',
+        isGuest: true,
+        shippingAddress: address,
+        shippingCost: 5,
+        tax: 0.8,
+      },
     });
 
   it('setPayment advances to review', async () => {
@@ -236,7 +250,9 @@ describe('review — submitOrder', () => {
 
 describe('recompute nudge (inbound signal from the cart)', () => {
   it('in shipping (no address yet) folds contents and stays in shipping', async () => {
-    const shippingCtx = makeCtx({ state: { step: 'shipping', isGuest: true, shippingCost: 0, tax: 0 } });
+    const shippingCtx = makeCtx({
+      state: { step: 'shipping', isGuest: true, shippingCost: 0, tax: 0 },
+    });
     vi.mocked(queryCart).mockResolvedValueOnce({
       items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 3, price: 10 }],
       subtotalPrice: 30,

@@ -99,7 +99,7 @@ export function getDocBySlug(slug: string): DocEntry | undefined {
 
 /** Maps a doc filename (basename, lowercased) to its slug, for cross-doc links. */
 const FILE_TO_SLUG = new Map(
-  DOC_ENTRIES.map((entry) => [path.basename(entry.file).toLowerCase(), entry.slug])
+  DOC_ENTRIES.map((entry) => [path.basename(entry.file).toLowerCase(), entry.slug]),
 );
 
 function escapeHtml(text: string): string {
@@ -121,7 +121,15 @@ function createHeadingSlugger() {
       // parseInline HTML-escapes the text; decode entities so e.g. "&" ("&amp;")
       // is dropped like GitHub does instead of leaving a literal "amp"
       .replace(/&(?:amp|lt|gt|quot|#39);/g, (entity) =>
-        entity === '&amp;' ? '&' : entity === '&lt;' ? '<' : entity === '&gt;' ? '>' : entity === '&quot;' ? '"' : "'"
+        entity === '&amp;'
+          ? '&'
+          : entity === '&lt;'
+            ? '<'
+            : entity === '&gt;'
+              ? '>'
+              : entity === '&quot;'
+                ? '"'
+                : "'",
       )
       .replace(/[^\p{L}\p{N} _-]/gu, '')
       .replace(/ /g, '-');
