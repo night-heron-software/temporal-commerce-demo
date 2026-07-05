@@ -204,7 +204,7 @@ describe('evolve', () => {
     expect(ctx.checkoutWorkflowId).toBeNull();
   });
 
-  it('CartCompleted folds the final checkout state into totals', () => {
+  it('CartCompleted folds the final checkout state into totals and drops the link', () => {
     const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x' });
     const ctx = apply(inCheckout, {
       type: 'checkoutCompleted',
@@ -214,6 +214,9 @@ describe('evolve', () => {
     expect(ctx.cart.shippingCost).toBe(5);
     expect(ctx.cart.totalTax).toBe(0.8);
     expect(ctx.cart.totalPrice).toBeCloseTo(10 - 0 + 5 + 0.8);
+    // The checkout child already closed — the link is dropped so terminal cleanup
+    // doesn't request-cancel a finished workflow.
+    expect(ctx.checkoutWorkflowId).toBeNull();
   });
 });
 

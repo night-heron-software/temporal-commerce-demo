@@ -233,7 +233,7 @@
               "conditions": [
                 "signal.kind === 'submitStarted'",
                 "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion",
+                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
                 "context.cart.status === 'completed'"
               ],
               "signalKinds": [
@@ -248,7 +248,7 @@
               "conditions": [
                 "signal.kind === 'submitStarted'",
                 "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion",
+                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
                 "context.cart.status === 'completed'"
               ],
               "signalKinds": [
@@ -263,7 +263,7 @@
               "conditions": [
                 "signal.kind === 'submitStarted'",
                 "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined && result.checkoutVersion !== ctx.checkoutVersion",
+                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
                 "context.cart.status === 'completed'"
               ],
               "signalKinds": [
