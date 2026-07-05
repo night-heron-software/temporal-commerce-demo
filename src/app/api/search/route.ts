@@ -5,7 +5,13 @@ import { getElasticsearchClient } from '@/lib/es-client';
 // Option type names can be inconsistent across fulfillers.
 // Group them by semantic category for search/faceting.
 // 'Color'/'Size' are normalized names used in the demo catalog.json.
-const COLOR_OPTION_TYPES = ['Color', 'Colors', 'Bella + Canvas Colors', 'AS Color colors', 'Comfort Colors® Colors'];
+const COLOR_OPTION_TYPES = [
+  'Color',
+  'Colors',
+  'Bella + Canvas Colors',
+  'AS Color colors',
+  'Comfort Colors® Colors',
+];
 const SIZE_OPTION_TYPES = ['Size', 'Sizes', 'Clothing sizes'];
 
 interface SearchParams {
@@ -50,11 +56,11 @@ function buildVariantFacetAggs(params: SearchParams): Record<string, any> {
           bool: {
             must: [
               { terms: { 'variants.options.optionType': optionTypes } },
-              { term: { 'variants.options.value.label': label } }
-            ]
-          }
-        }
-      }
+              { term: { 'variants.options.value.label': label } },
+            ],
+          },
+        },
+      },
     };
   }
 
@@ -85,17 +91,17 @@ function buildVariantFacetAggs(params: SearchParams): Record<string, any> {
                       terms: { field: 'variants.options.value.label', size: 50 },
                       aggs: {
                         hex: {
-                          terms: { field: 'variants.options.value.hex', size: 1 }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+                          terms: { field: 'variants.options.value.hex', size: 1 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
     size_facets: {
       nested: { path: 'variants' },
@@ -110,22 +116,20 @@ function buildVariantFacetAggs(params: SearchParams): Record<string, any> {
                   filter: { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
                   aggs: {
                     size_values: {
-                      terms: { field: 'variants.options.value.label', size: 50 }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+                      terms: { field: 'variants.options.value.label', size: 50 },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   };
 }
 
-export async function GET(
-  request: NextRequest
-): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const searchParams = request.nextUrl.searchParams;
 
@@ -138,7 +142,7 @@ export async function GET(
       color: searchParams.get('color') || undefined,
       size: searchParams.get('size') || undefined,
       page: parseInt(searchParams.get('page') || '1'),
-      pageSize: Math.min(parseInt(searchParams.get('pageSize') || '24'), 100)
+      pageSize: Math.min(parseInt(searchParams.get('pageSize') || '24'), 100),
     };
 
     // Build ES query
@@ -150,8 +154,8 @@ export async function GET(
         multi_match: {
           query: params.q,
           fields: ['name^3', 'description', 'collectionNames'],
-          fuzziness: 'AUTO'
-        }
+          fuzziness: 'AUTO',
+        },
       });
     }
 
@@ -180,11 +184,11 @@ export async function GET(
             bool: {
               must: [
                 { terms: { 'variants.options.optionType': COLOR_OPTION_TYPES } },
-                { term: { 'variants.options.value.label': params.color } }
-              ]
-            }
-          }
-        }
+                { term: { 'variants.options.value.label': params.color } },
+              ],
+            },
+          },
+        },
       });
     }
 
@@ -196,11 +200,11 @@ export async function GET(
             bool: {
               must: [
                 { terms: { 'variants.options.optionType': SIZE_OPTION_TYPES } },
-                { term: { 'variants.options.value.label': params.size } }
-              ]
-            }
-          }
-        }
+                { term: { 'variants.options.value.label': params.size } },
+              ],
+            },
+          },
+        },
       });
     }
 
@@ -210,18 +214,20 @@ export async function GET(
           path: 'variants',
           query: {
             bool: {
-              must: variantOptionFilters
-            }
+              must: variantOptionFilters,
+            },
           },
           // Return the matching variant for display image swap
-          ...(params.color ? {
-            inner_hits: {
-              name: 'color_variants',
-              size: 1,
-              _source: ['variants.id', 'variants.frontImageUrl']
-            }
-          } : {})
-        }
+          ...(params.color
+            ? {
+                inner_hits: {
+                  name: 'color_variants',
+                  size: 1,
+                  _source: ['variants.id', 'variants.frontImageUrl'],
+                },
+              }
+            : {}),
+        },
       });
     }
 
@@ -236,15 +242,15 @@ export async function GET(
       query: {
         bool: {
           must: must.length > 0 ? must : [{ match_all: {} }],
-          filter
-        }
+          filter,
+        },
       },
       aggs: {
         collections: {
-          terms: { field: 'collectionNames.keyword', size: 50 }
+          terms: { field: 'collectionNames.keyword', size: 50 },
         },
         types: {
-          terms: { field: 'type', size: 10 }
+          terms: { field: 'type', size: 10 },
         },
         price_ranges: {
           range: {
@@ -253,16 +259,16 @@ export async function GET(
               { key: 'Under $25', to: 2500 },
               { key: '$25 - $50', from: 2500, to: 5000 },
               { key: '$50 - $100', from: 5000, to: 10000 },
-              { key: 'Over $100', from: 10000 }
-            ]
-          }
+              { key: 'Over $100', from: 10000 },
+            ],
+          },
         },
         // Build variant-scoped facet aggregations.
         // When a color is active, size facets only count sizes on variants with that color.
         // When a size is active, color facets only count colors on variants with that size.
-        ...buildVariantFacetAggs(params)
+        ...buildVariantFacetAggs(params),
       },
-      sort: params.q ? ['_score'] : [{ 'name.keyword': 'asc' }]
+      sort: params.q ? ['_score'] : [{ 'name.keyword': 'asc' }],
     });
 
     // Parse response
@@ -297,8 +303,11 @@ export async function GET(
     const collectionBuckets = aggs?.collections?.buckets || [];
     const typeBuckets = aggs?.types?.buckets || [];
     const priceBuckets = aggs?.price_ranges?.buckets || [];
-    const colorBuckets = aggs?.color_facets?.scoped_variants?.variant_options?.color_filter?.color_values?.buckets || [];
-    const sizeBuckets = aggs?.size_facets?.scoped_variants?.variant_options?.size_filter?.size_values?.buckets || [];
+    const colorBuckets =
+      aggs?.color_facets?.scoped_variants?.variant_options?.color_filter?.color_values?.buckets ||
+      [];
+    const sizeBuckets =
+      aggs?.size_facets?.scoped_variants?.variant_options?.size_filter?.size_values?.buckets || [];
 
     const facets = {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -307,14 +316,19 @@ export async function GET(
       types: typeBuckets.map((b: any) => ({ name: b.key, count: b.doc_count })),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       priceRanges: priceBuckets.map((b: any) => ({
-        label: b.key, min: b.from || 0, max: b.to || Infinity, count: b.doc_count
+        label: b.key,
+        min: b.from || 0,
+        max: b.to || Infinity,
+        count: b.doc_count,
       })),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       colors: colorBuckets.map((b: any) => ({
-        name: b.key, hex: b.hex?.buckets?.[0]?.key, count: b.doc_count
+        name: b.key,
+        hex: b.hex?.buckets?.[0]?.key,
+        count: b.doc_count,
       })),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      sizes: sizeBuckets.map((b: any) => ({ name: b.key, count: b.doc_count }))
+      sizes: sizeBuckets.map((b: any) => ({ name: b.key, count: b.doc_count })),
     };
 
     return NextResponse.json({
@@ -322,7 +336,7 @@ export async function GET(
       total,
       page: params.page || 1,
       pageSize: params.pageSize || 24,
-      facets
+      facets,
     });
   } catch (error) {
     return createErrorResponse(500, 'Search failed', error);

@@ -22,7 +22,7 @@ export function buildCartDocument(cart: CartDetails, createdAt?: string): CartDo
       lineItemId: item.lineItemId,
       variantId: item.variantId,
       quantity: item.quantity,
-      price: item.price
+      price: item.price,
     })),
     itemCount: cart.items.length,
     subtotalPrice: cart.subtotalPrice,
@@ -31,6 +31,6 @@ export function buildCartDocument(cart: CartDetails, createdAt?: string): CartDo
     status: cart.status,
     appliedCoupons: cart.appliedCoupons,
     createdAt: createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
   };
 }

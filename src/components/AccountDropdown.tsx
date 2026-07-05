@@ -51,9 +51,7 @@ export function AccountDropdown() {
   };
 
   if (loading) {
-    return (
-      <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
-    );
+    return <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 animate-pulse" />;
   }
 
   return (
@@ -68,14 +66,23 @@ export function AccountDropdown() {
             <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">
               {shopper.name.charAt(0).toUpperCase()}
             </span>
-            <span className="hidden sm:inline max-w-[120px] truncate">
-              {shopper.name}
-            </span>
+            <span className="hidden sm:inline max-w-[120px] truncate">{shopper.name}</span>
           </>
         ) : (
           <>
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+              className="w-5 h-5"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+              />
             </svg>
             <span className="hidden sm:inline">Sign In</span>
           </>
@@ -108,9 +115,7 @@ export function AccountDropdown() {
             /* ── Not Signed In ── */
             <form onSubmit={handleSignIn} className="p-4">
               <div className="text-sm font-medium mb-3">Sign in with email</div>
-              {error && (
-                <div className="text-xs text-red-500 mb-2">{error}</div>
-              )}
+              {error && <div className="text-xs text-red-500 mb-2">{error}</div>}
               <input
                 ref={inputRef}
                 type="email"

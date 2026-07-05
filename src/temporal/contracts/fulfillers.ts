@@ -22,9 +22,9 @@ export interface CatalogItem {
   brand?: string;
   model?: string;
   options: CatalogOption[];
-  imageUrl?: string;        // GCS URL
-  localImageUrl?: string;   // local /images/... URL
-  originalImageUrl?: string;  // Fulfiller CDN URL before GCS rewrite
+  imageUrl?: string; // GCS URL
+  localImageUrl?: string; // local /images/... URL
+  originalImageUrl?: string; // Fulfiller CDN URL before GCS rewrite
   printAreas: PrintAreaSpec[];
   blankCost: number; // cents
   inStock: boolean;

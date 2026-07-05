@@ -14,8 +14,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       price: {
         properties: {
           amount: { type: 'integer' },
-          currency: { type: 'keyword' }
-        }
+          currency: { type: 'keyword' },
+        },
       },
       collectionId: { type: 'keyword' },
       collectionName: { type: 'text', fields: { keyword: { type: 'keyword' } } },
@@ -30,8 +30,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           price: {
             properties: {
               amount: { type: 'integer' },
-              currency: { type: 'keyword' }
-            }
+              currency: { type: 'keyword' },
+            },
           },
           available: { type: 'boolean' },
           frontImageUrl: { type: 'keyword', index: false },
@@ -45,24 +45,24 @@ export const INDEX_MAPPINGS: Record<string, any> = {
                   type: { type: 'keyword' },
                   name: { type: 'keyword' },
                   label: { type: 'keyword' },
-                  hex: { type: 'keyword' }
-                }
-              }
-            }
-          }
-        }
+                  hex: { type: 'keyword' },
+                },
+              },
+            },
+          },
+        },
       },
       createdAt: { type: 'date' },
-      updatedAt: { type: 'date' }
-    }
+      updatedAt: { type: 'date' },
+    },
   },
   collections: {
     properties: {
       id: { type: 'keyword' },
       name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       thumbnailUrl: { type: 'keyword', index: false },
-      productCount: { type: 'integer' }
-    }
+      productCount: { type: 'integer' },
+    },
   },
   orders: {
     properties: {
@@ -89,14 +89,14 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           postalCode: { type: 'keyword' },
           country: { type: 'keyword' },
           phone: { type: 'keyword' },
-          email: { type: 'keyword' }
-        }
+          email: { type: 'keyword' },
+        },
       },
       paymentMethod: {
         properties: {
           type: { type: 'keyword' },
-          last4: { type: 'keyword' }
-        }
+          last4: { type: 'keyword' },
+        },
       },
       items: {
         type: 'nested',
@@ -104,8 +104,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           lineItemId: { type: 'keyword' },
           variantId: { type: 'keyword' },
           quantity: { type: 'integer' },
-          price: { type: 'integer' }
-        }
+          price: { type: 'integer' },
+        },
       },
       itemCount: { type: 'integer' },
       variantIds: { type: 'keyword' },
@@ -120,8 +120,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           quantity: { type: 'integer' },
           status: { type: 'keyword' },
           fulfillerOrderId: { type: 'keyword' },
-          carrier: { type: 'keyword' }
-        }
+          carrier: { type: 'keyword' },
+        },
       },
       fulfillerOrders: {
         type: 'nested',
@@ -135,8 +135,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           trackingNumber: { type: 'keyword' },
           rejectionReason: { type: 'text' },
           createdAt: { type: 'date' },
-          updatedAt: { type: 'date' }
-        }
+          updatedAt: { type: 'date' },
+        },
       },
       statusHistory: {
         type: 'nested',
@@ -144,20 +144,20 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           status: { type: 'keyword' },
           timestamp: { type: 'date' },
           note: { type: 'text' },
-          updatedBy: { type: 'keyword' }
-        }
+          updatedBy: { type: 'keyword' },
+        },
       },
       deliveredAt: { type: 'date' },
       customerFeedback: {
         properties: {
           rating: { type: 'integer' },
           comment: { type: 'text' },
-          submittedAt: { type: 'date' }
-        }
+          submittedAt: { type: 'date' },
+        },
       },
       createdAt: { type: 'date' },
-      updatedAt: { type: 'date' }
-    }
+      updatedAt: { type: 'date' },
+    },
   },
   customers: {
     properties: {
@@ -167,8 +167,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       phone: { type: 'keyword' },
       totalSpent: { type: 'integer' },
       orderCount: { type: 'integer' },
-      lastOrderAt: { type: 'date' }
-    }
+      lastOrderAt: { type: 'date' },
+    },
   },
   fulfillers: {
     properties: {
@@ -186,10 +186,10 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           state: { type: 'keyword' },
           postalCode: { type: 'keyword' },
           country: { type: 'keyword' },
-          isPrimary: { type: 'boolean' }
-        }
-      }
-    }
+          isPrimary: { type: 'boolean' },
+        },
+      },
+    },
   },
   inventory: {
     properties: {
@@ -217,10 +217,10 @@ export const INDEX_MAPPINGS: Record<string, any> = {
               quantity: { type: 'integer' },
               status: { type: 'keyword' },
               createdAt: { type: 'long' },
-              expiresAt: { type: 'long' }
-            }
-          }
-        }
+              expiresAt: { type: 'long' },
+            },
+          },
+        },
       },
       reservations: {
         type: 'nested',
@@ -230,12 +230,12 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           quantity: { type: 'integer' },
           status: { type: 'keyword' },
           createdAt: { type: 'long' },
-          expiresAt: { type: 'long' }
-        }
+          expiresAt: { type: 'long' },
+        },
       },
       reservationIds: { type: 'keyword' },
-      cartIds: { type: 'keyword' }
-    }
+      cartIds: { type: 'keyword' },
+    },
   },
   fulfiller_orders: {
     properties: {
@@ -249,8 +249,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
         properties: {
           assignmentId: { type: 'keyword' },
           variantId: { type: 'keyword' },
-          quantity: { type: 'integer' }
-        }
+          quantity: { type: 'integer' },
+        },
       },
       itemCount: { type: 'integer' },
       carrier: { type: 'keyword' },
@@ -263,10 +263,10 @@ export const INDEX_MAPPINGS: Record<string, any> = {
         properties: {
           status: { type: 'keyword' },
           timestamp: { type: 'date' },
-          note: { type: 'text' }
-        }
-      }
-    }
+          note: { type: 'text' },
+        },
+      },
+    },
   },
   carts: {
     properties: {
@@ -279,8 +279,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           lineItemId: { type: 'keyword' },
           variantId: { type: 'keyword' },
           quantity: { type: 'integer' },
-          price: { type: 'integer' }
-        }
+          price: { type: 'integer' },
+        },
       },
       itemCount: { type: 'integer' },
       subtotalPrice: { type: 'integer' },
@@ -289,8 +289,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       status: { type: 'keyword' },
       appliedCoupons: { type: 'keyword' },
       createdAt: { type: 'date' },
-      updatedAt: { type: 'date' }
-    }
+      updatedAt: { type: 'date' },
+    },
   },
   reservations: {
     properties: {
@@ -300,8 +300,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       quantity: { type: 'integer' },
       status: { type: 'keyword' },
       expiresAt: { type: 'date' },
-      createdAt: { type: 'date' }
-    }
+      createdAt: { type: 'date' },
+    },
   },
   fulfillments: {
     properties: {
@@ -312,8 +312,8 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       createdAt: { type: 'date' },
       updatedAt: { type: 'date' },
       completedAt: { type: 'date' },
-      errorMessage: { type: 'text' }
-    }
+      errorMessage: { type: 'text' },
+    },
   },
   shipments: {
     properties: {
@@ -324,9 +324,9 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       trackingUrl: { type: 'keyword', index: false },
       itemCount: { type: 'integer' },
       shippedAt: { type: 'date' },
-      deliveredAt: { type: 'date' }
-    }
-  }
+      deliveredAt: { type: 'date' },
+    },
+  },
 };
 
 export async function ensureIndicesExist(): Promise<void> {
@@ -338,7 +338,7 @@ export async function ensureIndicesExist(): Promise<void> {
     if (!exists) {
       await client.indices.create({
         index: indexName,
-        mappings: mapping
+        mappings: mapping,
       });
       console.log(`[ES] Created index: ${indexName}`);
     } else {

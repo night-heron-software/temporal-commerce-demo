@@ -29,7 +29,15 @@ function makeCtx(
       fulfillerType: 'simulated',
       status: 'received',
       items: [
-        { sku: 'SKU-1', productId: 'p1', variantId: 'v1', quantity: 1, unitPrice: 10, title: 'T', status: 'pending' },
+        {
+          sku: 'SKU-1',
+          productId: 'p1',
+          variantId: 'v1',
+          quantity: 1,
+          unitPrice: 10,
+          title: 'T',
+          status: 'pending',
+        },
       ],
       statusHistory: [],
       ...soOverrides,

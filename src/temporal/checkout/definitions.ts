@@ -5,7 +5,7 @@ import type {
   RetargetParentSignal,
   SetShippingSignal,
   SetPaymentSignal,
-  SubmitOrderSignal
+  SubmitOrderSignal,
 } from './types';
 
 // ==================
@@ -15,7 +15,11 @@ import type {
 export const setShippingUpdate = defineUpdate<CheckoutState, [SetShippingSignal]>('setShipping');
 export const setPaymentUpdate = defineUpdate<CheckoutState, [SetPaymentSignal]>('setPayment');
 export const submitOrderUpdate = defineUpdate<CheckoutState, [SubmitOrderSignal]>('submitOrder');
-export const cancelCheckoutUpdate = defineUpdate<CheckoutState, [CancelCheckoutSignal]>('cancelCheckout');
-export const acknowledgeCartChangeUpdate = defineUpdate<CheckoutState, [{ cartVersion: number }]>('acknowledgeCartChange');
+export const cancelCheckoutUpdate = defineUpdate<CheckoutState, [CancelCheckoutSignal]>(
+  'cancelCheckout',
+);
+export const acknowledgeCartChangeUpdate = defineUpdate<CheckoutState, [{ cartVersion: number }]>(
+  'acknowledgeCartChange',
+);
 export const retargetParentUpdate = defineUpdate<void, [RetargetParentSignal]>('retargetParent');
 export const getCheckoutStateQuery = defineQuery<CheckoutState>('getCheckoutStateForCheckout');

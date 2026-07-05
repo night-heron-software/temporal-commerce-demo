@@ -168,5 +168,3 @@ export interface VariantInput {
   images?: ImageMap;
   options?: OptionSelection[];
 }
-
-

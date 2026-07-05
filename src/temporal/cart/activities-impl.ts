@@ -16,10 +16,9 @@ interface VariantRow {
 }
 
 async function resolveBlankSku(variantId: string): Promise<string | null> {
-  const variants = await executeCql<VariantRow>(
-    `SELECT blank_sku FROM variants WHERE id = ?`,
-    [types.Uuid.fromString(variantId)]
-  );
+  const variants = await executeCql<VariantRow>(`SELECT blank_sku FROM variants WHERE id = ?`, [
+    types.Uuid.fromString(variantId),
+  ]);
   if (variants.length > 0) return variants[0].blank_sku;
 
   return null;
@@ -43,7 +42,7 @@ export async function validateInventory(variantId: string, quantity: number): Pr
     const available = stockLevel.available >= quantity;
     logger.info(
       { blankSku, available: stockLevel.available, requested: quantity, result: available },
-      'Stock check complete'
+      'Stock check complete',
     );
     return available;
   } catch (e) {
@@ -60,7 +59,7 @@ export async function validateInventory(variantId: string, quantity: number): Pr
 export async function reserveCartItem(
   cartId: string,
   variantId: string,
-  quantity: number
+  quantity: number,
 ): Promise<string | null> {
   logger.info({ cartId, variantId, quantity }, 'Reserving inventory for cart item');
 
@@ -87,19 +86,21 @@ export async function reserveCartItem(
 
       // Index individual reservation to ES
       const esClient = getElasticsearchClient();
-      await esClient.index({
-        index: ES_INDICES.reservations,
-        id: reservationId,
-        document: {
-          reservationId,
-          cartId,
-          variantId,
-          quantity,
-          status: 'TEMPORARY',
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-          createdAt: new Date().toISOString()
-        }
-      }).catch((e: unknown) => logger.warn({ err: e }, 'Failed to index reservation'));
+      await esClient
+        .index({
+          index: ES_INDICES.reservations,
+          id: reservationId,
+          document: {
+            reservationId,
+            cartId,
+            variantId,
+            quantity,
+            status: 'TEMPORARY',
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            createdAt: new Date().toISOString(),
+          },
+        })
+        .catch((e: unknown) => logger.warn({ err: e }, 'Failed to index reservation'));
 
       return result.reservationId!;
     } else {
@@ -115,10 +116,7 @@ export async function reserveCartItem(
 /**
  * Release an inventory reservation (item removed from cart or quantity reduced).
  */
-export async function releaseCartItem(
-  cartId: string,
-  variantId: string
-): Promise<void> {
+export async function releaseCartItem(cartId: string, variantId: string): Promise<void> {
   const reservationId = `${cartId}-${variantId}`;
   logger.info({ reservationId }, 'Releasing reservation');
 
@@ -127,10 +125,14 @@ export async function releaseCartItem(
 
     // Remove reservation from ES
     const esClient = getElasticsearchClient();
-    await esClient.delete({
-      index: ES_INDICES.reservations,
-      id: reservationId
-    }).catch(() => { /* ignore if not found */ });
+    await esClient
+      .delete({
+        index: ES_INDICES.reservations,
+        id: reservationId,
+      })
+      .catch(() => {
+        /* ignore if not found */
+      });
 
     logger.info({ reservationId }, 'Released reservation');
   } catch (e) {
@@ -143,7 +145,7 @@ export async function indexCart(doc: Elasticsearch.CartDocument): Promise<void> 
   await client.index({
     index: ES_INDICES.carts,
     id: doc.cartId,
-    document: doc
+    document: doc,
   });
 }
 
@@ -152,7 +154,7 @@ export async function deleteCart(cartId: string): Promise<void> {
   await client
     .delete({
       index: ES_INDICES.carts,
-      id: cartId
+      id: cartId,
     })
     .catch(() => {
       /* ignore if not found */

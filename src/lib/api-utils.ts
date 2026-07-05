@@ -13,7 +13,7 @@ export function createErrorResponse(
   status: number,
   message: string,
   error?: unknown,
-  correlationId?: string
+  correlationId?: string,
 ): NextResponse {
   const cid = correlationId || uuidv4();
 

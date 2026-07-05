@@ -49,7 +49,13 @@ export interface SavedAddress {
 
 /** Identity activities — shopper management. */
 export interface IdentityActivities {
-  createShopper(shopper: { id: string; email: string; passwordHash: string; name: string; phone?: string }): Promise<void>;
+  createShopper(shopper: {
+    id: string;
+    email: string;
+    passwordHash: string;
+    name: string;
+    phone?: string;
+  }): Promise<void>;
   updateShopperProfile(email: string, updates: { name?: string; phone?: string }): Promise<void>;
   updateShopperPassword(email: string, hash: string): Promise<void>;
 }

@@ -17,7 +17,7 @@ export async function PUT(request: NextRequest) {
   if (typeof name !== 'string' || typeof value !== 'boolean') {
     return NextResponse.json(
       { error: 'Invalid request. Expected { name: string, value: boolean }' },
-      { status: 400 }
+      { status: 400 },
     );
   }
 

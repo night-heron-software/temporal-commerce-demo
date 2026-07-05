@@ -9,7 +9,13 @@
  * the `OmsFinalize` discriminated union in `omsFinalize` — the accounting (Twisp) actions
  * from the mono are intentionally absent in this demo.
  */
-import { log, getExternalWorkflowHandle, uuid4, startChild, defineSignal } from '@temporalio/workflow';
+import {
+  log,
+  getExternalWorkflowHandle,
+  uuid4,
+  startChild,
+  defineSignal,
+} from '@temporalio/workflow';
 import {
   buildWorkflowId,
   buildWorkflowStartOptions,
@@ -339,7 +345,16 @@ const assigningFulfillers = oms.state('assigning_fulfillers', {
     }));
     return resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
   },
-  decide(ctx, _input, prepared: Array<{ fulfillerId: string; fulfillerName?: string; fulfillerType?: string; sku?: string }>) {
+  decide(
+    ctx,
+    _input,
+    prepared: Array<{
+      fulfillerId: string;
+      fulfillerName?: string;
+      fulfillerType?: string;
+      sku?: string;
+    }>,
+  ) {
     const draft = copyOrderState(ctx);
     for (let i = 0; i < ctx.order.items.length; i++) {
       const item = ctx.order.items[i];
@@ -359,7 +374,10 @@ const assigningFulfillers = oms.state('assigning_fulfillers', {
     }
     return {
       context: draft,
-      next: draft.assignments.length > 0 ? ('requesting_fulfillment' as const) : ('ready_to_fulfill' as const),
+      next:
+        draft.assignments.length > 0
+          ? ('requesting_fulfillment' as const)
+          : ('ready_to_fulfill' as const),
       finalize: { action: 'none' as const },
     };
   },
@@ -508,7 +526,10 @@ function applyFulfillmentStatus(
   update: FulfillmentStatusUpdate,
   meta: InputMeta,
 ): OmsDecision {
-  const facts = omsDecide({ type: 'fulfillmentStatus', update, at: meta.timestamp }, ctx as OrderState);
+  const facts = omsDecide(
+    { type: 'fulfillmentStatus', update, at: meta.timestamp },
+    ctx as OrderState,
+  );
   if (facts.length === 0) {
     log.warn('[OMS] Received fulfillment status for unknown fulfiller order', {
       fulfillerOrderId: update.fulfillerOrderId,
@@ -517,7 +538,8 @@ function applyFulfillmentStatus(
   }
   const context = facts.reduce(evolve, ctx as OrderState);
   const agg = aggregateShippingState(context.fulfillerOrders);
-  if (agg === 'delivered') return { context, next: 'delivered' as const, finalize: { action: 'none' } };
+  if (agg === 'delivered')
+    return { context, next: 'delivered' as const, finalize: { action: 'none' } };
   if (agg === 'shipped') return { context, next: 'shipped' as const, finalize: { action: 'none' } };
   if (agg === 'partially_shipped')
     return { context, next: 'partially_shipped' as const, finalize: { action: 'none' } };
@@ -608,8 +630,14 @@ const delivered = oms.transitions(
         // quantity. Route through the refund command so it records a refund exactly
         // (handles the case where partials came first).
         if (event.status === 'refunded') {
-          const context = apply(ctx, { type: 'refundOrder', lines: undefined, reason: event.note, at: meta.timestamp });
-          const next = context.status === 'refunded' ? terminal('refunded') : ('delivered' as const);
+          const context = apply(ctx, {
+            type: 'refundOrder',
+            lines: undefined,
+            reason: event.note,
+            at: meta.timestamp,
+          });
+          const next =
+            context.status === 'refunded' ? terminal('refunded') : ('delivered' as const);
           return { context, next, response: context, finalize: refundFinalize(context) };
         }
         const context = apply(ctx, { type: 'updateStatus', status: event.status });
@@ -621,7 +649,12 @@ const delivered = oms.transitions(
       decide(ctx, event: Extract<OrderEvent, { type: 'refundOrder' }>, meta) {
         // Empty/omitted selection = full refund of all remaining quantity.
         const selections = event.lines && event.lines.length > 0 ? event.lines : undefined;
-        const context = apply(ctx, { type: 'refundOrder', lines: selections, reason: event.reason, at: meta.timestamp });
+        const context = apply(ctx, {
+          type: 'refundOrder',
+          lines: selections,
+          reason: event.reason,
+          at: meta.timestamp,
+        });
         const next = context.status === 'refunded' ? terminal('refunded') : ('delivered' as const);
         return { context, next, response: context, finalize: refundFinalize(context) };
       },
@@ -672,7 +705,11 @@ const returnRequested = oms.transitions(
   {
     confirmReturn: {
       decide(ctx, event: Extract<OrderEvent, { type: 'confirmReturn' }>, meta) {
-        const context = apply(ctx, { type: 'confirmReturn', reason: event.reason, at: meta.timestamp });
+        const context = apply(ctx, {
+          type: 'confirmReturn',
+          reason: event.reason,
+          at: meta.timestamp,
+        });
         return {
           context,
           next: terminal('returned'),

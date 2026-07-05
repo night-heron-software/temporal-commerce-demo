@@ -42,7 +42,13 @@ export function decide(
 ): FulfillerOrderFact[] {
   switch (command.type) {
     case 'submitted':
-      return [{ type: 'OrderSubmitted', fulfillerExternalId: command.fulfillerExternalId, at: command.at }];
+      return [
+        {
+          type: 'OrderSubmitted',
+          fulfillerExternalId: command.fulfillerExternalId,
+          at: command.at,
+        },
+      ];
     case 'autoShipped':
       return [{ type: 'AutoShipped', trackingNumber: command.trackingNumber, at: command.at }];
     case 'autoDelivered':

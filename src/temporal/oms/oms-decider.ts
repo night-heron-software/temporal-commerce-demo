@@ -175,11 +175,21 @@ export function decide(command: OrderCommand, state: OrderState): OrderFact[] {
 
     case 'submitFeedback':
       return [
-        { type: 'FeedbackSubmitted', rating: command.rating, comment: command.comment, at: command.at },
+        {
+          type: 'FeedbackSubmitted',
+          rating: command.rating,
+          comment: command.comment,
+          at: command.at,
+        },
       ];
 
     case 'refundOrder': {
-      const { record, fullyRefunded } = computeRefundRecord(state, command.lines, command.reason, command.at);
+      const { record, fullyRefunded } = computeRefundRecord(
+        state,
+        command.lines,
+        command.reason,
+        command.at,
+      );
       return [{ type: 'Refunded', record, fullyRefunded }];
     }
 
@@ -198,7 +208,12 @@ export function decide(command: OrderCommand, state: OrderState): OrderFact[] {
 
     case 'confirmReturn': {
       const req = state.returnRequest;
-      const { record } = computeRefundRecord(state, req?.lines, command.reason ?? req?.reason, command.at);
+      const { record } = computeRefundRecord(
+        state,
+        req?.lines,
+        command.reason ?? req?.reason,
+        command.at,
+      );
       return [{ type: 'ReturnConfirmed', record }];
     }
 
@@ -206,7 +221,9 @@ export function decide(command: OrderCommand, state: OrderState): OrderFact[] {
       return [{ type: 'ReturnDenied' }];
 
     case 'fulfillmentStatus':
-      return state.fulfillerOrders.some((so) => so.fulfillerOrderId === command.update.fulfillerOrderId)
+      return state.fulfillerOrders.some(
+        (so) => so.fulfillerOrderId === command.update.fulfillerOrderId,
+      )
         ? [{ type: 'FulfillmentApplied', update: command.update, at: command.at }]
         : [];
 
@@ -216,7 +233,11 @@ export function decide(command: OrderCommand, state: OrderState): OrderFact[] {
 }
 
 /** Fold a single fulfilment-status fact: apply to the fulfiller order, then aggregate. */
-function applyFulfillment(draft: OrderState, update: FulfillmentStatusUpdate, at: string): OrderState {
+function applyFulfillment(
+  draft: OrderState,
+  update: FulfillmentStatusUpdate,
+  at: string,
+): OrderState {
   const fulfillerOrder = draft.fulfillerOrders.find(
     (so) => so.fulfillerOrderId === update.fulfillerOrderId,
   );

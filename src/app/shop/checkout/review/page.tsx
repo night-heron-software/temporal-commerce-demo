@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react';
 import { submitOrder, cancelCheckout, getCheckoutState } from '@/app/shop/cart-actions';
 import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
-import type { Cart } from "@/temporal/contracts";
+import type { Cart } from '@/temporal/contracts';
 
 export default function ReviewPage() {
   const router = useRouter();
@@ -124,10 +124,14 @@ export default function ReviewPage() {
           </div>
           {shipping && (
             <div className="text-sm text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)] space-y-1">
-              <p>{shipping.firstName} {shipping.lastName}</p>
+              <p>
+                {shipping.firstName} {shipping.lastName}
+              </p>
               <p>{shipping.address1}</p>
               {shipping.address2 && <p>{shipping.address2}</p>}
-              <p>{shipping.city}, {shipping.state} {shipping.postalCode}</p>
+              <p>
+                {shipping.city}, {shipping.state} {shipping.postalCode}
+              </p>
               <p>{shipping.email}</p>
               {shipping.phone && <p>{shipping.phone}</p>}
             </div>
@@ -201,7 +205,9 @@ export default function ReviewPage() {
             disabled={isSubmitting || isCancelling}
             className="w-full bg-[var(--success)] hover:bg-[var(--success)]/90 text-white py-4 rounded-xl font-semibold transition-colors disabled:opacity-50"
           >
-            {isSubmitting ? 'Processing...' : `Place Order — $${(cart.totalPrice / 100).toFixed(2)}`}
+            {isSubmitting
+              ? 'Processing...'
+              : `Place Order — $${(cart.totalPrice / 100).toFixed(2)}`}
           </button>
 
           <button

@@ -321,5 +321,5 @@ export const ES_INDICES = {
   carts: 'carts',
   reservations: 'reservations',
   fulfillments: 'fulfillments',
-  shipments: 'shipments'
+  shipments: 'shipments',
 } as const;

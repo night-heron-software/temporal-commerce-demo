@@ -263,7 +263,10 @@ async function prepareSubmitOrder(ctx: Readonly<CheckoutContext>): Promise<Submi
 // ==================
 
 const recomputeEntry = {
-  async prepare(ctx: Readonly<CheckoutContext>, _signal: RecomputeSignal): Promise<RecomputePrepared> {
+  async prepare(
+    ctx: Readonly<CheckoutContext>,
+    _signal: RecomputeSignal,
+  ): Promise<RecomputePrepared> {
     const cart = await queryCart(ctx.parentCartWorkflowId);
     if (!ctx.state.shippingAddress) {
       return { cart };
@@ -426,7 +429,12 @@ const review = checkout.transitions(
         const context = apply(ctx, { type: 'submitOrder', prepared });
         if (!prepared.success) {
           // Pipeline failed — back to payment with the error.
-          return { context, next: 'payment' as const, response: context.state, error: prepared.error };
+          return {
+            context,
+            next: 'payment' as const,
+            response: context.state,
+            error: prepared.error,
+          };
         }
         return { context, next: terminal('complete'), response: context.state };
       },

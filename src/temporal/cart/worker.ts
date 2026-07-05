@@ -8,8 +8,6 @@ import { CART_TASK_QUEUE } from '../contracts';
 
 const logger = createLogger('cart:worker');
 
-
-
 async function start(
   connection: NativeConnection,
   otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
@@ -32,7 +30,7 @@ if (require.main === module) {
 
   (async () => {
     const connection = await NativeConnection.connect({
-      address: TEMPORAL_ADDRESS
+      address: TEMPORAL_ADDRESS,
     });
 
     logger.info({ address: TEMPORAL_ADDRESS }, 'Connected to Temporal');

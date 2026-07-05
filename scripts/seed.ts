@@ -14,7 +14,7 @@ async function call(
   label: string,
   method: 'GET' | 'POST',
   path: string,
-  body?: object
+  body?: object,
 ): Promise<unknown> {
   console.log(`\n--- ${label} ---`);
   const headers: Record<string, string> = {};

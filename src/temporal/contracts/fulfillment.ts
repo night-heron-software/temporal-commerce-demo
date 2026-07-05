@@ -4,11 +4,7 @@
  */
 
 // Re-export ShippingAddress from fulfillers (single source of truth)
-export type {
-  ShippingAddress,
-  FulfillerStatusUpdate,
-  FulfillerOrderResult
-} from './fulfillers';
+export type { ShippingAddress, FulfillerStatusUpdate, FulfillerOrderResult } from './fulfillers';
 import type { ShippingAddress, FulfillerStatusUpdate } from './fulfillers';
 import type { FulfillerOrderStatus } from './oms';
 
@@ -133,7 +129,6 @@ export interface ShipmentItemRef {
   quantity: number;
 }
 
-
 /**
  * Fulfillment Workflow Definitions
  * Signals, queries, and result types
@@ -141,12 +136,12 @@ export interface ShipmentItemRef {
 
 import * as wf from '@temporalio/workflow';
 
-
 /** Query: get current workflow state */
 export const getStatusQuery = wf.defineQuery<FulfillmentWorkflowState>('getStatus');
 
 /** Signal: fulfiller status update (from webhook or polling) */
-export const fulfillerStatusSignal = wf.defineSignal<[FulfillerStatusUpdate]>('fulfillerStatusUpdate');
+export const fulfillerStatusSignal =
+  wf.defineSignal<[FulfillerStatusUpdate]>('fulfillerStatusUpdate');
 
 /** Signal: cancel fulfillment */
 export const cancelSignal = wf.defineSignal('cancel');
@@ -167,5 +162,3 @@ export interface FulfillmentResult {
   fulfillerOrders: FulfillmentFulfillerOrderResult[];
   error?: string;
 }
-
-

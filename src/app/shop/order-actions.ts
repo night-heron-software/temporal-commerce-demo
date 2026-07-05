@@ -54,7 +54,7 @@ export async function getOrdersByEmail(email: string): Promise<{
        FROM orders_by_customer
        WHERE customer_email = ?
        LIMIT 50`,
-      [email.toLowerCase().trim()]
+      [email.toLowerCase().trim()],
     );
 
     // Enrich each order with shipping address from the main orders table
@@ -78,10 +78,7 @@ export async function getOrdersByEmail(email: string): Promise<{
               phone: string | null;
               email: string;
             } | null;
-          }>(
-            `SELECT shipping_address FROM orders WHERE order_id = ?`,
-            [orderId]
-          );
+          }>(`SELECT shipping_address FROM orders WHERE order_id = ?`, [orderId]);
           const addr = orderRows[0]?.shipping_address;
           if (addr) {
             shippingAddress = {
@@ -110,7 +107,7 @@ export async function getOrdersByEmail(email: string): Promise<{
           createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
           shippingAddress,
         };
-      })
+      }),
     );
 
     return { success: true, data };

@@ -22,17 +22,18 @@ export async function POST() {
   try {
     // Get all unique blank_skus from variants — must use executeCqlAll
     // because the catalog can exceed the default 5000-row page size.
-    const variants = await executeCqlAll<VariantSkuRow>(
-      `SELECT blank_sku FROM variants`
-    );
+    const variants = await executeCqlAll<VariantSkuRow>(`SELECT blank_sku FROM variants`);
 
-    const uniqueSkus = [...new Set(variants.map(v => v.blank_sku).filter(Boolean))];
+    const uniqueSkus = [...new Set(variants.map((v) => v.blank_sku).filter(Boolean))];
 
     if (uniqueSkus.length === 0) {
-      return NextResponse.json({
-        success: false,
-        error: 'No variants found — run catalog seed first',
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'No variants found — run catalog seed first',
+        },
+        { status: 400 },
+      );
     }
 
     // Get the fulfiller location for default address info
@@ -46,7 +47,7 @@ export async function POST() {
     }>(
       `SELECT address1, city, state, postal_code, country, cost FROM fulfiller_locations
        WHERE fulfiller_id = ? AND location_id = ?`,
-      [FULFILLER_ID, 'default-warehouse']
+      [FULFILLER_ID, 'default-warehouse'],
     );
 
     const loc = locations[0] ?? {
@@ -88,9 +89,6 @@ export async function POST() {
     });
   } catch (error) {
     console.error('Inventory seed error:', error);
-    return NextResponse.json(
-      { success: false, error: String(error) },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }
 }

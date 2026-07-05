@@ -48,9 +48,10 @@ export default function CheckoutPage() {
 
         const deadline = Date.now() + CHECKOUT_READY_TIMEOUT_MS;
         while (Date.now() < deadline) {
-          const state = updatedCart?.checkout?.step && routeForStep(updatedCart.checkout.step)
-            ? updatedCart.checkout
-            : await getCheckoutState(cartId);
+          const state =
+            updatedCart?.checkout?.step && routeForStep(updatedCart.checkout.step)
+              ? updatedCart.checkout
+              : await getCheckoutState(cartId);
 
           const route = routeForStep(state?.step);
           if (route) {

@@ -192,7 +192,10 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
   it('is a no-op when disabled', async () => {
     const config: StateMachineConfig<RState, never, Ctx, void> = {
       states: {
-        a: { transitional: true, fn: async (ctx: Ctx) => ({ context: ctx, next: '__terminal:done' }) },
+        a: {
+          transitional: true,
+          fn: async (ctx: Ctx) => ({ context: ctx, next: '__terminal:done' }),
+        },
       } as Any,
       initialState: 'a',
       transitionRecording: { enabled: false },

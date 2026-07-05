@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
 import { getElasticsearchClient } from '@/lib/es-client';
 
-
 interface RouteParams {
   params: Promise<{ productId: string }>;
 }
@@ -23,12 +22,10 @@ export async function GET(request: Request, { params }: RouteParams) {
       index: 'products',
       query: {
         bool: {
-          must: [
-            { term: { id: productId } }
-          ]
-        }
+          must: [{ term: { id: productId } }],
+        },
       },
-      size: 1
+      size: 1,
     });
 
     if (!response.hits.hits.length) {
@@ -47,7 +44,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       collectionIds: source.collectionIds || [],
       collectionNames: source.collectionNames || [],
       brand: source.brand,
-      model: source.model
+      model: source.model,
     };
 
     // Build variants array from the ES document
@@ -59,7 +56,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       available: v.available !== false,
       variantImageUrl: v.images?.['front'] || source.defaultVariantImageUrl || '',
       options: v.options || [],
-      images: v.images ?? {}
+      images: v.images ?? {},
     }));
 
     // If no variants in ES doc, create a synthetic one from the product
@@ -71,7 +68,7 @@ export async function GET(request: Request, { params }: RouteParams) {
         available: true,
         variantImageUrl: source.defaultVariantImageUrl || '',
         options: [],
-        images: source.defaultVariantImageUrl ? { front: source.defaultVariantImageUrl } : {}
+        images: source.defaultVariantImageUrl ? { front: source.defaultVariantImageUrl } : {},
       });
     }
 
@@ -81,7 +78,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     return NextResponse.json({
       product,
       variants,
-      defaultVariant
+      defaultVariant,
     });
   } catch (error) {
     return createErrorResponse(500, 'Failed to fetch product', error);

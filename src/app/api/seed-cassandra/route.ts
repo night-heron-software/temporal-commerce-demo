@@ -46,12 +46,11 @@ export async function POST() {
     collections: 0,
     products: 0,
     variants: 0,
-    errors: [] as string[]
+    errors: [] as string[],
   };
 
   try {
     const now = new Date();
-
 
     // Load sample data
     const dataPath = path.join(process.cwd(), 'sample-data', 'catalog.json');
@@ -63,7 +62,7 @@ export async function POST() {
       try {
         await executeCql(
           `INSERT INTO collections (id, name, description, created_at) VALUES (?, ?, ?, ?)`,
-          [types.Uuid.fromString(collection.id), collection.name, collection.description, now]
+          [types.Uuid.fromString(collection.id), collection.name, collection.description, now],
         );
         results.collections++;
       } catch (error) {
@@ -93,8 +92,8 @@ export async function POST() {
             product.default_variant_id ? types.Uuid.fromString(product.default_variant_id) : null,
             product.default_variant_image_url ?? null,
             now,
-            now
-          ]
+            now,
+          ],
         );
 
         // Products by collection
@@ -113,9 +112,11 @@ export async function POST() {
                 product.name,
                 product.base_price_amount,
                 product.base_price_currency,
-                product.default_variant_id ? types.Uuid.fromString(product.default_variant_id) : null,
-                product.default_variant_image_url ?? null
-              ]
+                product.default_variant_id
+                  ? types.Uuid.fromString(product.default_variant_id)
+                  : null,
+                product.default_variant_image_url ?? null,
+              ],
             );
           }
         }
@@ -145,8 +146,8 @@ export async function POST() {
             variant.available,
             variant.images ?? {},
             variant.options ?? [],
-            now
-          ]
+            now,
+          ],
         );
 
         const primaryImageUrl =
@@ -167,8 +168,8 @@ export async function POST() {
             variant.price_currency,
             variant.available,
             primaryImageUrl,
-            variant.options ?? []
-          ]
+            variant.options ?? [],
+          ],
         );
 
         results.variants++;
@@ -177,17 +178,16 @@ export async function POST() {
       }
     }
 
-
     return NextResponse.json({
       success: true,
       message: 'Sample data loaded successfully',
-      results
+      results,
     });
   } catch (error) {
     console.error('Failed to seed database:', error);
     return NextResponse.json(
       { success: false, error: `Failed to seed database: ${error}`, results },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

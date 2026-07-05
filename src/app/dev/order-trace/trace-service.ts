@@ -269,9 +269,11 @@ async function fetchStatusHistory(orderId: string): Promise<TraceStatusHistoryRo
  * An email that matches multiple orders returns `{ candidates }` for the caller to
  * disambiguate.
  */
-export async function resolveOrderId(
-  input: { orderId?: string; confirmation?: string; email?: string },
-): Promise<ResolveResult> {
+export async function resolveOrderId(input: {
+  orderId?: string;
+  confirmation?: string;
+  email?: string;
+}): Promise<ResolveResult> {
   const es = getElasticsearchClient();
 
   if (input.orderId) {

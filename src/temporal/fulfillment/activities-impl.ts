@@ -1,4 +1,4 @@
-import { heartbeat } from "@temporalio/activity";
+import { heartbeat } from '@temporalio/activity';
 import { logger, getElasticsearchClient } from '../../lib';
 import type { Fulfillers, Elasticsearch } from '../contracts';
 import type { TrackingInfo } from './activities';
@@ -13,11 +13,8 @@ export async function getFeatureFlag(name: string): Promise<boolean> {
 export async function submitFulfillerOrder(
   request: Fulfillers.FulfillerOrderInput,
 ): Promise<Fulfillers.FulfillerOrderResult> {
-  heartbeat("Submitting order to fulfiller");
-  logger.info(
-    { fulfillerType: request.fulfillerType },
-    "submitFulfillerOrder called",
-  );
+  heartbeat('Submitting order to fulfiller');
+  logger.info({ fulfillerType: request.fulfillerType }, 'submitFulfillerOrder called');
 
   // Demo: always simulate success
   return {
@@ -32,7 +29,7 @@ export async function sendShippedEmail(
   confirmationNumber: string,
   trackingInfo: TrackingInfo,
 ): Promise<void> {
-  logger.info({ email, orderId, trackingInfo }, "📧 [DEMO] Shipped notification");
+  logger.info({ email, orderId, trackingInfo }, '📧 [DEMO] Shipped notification');
 }
 
 export async function sendDeliveredEmail(
@@ -40,14 +37,17 @@ export async function sendDeliveredEmail(
   orderId: string,
   _confirmationNumber: string,
 ): Promise<void> {
-  logger.info({ email, orderId }, "📧 [DEMO] Delivered notification");
+  logger.info({ email, orderId }, '📧 [DEMO] Delivered notification');
 }
 
 export async function transferInventoryReservations(
   cartId: string,
   items: Array<{ variantId: string; fulfillerId: string; quantity: number }>,
 ): Promise<void> {
-  logger.info({ cartId, itemCount: items.length }, 'Transferring inventory reservations to fulfillers');
+  logger.info(
+    { cartId, itemCount: items.length },
+    'Transferring inventory reservations to fulfillers',
+  );
 
   for (const item of items) {
     const reservationId = `${cartId}-${item.variantId}`;
@@ -73,10 +73,14 @@ export async function fulfillInventoryReservations(
     await InventoryCommandRepository.fulfill(reservationId);
 
     // Remove reservation doc from ES
-    await esClient.delete({
-      index: ES_INDICES.reservations,
-      id: reservationId,
-    }).catch(() => { /* ignore if not found */ });
+    await esClient
+      .delete({
+        index: ES_INDICES.reservations,
+        id: reservationId,
+      })
+      .catch(() => {
+        /* ignore if not found */
+      });
   }
 
   logger.info({ cartId }, 'Inventory reservations fulfilled');
@@ -102,10 +106,14 @@ export async function releaseInventoryReservations(
     }
 
     // Remove reservation doc from ES
-    await esClient.delete({
-      index: ES_INDICES.reservations,
-      id: reservationId,
-    }).catch(() => { /* ignore if not found */ });
+    await esClient
+      .delete({
+        index: ES_INDICES.reservations,
+        id: reservationId,
+      })
+      .catch(() => {
+        /* ignore if not found */
+      });
   }
 
   logger.info({ cartId }, 'Inventory reservations released');
@@ -125,9 +133,7 @@ export function createFulfillmentActivities() {
   };
 }
 
-export async function indexFulfillment(
-  doc: Elasticsearch.FulfillmentDocument,
-): Promise<void> {
+export async function indexFulfillment(doc: Elasticsearch.FulfillmentDocument): Promise<void> {
   const client = getElasticsearchClient();
   await client.index({
     index: ES_INDICES.fulfillments,
@@ -136,9 +142,7 @@ export async function indexFulfillment(
   });
 }
 
-export async function indexShipment(
-  doc: Elasticsearch.ShipmentDocument,
-): Promise<void> {
+export async function indexShipment(doc: Elasticsearch.ShipmentDocument): Promise<void> {
   const client = getElasticsearchClient();
   await client.index({
     index: ES_INDICES.shipments,

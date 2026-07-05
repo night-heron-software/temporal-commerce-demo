@@ -31,7 +31,12 @@ const cartWorker = { taskQueue: CART_TASK_QUEUE, workflowsPath: WORKFLOWS_PATH, 
 
 const startOpts = (cartId: string) => ({
   taskQueue: CART_TASK_QUEUE,
-  ...buildWorkflowStartOptions({ storeId: DEMO_STORE_ID, domain: 'cart', entityId: cartId, cartId }),
+  ...buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'cart',
+    entityId: cartId,
+    cartId,
+  }),
   args: [{ cartId }] as [{ cartId: string }],
 });
 
@@ -81,7 +86,10 @@ describe('cartWorkflow (Temporal test env)', () => {
 
   it('auto-abandons after the active-state idle timeout (time-skip)', async () => {
     await withWorkflowEnv([cartWorker], async (env) => {
-      const handle = await env.client.workflow.start(cartWorkflow, startOpts('cart-harness-timeout'));
+      const handle = await env.client.workflow.start(
+        cartWorkflow,
+        startOpts('cart-harness-timeout'),
+      );
 
       // The 'active' state has a 30-day idle onTimeout that routes to terminal('abandoned').
       // The time-skipping env fast-forwards the timer, so awaiting the result advances

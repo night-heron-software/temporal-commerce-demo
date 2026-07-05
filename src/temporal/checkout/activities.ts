@@ -29,18 +29,23 @@ export interface CreateOrderInput {
 export interface CheckoutActivities {
   createPaymentIntent(
     amount: number,
-    currency: string
+    currency: string,
   ): Promise<{ clientSecret: string; id: string }>;
   verifyPayment(paymentIntentId: string): Promise<boolean>;
   calculateShipping(address: string): Promise<number>;
   calculateTax(state: string, subtotal: number): Promise<number>;
-  processPayment(token: string, amount: number, currency: string, idempotencyKey?: string): Promise<boolean>;
+  processPayment(
+    token: string,
+    amount: number,
+    currency: string,
+    idempotencyKey?: string,
+  ): Promise<boolean>;
   createOrder(input: CreateOrderInput): Promise<Order>;
   sendConfirmationEmail(email: string, confirmationNumber: string, order: Order): Promise<void>;
   startOrderManagementWorkflow(order: Order, customerEmail: string): Promise<string>;
   renewReservationsForCheckout(
     cartId: string,
-    items: CartItem[]
+    items: CartItem[],
   ): Promise<{
     success: boolean;
     reservations: ReservationInfo[];
@@ -64,31 +69,30 @@ export interface CheckoutActivities {
 }
 
 // Payment activities: non-retryable for permanent failures (declined cards, invalid tokens)
-export const {
-  createPaymentIntent,
-  verifyPayment,
-  processPayment
-} = proxyActivities<CheckoutActivities>({
-  startToCloseTimeout: '1m',
-  retry: {
-    maximumAttempts: 3,
-    initialInterval: '1s',
-    backoffCoefficient: 2,
-    nonRetryableErrorTypes: ['PaymentDeclinedError', 'InvalidCardError', 'InsufficientFundsError']
-  }
-});
+export const { createPaymentIntent, verifyPayment, processPayment } =
+  proxyActivities<CheckoutActivities>({
+    startToCloseTimeout: '1m',
+    retry: {
+      maximumAttempts: 3,
+      initialInterval: '1s',
+      backoffCoefficient: 2,
+      nonRetryableErrorTypes: [
+        'PaymentDeclinedError',
+        'InvalidCardError',
+        'InsufficientFundsError',
+      ],
+    },
+  });
 
 // Email activities: longer timeout for external Mailgun API
-export const {
-  sendConfirmationEmail
-} = proxyActivities<CheckoutActivities>({
+export const { sendConfirmationEmail } = proxyActivities<CheckoutActivities>({
   startToCloseTimeout: '2m',
   retry: {
     maximumAttempts: 3,
     initialInterval: '1s',
     backoffCoefficient: 2,
-    nonRetryableErrorTypes: ['InvalidRecipientError']
-  }
+    nonRetryableErrorTypes: ['InvalidRecipientError'],
+  },
 });
 
 // General checkout activities: calculations, order creation, reservations, OMS start
@@ -101,12 +105,12 @@ export const {
   renewReservationsForCheckout,
   confirmReservations,
   releaseReservations,
-  cancelReservations
+  cancelReservations,
 } = proxyActivities<CheckoutActivities>({
   startToCloseTimeout: '1m',
   retry: {
     maximumAttempts: 3,
     initialInterval: '1s',
-    backoffCoefficient: 2
-  }
+    backoffCoefficient: 2,
+  },
 });

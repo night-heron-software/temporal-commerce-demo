@@ -173,7 +173,6 @@ function rowToLowStockEntry(row: LowStockRow): LowStockEntry {
 // ============================================================
 
 export const InventoryQueryRepository = {
-
   /**
    * Get stock level for a single SKU.
    */
@@ -181,7 +180,7 @@ export const InventoryQueryRepository = {
     const rows = await executeCql<StockSummaryRow>(
       `SELECT total_stock, reserved_stock, available_stock
        FROM inventory_stock_summary WHERE blank_sku = ?`,
-      [blankSku]
+      [blankSku],
     );
     if (rows.length === 0) return null;
 
@@ -196,9 +195,7 @@ export const InventoryQueryRepository = {
    * Get all stock summaries (one per SKU).
    */
   async getAllStock(): Promise<StockSummary[]> {
-    const rows = await executeCql<StockSummaryRow>(
-      `SELECT * FROM inventory_stock_summary`
-    );
+    const rows = await executeCql<StockSummaryRow>(`SELECT * FROM inventory_stock_summary`);
     return rows.map(rowToStockSummary);
   },
 
@@ -208,7 +205,7 @@ export const InventoryQueryRepository = {
   async getLowStock(bucket: string = 'default'): Promise<LowStockEntry[]> {
     const rows = await executeCql<LowStockRow>(
       `SELECT * FROM inventory_low_stock WHERE threshold_bucket = ?`,
-      [bucket]
+      [bucket],
     );
     return rows.map(rowToLowStockEntry);
   },
@@ -219,7 +216,7 @@ export const InventoryQueryRepository = {
   async getStockByFulfiller(fulfillerId: string): Promise<FulfillerStock[]> {
     const rows = await executeCql<FulfillerStockRow>(
       `SELECT * FROM inventory_stock_by_fulfiller WHERE fulfiller_id = ?`,
-      [fulfillerId]
+      [fulfillerId],
     );
     return rows.map(rowToFulfillerStock);
   },
@@ -227,14 +224,11 @@ export const InventoryQueryRepository = {
   /**
    * Get stock for a specific SKU from a specific fulfiller.
    */
-  async getFulfillerForSku(
-    fulfillerId: string,
-    blankSku: string
-  ): Promise<FulfillerStock | null> {
+  async getFulfillerForSku(fulfillerId: string, blankSku: string): Promise<FulfillerStock | null> {
     const rows = await executeCql<FulfillerStockRow>(
       `SELECT * FROM inventory_stock_by_fulfiller
        WHERE fulfiller_id = ? AND blank_sku = ?`,
-      [fulfillerId, blankSku]
+      [fulfillerId, blankSku],
     );
     return rows.length > 0 ? rowToFulfillerStock(rows[0]) : null;
   },
@@ -245,7 +239,7 @@ export const InventoryQueryRepository = {
   async getReservationsBySku(blankSku: string): Promise<SkuReservation[]> {
     const rows = await executeCql<SkuReservationRow>(
       `SELECT * FROM inventory_reservations_by_sku WHERE blank_sku = ?`,
-      [blankSku]
+      [blankSku],
     );
     return rows.map(rowToSkuReservation);
   },

@@ -1,4 +1,3 @@
-
 import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
 import { logger } from '../../lib';
 import { FULFILLMENT_TASK_QUEUE } from '../contracts';

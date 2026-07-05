@@ -1,11 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import {
-  getActiveCarts,
-  getCartDetails,
-  type CartSummary,
-} from '../admin-cart-actions';
+import { getActiveCarts, getCartDetails, type CartSummary } from '../admin-cart-actions';
 import type { CartDetails } from '@/app/shop/cart-actions';
 
 export default function AdminCartsPage() {
@@ -31,13 +27,15 @@ export default function AdminCartsPage() {
   // Initial load: isLoading starts true, so we only need the async resolution
   useEffect(() => {
     let active = true;
-    getActiveCarts().then(result => {
+    getActiveCarts().then((result) => {
       if (!active) return;
       if (result.success) setCarts(result.data);
       else setError(result.error);
       setIsLoading(false);
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
   const toggleCartDetails = async (cartId: string) => {
@@ -51,7 +49,7 @@ export default function AdminCartsPage() {
       setLoadingDetails(cartId);
       const result = await getCartDetails(cartId);
       if (result.success) {
-        setCartDetails(prev => ({ ...prev, [cartId]: result.data as CartDetails }));
+        setCartDetails((prev) => ({ ...prev, [cartId]: result.data as CartDetails }));
       }
       setLoadingDetails(null);
     }
@@ -95,9 +93,7 @@ export default function AdminCartsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-            Active Carts
-          </h1>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Active Carts</h1>
           <button
             onClick={fetchCarts}
             disabled={isLoading}
@@ -119,27 +115,38 @@ export default function AdminCartsPage() {
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Active Carts</div>
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
+            Active Carts
+          </div>
           <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">
-            {carts.filter(c => c.status === 'active').length}
+            {carts.filter((c) => c.status === 'active').length}
           </div>
         </div>
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">In Checkout</div>
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
+            In Checkout
+          </div>
           <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 tabular-nums">
-            {carts.filter(c => c.status === 'checkout' || c.status === 'processing').length}
+            {carts.filter((c) => c.status === 'checkout' || c.status === 'processing').length}
           </div>
         </div>
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Total Items</div>
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
+            Total Items
+          </div>
           <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">
             {carts.reduce((sum, c) => sum + c.itemCount, 0)}
           </div>
         </div>
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Total Value</div>
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
+            Total Value
+          </div>
           <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
-            {formatPrice(carts.reduce((sum, c) => sum + c.totalPrice, 0), 'USD')}
+            {formatPrice(
+              carts.reduce((sum, c) => sum + c.totalPrice, 0),
+              'USD',
+            )}
           </div>
         </div>
       </div>
@@ -155,9 +162,7 @@ export default function AdminCartsPage() {
       ) : carts.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-zinc-800 rounded-lg text-zinc-500">
           <p className="text-lg mb-2">No active carts</p>
-          <p className="text-sm">
-            Add an item from the storefront to create a cart workflow.
-          </p>
+          <p className="text-sm">Add an item from the storefront to create a cart workflow.</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -182,20 +187,22 @@ export default function AdminCartsPage() {
                     {cart.cartId.substring(0, 8)}…
                   </code>
                   {cart.userId && (
-                    <span className="ml-2 text-xs text-zinc-400">
-                      👤 {cart.userId}
-                    </span>
+                    <span className="ml-2 text-xs text-zinc-400">👤 {cart.userId}</span>
                   )}
                 </div>
 
                 {/* Status */}
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(cart.status)}`}>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusClasses(cart.status)}`}
+                >
                   {cart.status}
                 </span>
 
                 {/* Checkout step */}
                 {cart.checkout && (
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getCheckoutStepClasses(cart.checkout.step)}`}>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${getCheckoutStepClasses(cart.checkout.step)}`}
+                  >
                     {cart.checkout.step}
                   </span>
                 )}
@@ -250,14 +257,21 @@ export default function AdminCartsPage() {
                           </thead>
                           <tbody>
                             {cartDetails[cart.cartId].items.map((item) => (
-                              <tr key={item.lineItemId} className="border-t border-zinc-200 dark:border-zinc-700">
+                              <tr
+                                key={item.lineItemId}
+                                className="border-t border-zinc-200 dark:border-zinc-700"
+                              >
                                 <td className="py-2">
                                   <code className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
                                     {item.variantId.substring(0, 8)}…
                                   </code>
                                 </td>
-                                <td className="py-2 text-right tabular-nums text-zinc-900 dark:text-zinc-100">{item.quantity}</td>
-                                <td className="py-2 text-right tabular-nums text-zinc-500">{formatPrice(item.price, cart.currency)}</td>
+                                <td className="py-2 text-right tabular-nums text-zinc-900 dark:text-zinc-100">
+                                  {item.quantity}
+                                </td>
+                                <td className="py-2 text-right tabular-nums text-zinc-500">
+                                  {formatPrice(item.price, cart.currency)}
+                                </td>
                                 <td className="py-2 text-right tabular-nums font-medium text-zinc-900 dark:text-zinc-100">
                                   {formatPrice(item.price * item.quantity, cart.currency)}
                                 </td>
@@ -299,8 +313,11 @@ export default function AdminCartsPage() {
                       {cartDetails[cart.cartId].appliedCoupons.length > 0 && (
                         <div className="text-sm">
                           <span className="text-zinc-400">Coupons:</span>{' '}
-                          {cartDetails[cart.cartId].appliedCoupons.map(c => (
-                            <span key={c} className="ml-1 px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded text-xs font-mono">
+                          {cartDetails[cart.cartId].appliedCoupons.map((c) => (
+                            <span
+                              key={c}
+                              className="ml-1 px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded text-xs font-mono"
+                            >
                               {c}
                             </span>
                           ))}

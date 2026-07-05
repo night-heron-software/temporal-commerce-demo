@@ -198,7 +198,6 @@ function rowToReservation(row: ReservationRow): ReservationRecord {
 // ============================================================
 
 export const InventoryCommandRepository = {
-
   // --- Stock Operations ---
 
   /**
@@ -206,13 +205,13 @@ export const InventoryCommandRepository = {
    */
   async setFulfillerStock(
     blankSku: string,
-    args: SetFulfillerStockArgs
+    args: SetFulfillerStockArgs,
   ): Promise<SetFulfillerStockResult> {
     // Read current stock for the return value
     const existing = await executeCql<StockRow>(
       `SELECT total_stock, reserved_stock FROM inventory_stock_w
        WHERE blank_sku = ? AND fulfiller_id = ?`,
-      [blankSku, args.fulfillerId]
+      [blankSku, args.fulfillerId],
     );
     const previousStock = existing.length > 0 ? existing[0].total_stock : 0;
 
@@ -236,7 +235,7 @@ export const InventoryCommandRepository = {
         args.state,
         args.postalCode,
         args.country,
-      ]
+      ],
     );
 
     const reservedStock = existing.length > 0 ? existing[0].reserved_stock : 0;
@@ -258,11 +257,11 @@ export const InventoryCommandRepository = {
   async getStockLevel(blankSku: string): Promise<Inventory.StockLevel> {
     const rows = await executeCql<StockRow>(
       `SELECT total_stock, reserved_stock FROM inventory_stock_w WHERE blank_sku = ?`,
-      [blankSku]
+      [blankSku],
     );
     const reserved = rows.reduce((sum, r) => sum + r.reserved_stock, 0);
     const available = computeTotalAvailable(rows);
-    if (rows.some(r => isUnlimited(r.total_stock))) {
+    if (rows.some((r) => isUnlimited(r.total_stock))) {
       return { total: UNLIMITED_STOCK, reserved, available };
     }
     const total = rows.reduce((sum, r) => sum + r.total_stock, 0);
@@ -284,7 +283,7 @@ export const InventoryCommandRepository = {
     const stockRows = await executeCql<StockRow>(
       `SELECT fulfiller_id, total_stock, reserved_stock FROM inventory_stock_w
        WHERE blank_sku = ?`,
-      [args.blankSku]
+      [args.blankSku],
     );
 
     if (stockRows.length === 0) {
@@ -299,7 +298,7 @@ export const InventoryCommandRepository = {
       const preemptable = await executeCql<ReservationRow>(
         `SELECT * FROM inventory_reservations_w
          WHERE blank_sku = ? AND status = 'TEMPORARY' ALLOW FILTERING`,
-        [args.blankSku]
+        [args.blankSku],
       );
 
       const toPreempt = selectPreemptibleReservations(preemptable, {
@@ -314,8 +313,12 @@ export const InventoryCommandRepository = {
         // Preempt the stale reservations
         for (const r of toPreempt) {
           logger.info(
-            { preemptedReservation: r.reservation_id, blankSku: args.blankSku, forCart: args.cartId },
-            'Preempting stale TEMPORARY reservation'
+            {
+              preemptedReservation: r.reservation_id,
+              blankSku: args.blankSku,
+              forCart: args.cartId,
+            },
+            'Preempting stale TEMPORARY reservation',
           );
           await this.release(r.reservation_id);
         }
@@ -324,7 +327,7 @@ export const InventoryCommandRepository = {
         const freshRows = await executeCql<StockRow>(
           `SELECT fulfiller_id, total_stock, reserved_stock FROM inventory_stock_w
            WHERE blank_sku = ?`,
-          [args.blankSku]
+          [args.blankSku],
         );
         stockRows.length = 0;
         stockRows.push(...freshRows);
@@ -334,7 +337,7 @@ export const InventoryCommandRepository = {
 
     // Find a fulfiller with enough available stock
     const fulfiller = stockRows.find(
-      r => isUnlimited(r.total_stock) || (r.total_stock - r.reserved_stock) >= args.quantity
+      (r) => isUnlimited(r.total_stock) || r.total_stock - r.reserved_stock >= args.quantity,
     );
 
     if (!fulfiller) {
@@ -353,7 +356,7 @@ export const InventoryCommandRepository = {
        WHERE blank_sku = ? AND fulfiller_id = ?
        IF reserved_stock = ?`,
       [newReserved, args.blankSku, fulfiller.fulfiller_id, fulfiller.reserved_stock],
-      { prepare: true }
+      { prepare: true },
     );
 
     // Check if LWT was applied
@@ -361,7 +364,7 @@ export const InventoryCommandRepository = {
     if (!applied) {
       logger.warn(
         { blankSku: args.blankSku, fulfillerId: fulfiller.fulfiller_id },
-        'LWT not applied for reserve, concurrent modification detected'
+        'LWT not applied for reserve, concurrent modification detected',
       );
       return { success: false, error: 'Concurrent modification, retry needed' };
     }
@@ -377,24 +380,29 @@ export const InventoryCommandRepository = {
           quantity, reference_id, status, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'TEMPORARY', ?, ?, ?)`,
         params: [
-          args.reservationId, args.blankSku, args.cartId, args.variantId,
-          null, args.quantity, args.referenceId, expiresAt, now, now,
+          args.reservationId,
+          args.blankSku,
+          args.cartId,
+          args.variantId,
+          null,
+          args.quantity,
+          args.referenceId,
+          expiresAt,
+          now,
+          now,
         ],
       },
       {
         query: `INSERT INTO inventory_reservations_by_cart_w (
           cart_id, reservation_id, blank_sku, variant_id, quantity, status
         ) VALUES (?, ?, ?, ?, ?, 'TEMPORARY')`,
-        params: [
-          args.cartId, args.reservationId, args.blankSku,
-          args.variantId, args.quantity,
-        ],
+        params: [args.cartId, args.reservationId, args.blankSku, args.variantId, args.quantity],
       },
     ]);
 
     logger.info(
       { reservationId: args.reservationId, blankSku: args.blankSku, quantity: args.quantity },
-      'Reserved inventory'
+      'Reserved inventory',
     );
 
     await signalInventoryChanged([args.blankSku]);
@@ -408,7 +416,7 @@ export const InventoryCommandRepository = {
   async release(reservationId: string): Promise<void> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
-      [reservationId]
+      [reservationId],
     );
 
     if (rows.length === 0) {
@@ -426,7 +434,7 @@ export const InventoryCommandRepository = {
     // Decrement reserved_stock via LWT
     const stockRows = await executeCql<StockRow>(
       `SELECT fulfiller_id, reserved_stock FROM inventory_stock_w WHERE blank_sku = ?`,
-      [reservation.blank_sku]
+      [reservation.blank_sku],
     );
 
     // Find which fulfiller holds this reservation's stock
@@ -438,7 +446,7 @@ export const InventoryCommandRepository = {
         `UPDATE inventory_stock_w
          SET reserved_stock = ?, updated_at = toTimestamp(now())
          WHERE blank_sku = ? AND fulfiller_id = ?`,
-        [newReserved, reservation.blank_sku, fulfiller.fulfiller_id]
+        [newReserved, reservation.blank_sku, fulfiller.fulfiller_id],
       );
     } else {
       throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} on release`);
@@ -470,7 +478,7 @@ export const InventoryCommandRepository = {
   async renewReservation(reservationId: string, newTtlSeconds: number): Promise<boolean> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
-      [reservationId]
+      [reservationId],
     );
 
     if (rows.length === 0) {
@@ -480,7 +488,10 @@ export const InventoryCommandRepository = {
 
     const reservation = rows[0];
     if (reservation.status !== 'TEMPORARY') {
-      logger.warn({ reservationId, status: reservation.status }, 'Cannot renew non-TEMPORARY reservation');
+      logger.warn(
+        { reservationId, status: reservation.status },
+        'Cannot renew non-TEMPORARY reservation',
+      );
       return false;
     }
 
@@ -489,7 +500,7 @@ export const InventoryCommandRepository = {
       `UPDATE inventory_reservations_w
        SET expires_at = ?, updated_at = toTimestamp(now())
        WHERE reservation_id = ?`,
-      [newExpiresAt, reservationId]
+      [newExpiresAt, reservationId],
     );
 
     logger.info({ reservationId, newTtlSeconds }, 'Renewed reservation');
@@ -504,7 +515,7 @@ export const InventoryCommandRepository = {
   async cancel(reservationId: string): Promise<void> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
-      [reservationId]
+      [reservationId],
     );
 
     if (rows.length === 0) {
@@ -514,7 +525,10 @@ export const InventoryCommandRepository = {
 
     const reservation = rows[0];
     if (reservation.status !== 'CONFIRMED') {
-      logger.warn({ reservationId, status: reservation.status }, 'Can only cancel CONFIRMED reservations');
+      logger.warn(
+        { reservationId, status: reservation.status },
+        'Can only cancel CONFIRMED reservations',
+      );
       return;
     }
 
@@ -527,7 +541,7 @@ export const InventoryCommandRepository = {
     const stockRows = await executeCql<StockRow>(
       `SELECT reserved_stock FROM inventory_stock_w
        WHERE blank_sku = ? AND fulfiller_id = ?`,
-      [reservation.blank_sku, fulfillerId]
+      [reservation.blank_sku, fulfillerId],
     );
 
     if (stockRows.length > 0) {
@@ -536,10 +550,12 @@ export const InventoryCommandRepository = {
         `UPDATE inventory_stock_w
          SET reserved_stock = ?, updated_at = toTimestamp(now())
          WHERE blank_sku = ? AND fulfiller_id = ?`,
-        [newReserved, reservation.blank_sku, fulfillerId]
+        [newReserved, reservation.blank_sku, fulfillerId],
       );
     } else {
-      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on cancel`);
+      throw new Error(
+        `Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on cancel`,
+      );
     }
 
     // Update reservation status and remove from cart lookup
@@ -557,7 +573,10 @@ export const InventoryCommandRepository = {
       },
     ]);
 
-    logger.info({ reservationId, blankSku: reservation.blank_sku, fulfillerId }, 'Cancelled reservation');
+    logger.info(
+      { reservationId, blankSku: reservation.blank_sku, fulfillerId },
+      'Cancelled reservation',
+    );
     await signalInventoryChanged([reservation.blank_sku]);
   },
 
@@ -568,7 +587,7 @@ export const InventoryCommandRepository = {
   async confirm(reservationId: string): Promise<void> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
-      [reservationId]
+      [reservationId],
     );
 
     if (rows.length === 0) {
@@ -601,7 +620,7 @@ export const InventoryCommandRepository = {
   async fulfill(reservationId: string): Promise<void> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
-      [reservationId]
+      [reservationId],
     );
 
     if (rows.length === 0) {
@@ -610,7 +629,11 @@ export const InventoryCommandRepository = {
     }
 
     const reservation = rows[0];
-    if (reservation.status === 'FULFILLED' || reservation.status === 'RELEASED' || reservation.status === 'CANCELLED') {
+    if (
+      reservation.status === 'FULFILLED' ||
+      reservation.status === 'RELEASED' ||
+      reservation.status === 'CANCELLED'
+    ) {
       logger.warn({ reservationId, status: reservation.status }, 'Reservation already terminal');
       return;
     }
@@ -624,7 +647,7 @@ export const InventoryCommandRepository = {
     const stockRows = await executeCql<StockRow>(
       `SELECT total_stock, reserved_stock FROM inventory_stock_w
        WHERE blank_sku = ? AND fulfiller_id = ?`,
-      [reservation.blank_sku, fulfillerId]
+      [reservation.blank_sku, fulfillerId],
     );
 
     if (stockRows.length > 0) {
@@ -636,15 +659,12 @@ export const InventoryCommandRepository = {
         `UPDATE inventory_stock_w
          SET total_stock = ?, reserved_stock = ?, updated_at = toTimestamp(now())
          WHERE blank_sku = ? AND fulfiller_id = ?`,
-        [
-          newTotal,
-          stock.reserved_stock - reservation.quantity,
-          reservation.blank_sku,
-          fulfillerId,
-        ]
+        [newTotal, stock.reserved_stock - reservation.quantity, reservation.blank_sku, fulfillerId],
       );
     } else {
-      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on fulfill`);
+      throw new Error(
+        `Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on fulfill`,
+      );
     }
 
     await executeBatch([
@@ -671,19 +691,19 @@ export const InventoryCommandRepository = {
   async transferToFulfiller(
     reservationId: string,
     fulfillerId: string,
-    quantity: number
+    quantity: number,
   ): Promise<void> {
     await executeCql(
       `UPDATE inventory_reservations_w
        SET fulfiller_id = ?, quantity = ?, updated_at = toTimestamp(now())
        WHERE reservation_id = ?`,
-      [fulfillerId, quantity, reservationId]
+      [fulfillerId, quantity, reservationId],
     );
 
     // Look up blank_sku for the signal
     const transferRows = await executeCql<ReservationRow>(
       `SELECT blank_sku FROM inventory_reservations_w WHERE reservation_id = ?`,
-      [reservationId]
+      [reservationId],
     );
     logger.info({ reservationId, fulfillerId, quantity }, 'Transferred reservation to fulfiller');
     if (transferRows.length > 0) {
@@ -700,11 +720,11 @@ export const InventoryCommandRepository = {
   async reserveAll(
     cartId: string,
     items: Array<{ variantId: string; blankSku: string; quantity: number }>,
-    referenceId?: string
+    referenceId?: string,
   ): Promise<BatchReserveResult> {
     const ttlSeconds = 15 * 60; // 15 minutes for checkout
     const results = await Promise.all(
-      items.map(item =>
+      items.map((item) =>
         this.reserve({
           reservationId: `${cartId}-${item.variantId}`,
           cartId,
@@ -713,17 +733,17 @@ export const InventoryCommandRepository = {
           quantity: item.quantity,
           referenceId: referenceId ?? `checkout-${cartId}`,
           ttlSeconds,
-        })
-      )
+        }),
+      ),
     );
 
-    const failures = results.filter(r => !r.success);
+    const failures = results.filter((r) => !r.success);
     if (failures.length > 0) {
       // Roll back successful reservations
       const successfulIds = results
-        .filter(r => r.success && r.reservationId)
-        .map(r => r.reservationId!);
-      await Promise.all(successfulIds.map(id => this.release(id)));
+        .filter((r) => r.success && r.reservationId)
+        .map((r) => r.reservationId!);
+      await Promise.all(successfulIds.map((id) => this.release(id)));
 
       return { success: false, error: failures[0].error };
     }
@@ -743,10 +763,10 @@ export const InventoryCommandRepository = {
   async releaseAllForCart(cartId: string): Promise<void> {
     const rows = await executeCql<CartReservationRow>(
       `SELECT reservation_id FROM inventory_reservations_by_cart_w WHERE cart_id = ?`,
-      [cartId]
+      [cartId],
     );
     if (rows.length === 0) return;
-    await Promise.all(rows.map(r => this.release(r.reservation_id)));
+    await Promise.all(rows.map((r) => this.release(r.reservation_id)));
   },
 
   /**
@@ -755,10 +775,10 @@ export const InventoryCommandRepository = {
   async confirmAllForCart(cartId: string): Promise<void> {
     const rows = await executeCql<CartReservationRow>(
       `SELECT reservation_id FROM inventory_reservations_by_cart_w WHERE cart_id = ?`,
-      [cartId]
+      [cartId],
     );
     if (rows.length === 0) return;
-    await Promise.all(rows.map(r => this.confirm(r.reservation_id)));
+    await Promise.all(rows.map((r) => this.confirm(r.reservation_id)));
   },
 
   /**
@@ -767,26 +787,24 @@ export const InventoryCommandRepository = {
   async reconcile(
     cartId: string,
     oldItems: Array<{ variantId: string; blankSku: string; quantity: number }>,
-    newItems: Array<{ variantId: string; blankSku: string; quantity: number }>
+    newItems: Array<{ variantId: string; blankSku: string; quantity: number }>,
   ): Promise<BatchReserveResult> {
-    const oldMap = new Map(oldItems.map(i => [i.variantId, i]));
-    const newMap = new Map(newItems.map(i => [i.variantId, i]));
+    const oldMap = new Map(oldItems.map((i) => [i.variantId, i]));
+    const newMap = new Map(newItems.map((i) => [i.variantId, i]));
 
     // Items removed from cart
-    const removed = oldItems.filter(i => !newMap.has(i.variantId));
+    const removed = oldItems.filter((i) => !newMap.has(i.variantId));
     // Items added to cart
-    const added = newItems.filter(i => !oldMap.has(i.variantId));
+    const added = newItems.filter((i) => !oldMap.has(i.variantId));
     // Items with changed quantity (release + re-reserve for simplicity)
-    const changed = newItems.filter(i => {
+    const changed = newItems.filter((i) => {
       const old = oldMap.get(i.variantId);
       return old && old.quantity !== i.quantity;
     });
 
     // Release removed + changed
     const toRelease = [...removed, ...changed];
-    await Promise.all(
-      toRelease.map(item => this.release(`${cartId}-${item.variantId}`))
-    );
+    await Promise.all(toRelease.map((item) => this.release(`${cartId}-${item.variantId}`)));
 
     // Reserve added + changed (with new quantities)
     const toReserve = [...added, ...changed];
@@ -805,7 +823,7 @@ export const InventoryCommandRepository = {
   async getReservation(reservationId: string): Promise<ReservationRecord | null> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
-      [reservationId]
+      [reservationId],
     );
     return rows.length > 0 ? rowToReservation(rows[0]) : null;
   },
@@ -816,22 +834,20 @@ export const InventoryCommandRepository = {
   async getReservationsByCart(cartId: string): Promise<ReservationRecord[]> {
     const cartRows = await executeCql<CartReservationRow>(
       `SELECT reservation_id FROM inventory_reservations_by_cart_w WHERE cart_id = ?`,
-      [cartId]
+      [cartId],
     );
     if (cartRows.length === 0) return [];
 
     const reservations = await Promise.all(
-      cartRows.map(r =>
+      cartRows.map((r) =>
         executeCql<ReservationRow>(
           `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
-          [r.reservation_id]
-        )
-      )
+          [r.reservation_id],
+        ),
+      ),
     );
 
-    return reservations
-      .filter(rows => rows.length > 0)
-      .map(rows => rowToReservation(rows[0]));
+    return reservations.filter((rows) => rows.length > 0).map((rows) => rowToReservation(rows[0]));
   },
 
   /**
@@ -841,7 +857,7 @@ export const InventoryCommandRepository = {
     // Note: Uses secondary index on status (idx_reservations_status).
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w
-       WHERE status = 'TEMPORARY' AND expires_at < toTimestamp(now()) ALLOW FILTERING`
+       WHERE status = 'TEMPORARY' AND expires_at < toTimestamp(now()) ALLOW FILTERING`,
     );
     return rows.map(rowToReservation);
   },
@@ -859,7 +875,7 @@ export const InventoryCommandRepository = {
   async getActiveReservations(): Promise<ReservationRecord[]> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w
-       WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`
+       WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
     );
     return rows.map(rowToReservation);
   },

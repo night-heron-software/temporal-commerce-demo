@@ -129,7 +129,7 @@ export interface ProductTypePlugin {
    */
   resolveFulfillerAssignment(
     item: OrderLineItem,
-    context: FulfillerResolutionContext
+    context: FulfillerResolutionContext,
   ): Promise<FulfillerAssignment[]>;
 
   /**
@@ -147,7 +147,7 @@ export interface ProductTypePlugin {
    */
   buildFulfillmentPayload(
     item: FulfillmentItem,
-    context: FulfillmentPayloadContext
+    context: FulfillmentPayloadContext,
   ): Promise<FulfillerOrderPayload>;
 
   // ─── Inventory ───────────────────────────────────────────────
@@ -167,10 +167,7 @@ export interface ProductTypePlugin {
    * POD uses composite IDs like `inventory-fulfiller-GILDAN64000-navy-L`.
    * Physical warehouse uses `inventory-warehouse-{warehouseId}-{sku}`.
    */
-  buildInventoryWorkflowId(
-    variant: VariantIdentity,
-    fulfillerInfo: FulfillerInfo
-  ): string;
+  buildInventoryWorkflowId(variant: VariantIdentity, fulfillerInfo: FulfillerInfo): string;
 
   /**
    * Resolve the stock seeding parameters for a variant.
@@ -178,7 +175,7 @@ export interface ProductTypePlugin {
    */
   getInitialStockLevel(
     variant: VariantIdentity,
-    fulfillerInfo: FulfillerInfo
+    fulfillerInfo: FulfillerInfo,
   ): Promise<StockSeedParams>;
 
   // ─── Catalog & Presentation ──────────────────────────────────
@@ -205,7 +202,7 @@ export interface ProductTypePlugin {
   resolveProductPresentation(
     product: Product,
     variant: Variant,
-    context: PresentationContext
+    context: PresentationContext,
   ): Promise<ProductPresentationData>;
 
   /**
@@ -229,7 +226,7 @@ export interface ProductTypePlugin {
    */
   calculateLandedCost(
     item: FulfillmentItem,
-    shippingAddress: ShippingAddressForCost
+    shippingAddress: ShippingAddressForCost,
   ): Promise<LandedCost>;
 
   // ─── Catalog Sync (Optional) ─────────────────────────────────

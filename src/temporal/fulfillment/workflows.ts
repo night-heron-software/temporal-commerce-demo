@@ -158,7 +158,10 @@ export async function fulfillmentWorkflow(
   const signals: SignalRegistration<FulfillmentSignal>[] = [
     {
       definition: childStatusSignal,
-      toSignal: (update: FulfillmentFulfillerOrderState) => ({ kind: 'childStatus' as const, update }),
+      toSignal: (update: FulfillmentFulfillerOrderState) => ({
+        kind: 'childStatus' as const,
+        update,
+      }),
     },
     {
       definition: cancelSignal,
@@ -186,7 +189,10 @@ export async function fulfillmentWorkflow(
   > = {
     states: FULFILLMENT_STATES,
     initialState: 'received',
-    onContextUpdate: (newCtx: FulfillmentWorkflowState, currentState: FulfillmentStateName | `__terminal:${string}`) => {
+    onContextUpdate: (
+      newCtx: FulfillmentWorkflowState,
+      currentState: FulfillmentStateName | `__terminal:${string}`,
+    ) => {
       Object.assign(state, newCtx);
       // Sync top-level status from driver state
       state.status = deriveDisplayStatus<FulfillmentWorkflowState['status']>(currentState);
@@ -221,16 +227,18 @@ export async function fulfillmentWorkflow(
               orderId: startCtx.orderId,
               cartId: startCtx.cartId,
             }),
-            args: [{
-              orderId: startCtx.orderId,
-              cartId: startCtx.cartId,
-              customerId: startCtx.customerId,
-              customerEmail: startCtx.customerEmail,
-              confirmationNumber: startCtx.confirmationNumber,
-              shippingAddress: request.shippingAddress,
-              shippingMethod: request.shippingMethod,
-              fulfillerOrder,
-            }],
+            args: [
+              {
+                orderId: startCtx.orderId,
+                cartId: startCtx.cartId,
+                customerId: startCtx.customerId,
+                customerEmail: startCtx.customerEmail,
+                confirmationNumber: startCtx.confirmationNumber,
+                shippingAddress: request.shippingAddress,
+                shippingMethod: request.shippingMethod,
+                fulfillerOrder,
+              },
+            ],
           });
           childHandles.set(fulfillerOrder.fulfillerOrderId, childHandle);
         } catch (err) {
@@ -247,7 +255,7 @@ export async function fulfillmentWorkflow(
       from: FulfillmentStateName,
       to: FulfillmentStateName | `__terminal:${string}`,
       eventDesc: 'timeout' | 'signal',
-      currentCtx: FulfillmentWorkflowState
+      currentCtx: FulfillmentWorkflowState,
     ) => {
       await syncProjections(currentCtx);
       for (const so of currentCtx.fulfillerOrders) {
@@ -261,7 +269,7 @@ export async function fulfillmentWorkflow(
         so.status = 'cancelled';
         so.items.forEach((i) => (i.status = 'cancelled'));
       }
-      
+
       // Signal cancel to all child workflows
       for (const [, childHandle] of childHandles) {
         try {

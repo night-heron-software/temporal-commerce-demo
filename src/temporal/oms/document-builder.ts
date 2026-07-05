@@ -17,7 +17,7 @@ type FulfillerOrderDocument = Elasticsearch.FulfillerOrderDocument;
 export function buildOrderDocument(
   order: Order,
   state: OrderState,
-  customerEmail: string
+  customerEmail: string,
 ): OrderDocument {
   return {
     orderId: order.orderId,
@@ -42,17 +42,17 @@ export function buildOrderDocument(
       postalCode: order.shippingAddress.postalCode,
       country: order.shippingAddress.country,
       phone: order.shippingAddress.phone,
-      email: order.shippingAddress.email
+      email: order.shippingAddress.email,
     },
     paymentMethod: {
       type: order.paymentMethod.type,
-      last4: order.paymentMethod.last4
+      last4: order.paymentMethod.last4,
     },
     items: order.items.map((item) => ({
       lineItemId: item.lineItemId,
       variantId: item.variantId,
       quantity: item.quantity,
-      price: item.price
+      price: item.price,
     })),
     itemCount: order.items.length,
     variantIds: order.items.map((item) => item.variantId),
@@ -65,7 +65,7 @@ export function buildOrderDocument(
       quantity: a.quantity,
       status: a.status,
       fulfillerOrderId: a.fulfillerOrderId,
-      carrier: a.carrier
+      carrier: a.carrier,
     })),
     fulfillerOrders: state.fulfillerOrders.map((so) => ({
       fulfillerOrderId: so.fulfillerOrderId,
@@ -77,24 +77,24 @@ export function buildOrderDocument(
       trackingNumber: so.trackingNumber,
       rejectionReason: so.rejectionReason,
       createdAt: so.createdAt,
-      updatedAt: so.updatedAt
+      updatedAt: so.updatedAt,
     })),
     statusHistory: state.statusHistory.map((h) => ({
       status: h.status,
       timestamp: h.timestamp,
       note: h.note,
-      updatedBy: h.updatedBy
+      updatedBy: h.updatedBy,
     })),
     deliveredAt: state.deliveredAt,
     customerFeedback: state.customerFeedback
       ? {
           rating: state.customerFeedback.rating,
           comment: state.customerFeedback.comment,
-          submittedAt: state.customerFeedback.submittedAt
+          submittedAt: state.customerFeedback.submittedAt,
         }
       : undefined,
     createdAt: order.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -102,7 +102,9 @@ export function buildOrderDocument(
  * Builds an ES FulfillerOrderDocument from a FulfillerOrder.
  * Pure function - no side effects.
  */
-export function buildFulfillerOrderDocument(fulfillerOrder: FulfillerOrder): FulfillerOrderDocument {
+export function buildFulfillerOrderDocument(
+  fulfillerOrder: FulfillerOrder,
+): FulfillerOrderDocument {
   return {
     fulfillerOrderId: fulfillerOrder.fulfillerOrderId,
     orderId: fulfillerOrder.orderId,
@@ -113,7 +115,7 @@ export function buildFulfillerOrderDocument(fulfillerOrder: FulfillerOrder): Ful
     items: fulfillerOrder.items.map((item) => ({
       assignmentId: item.assignmentId,
       variantId: item.variantId,
-      quantity: item.quantity
+      quantity: item.quantity,
     })),
     carrier: fulfillerOrder.carrier,
     trackingNumber: fulfillerOrder.trackingNumber,
@@ -123,7 +125,7 @@ export function buildFulfillerOrderDocument(fulfillerOrder: FulfillerOrder): Ful
     statusHistory: fulfillerOrder.statusHistory.map((h) => ({
       status: h.status,
       timestamp: h.timestamp,
-      note: h.note
-    }))
+      note: h.note,
+    })),
   };
 }

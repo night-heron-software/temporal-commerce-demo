@@ -68,7 +68,11 @@ function sourceFiles(dir) {
     if (e.isDirectory()) {
       if (e.name === 'dist' || e.name === 'node_modules' || SKIP_DIRS.has(e.name)) continue;
       out.push(...sourceFiles(p));
-    } else if (e.name.endsWith('.ts') && !e.name.endsWith('.test.ts') && !e.name.endsWith('.d.ts')) {
+    } else if (
+      e.name.endsWith('.ts') &&
+      !e.name.endsWith('.test.ts') &&
+      !e.name.endsWith('.d.ts')
+    ) {
       out.push(p);
     }
   }
@@ -107,7 +111,8 @@ function topLevelDecls(sf) {
   for (const stmt of sf.statements) {
     if (ts.isVariableStatement(stmt)) {
       for (const d of stmt.declarationList.declarations) {
-        if (ts.isIdentifier(d.name)) decls.set(d.name.text, { init: d.initializer ?? null, body: null, node: d });
+        if (ts.isIdentifier(d.name))
+          decls.set(d.name.text, { init: d.initializer ?? null, body: null, node: d });
       }
     } else if (ts.isFunctionDeclaration(stmt) && stmt.name) {
       decls.set(stmt.name.text, { init: null, body: stmt.body ?? null, node: stmt });
@@ -119,7 +124,7 @@ function topLevelDecls(sf) {
 function findReturnedObjectLiteral(body) {
   if (!body) return null;
   if (ts.isObjectLiteralExpression(body)) return body;
-  
+
   let found = null;
   const visit = (n) => {
     if (ts.isReturnStatement(n) && n.expression) {
@@ -135,7 +140,10 @@ function findReturnedObjectLiteral(body) {
 }
 
 function unwrap(expr) {
-  while (expr && (ts.isAsExpression(expr) || ts.isParenthesizedExpression(expr) || ts.isNonNullExpression(expr))) {
+  while (
+    expr &&
+    (ts.isAsExpression(expr) || ts.isParenthesizedExpression(expr) || ts.isNonNullExpression(expr))
+  ) {
     expr = expr.expression;
   }
   return expr;
@@ -149,7 +157,11 @@ function evalTarget(expr, decls) {
   // '__self' marker here and substituted for the enclosing state in edgesFromCall().
   if (ts.isIdentifier(expr) && expr.text === 'SELF') return '__self';
   if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) return expr.text;
-  if (ts.isCallExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'terminal') {
+  if (
+    ts.isCallExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === 'terminal'
+  ) {
     const a = expr.arguments[0];
     return a && ts.isStringLiteral(a) ? `__terminal:${a.text}` : null;
   }
@@ -174,7 +186,12 @@ function bodyOf(decl) {
 function localVarsOf(node) {
   const m = new Map();
   const v = (n) => {
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && !m.has(n.name.text)) {
+    if (
+      ts.isVariableDeclaration(n) &&
+      ts.isIdentifier(n.name) &&
+      n.initializer &&
+      !m.has(n.name.text)
+    ) {
       m.set(n.name.text, n.initializer);
     }
     n.forEachChild(v);
@@ -195,7 +212,11 @@ function resolveTargets(expr, decls, locals, visited = new Set()) {
   // `next: SELF` sentinel → '__self' marker (substituted for the state in edgesFromCall()).
   if (ts.isIdentifier(expr) && expr.text === 'SELF') return ['__self'];
   if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) return [expr.text];
-  if (ts.isCallExpression(expr) && ts.isIdentifier(expr.expression) && expr.expression.text === 'terminal') {
+  if (
+    ts.isCallExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === 'terminal'
+  ) {
     const a = expr.arguments[0];
     return a && ts.isStringLiteral(a) ? [`__terminal:${a.text}`] : [];
   }
@@ -213,7 +234,8 @@ function resolveTargets(expr, decls, locals, visited = new Set()) {
     return body ? [...collectReturnTargets(body, decls, visited)] : [];
   }
   if (ts.isIdentifier(expr)) {
-    if (locals && locals.has(expr.text)) return resolveTargets(locals.get(expr.text), decls, locals, visited);
+    if (locals && locals.has(expr.text))
+      return resolveTargets(locals.get(expr.text), decls, locals, visited);
     const init = unwrap(decls.get(expr.text)?.init);
     return init ? resolveTargets(init, decls, locals, visited) : [];
   }
@@ -276,7 +298,11 @@ function collectTargets(node, decls, locals = new Map(), visited = new Set()) {
     } else if (ts.isReturnStatement(n) && n.expression) {
       // return helperFn(...) where the helper returns decision objects → recurse its body
       const e = unwrap(n.expression);
-      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && !visited.has(e.expression.text)) {
+      if (
+        ts.isCallExpression(e) &&
+        ts.isIdentifier(e.expression) &&
+        !visited.has(e.expression.text)
+      ) {
         visited.add(e.expression.text);
         const body = bodyOf(decls.get(e.expression.text));
         if (body) for (const t of collectTargets(body, decls, combinedLocals, visited)) out.add(t);
@@ -286,12 +312,20 @@ function collectTargets(node, decls, locals = new Map(), visited = new Set()) {
       // return value; follow a helper call the same way as `return helper(...)`.
       // (Object-literal bodies are covered by the `next:` visitor as traversal descends.)
       const e = unwrap(n.body);
-      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && !visited.has(e.expression.text)) {
+      if (
+        ts.isCallExpression(e) &&
+        ts.isIdentifier(e.expression) &&
+        !visited.has(e.expression.text)
+      ) {
         visited.add(e.expression.text);
         const body = bodyOf(decls.get(e.expression.text));
         if (body) for (const t of collectTargets(body, decls, combinedLocals, visited)) out.add(t);
       }
-    } else if (ts.isPropertyAssignment(n) && n.initializer && ts.isIdentifier(unwrap(n.initializer))) {
+    } else if (
+      ts.isPropertyAssignment(n) &&
+      n.initializer &&
+      ts.isIdentifier(unwrap(n.initializer))
+    ) {
       // handler property referenced by identifier: decide: processingSignal, cancelOrder: entry
       const id = unwrap(n.initializer);
       if (!visited.has(id.text)) {
@@ -385,7 +419,11 @@ function extractAwaitedCallsInBody(body) {
   if (!body) return [];
   const calls = [];
   const visit = (n) => {
-    if (n !== body && (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n))) return;
+    if (
+      n !== body &&
+      (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n))
+    )
+      return;
     if (ts.isAwaitExpression(n)) {
       const expr = unwrap(n.expression);
       if (ts.isCallExpression(expr)) {
@@ -436,10 +474,13 @@ function extractSignalKinds(body, _src) {
 function kindFromCondition(expr) {
   if (!ts.isBinaryExpression(expr)) return null;
   const op = expr.operatorToken.kind;
-  if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.EqualsEqualsToken) return null;
+  if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.EqualsEqualsToken)
+    return null;
   const [l, r] = [expr.left, expr.right];
-  if (ts.isPropertyAccessExpression(l) && l.name.text === 'kind' && ts.isStringLiteral(r)) return r.text;
-  if (ts.isPropertyAccessExpression(r) && r.name.text === 'kind' && ts.isStringLiteral(l)) return l.text;
+  if (ts.isPropertyAccessExpression(l) && l.name.text === 'kind' && ts.isStringLiteral(r))
+    return r.text;
+  if (ts.isPropertyAccessExpression(r) && r.name.text === 'kind' && ts.isStringLiteral(l))
+    return l.text;
   return null;
 }
 
@@ -482,7 +523,15 @@ function handlerEdges(on, kind, handlerNode, decls, src, locals = new Map()) {
   }
 
   const targets = [...collectTargets(handlerNode, decls, locals)];
-  return targets.map((to) => ({ on, kind, to, prepareActivities, finalizeActivities, conditions, signalKinds }));
+  return targets.map((to) => ({
+    on,
+    kind,
+    to,
+    prepareActivities,
+    finalizeActivities,
+    conditions,
+    signalKinds,
+  }));
 }
 
 /** Extract edges [{on, kind, to, prepareActivities, finalizeActivities, conditions, signalKinds}] from a domain authoring call. */
@@ -563,7 +612,13 @@ function edgesFromCall(call, decls, src) {
             for (const kp of mapObj.properties) {
               const sigKind = propName(kp);
               if (!sigKind) continue;
-              for (const e of handlerEdges('signal', 'signal', propValueNode(kp, decls), decls, src)) {
+              for (const e of handlerEdges(
+                'signal',
+                'signal',
+                propValueNode(kp, decls),
+                decls,
+                src,
+              )) {
                 e.signalKinds = [sigKind];
                 edges.push(e);
               }
@@ -583,7 +638,16 @@ function edgesFromCall(call, decls, src) {
       for (const p of table.properties) {
         if (!ts.isPropertyAssignment(p)) continue;
         const t = evalTarget(p.initializer, decls);
-        if (t) edges.push({ on: propName(p), kind: 'update', to: t, prepareActivities: [], finalizeActivities: [], conditions: [], signalKinds: [] });
+        if (t)
+          edges.push({
+            on: propName(p),
+            kind: 'update',
+            to: t,
+            prepareActivities: [],
+            finalizeActivities: [],
+            conditions: [],
+            signalKinds: [],
+          });
       }
     }
     if (opts && ts.isObjectLiteralExpression(opts)) {
@@ -592,15 +656,33 @@ function edgesFromCall(call, decls, src) {
         const key = propName(p);
         const edgeKind = key === 'signal' ? 'signal' : key === 'timeout' ? 'timeout' : 'auto';
         const t = evalTarget(p.initializer, decls);
-        if (t) edges.push({ on: key, kind: edgeKind, to: t, prepareActivities: [], finalizeActivities: [], conditions: [], signalKinds: [] });
+        if (t)
+          edges.push({
+            on: key,
+            kind: edgeKind,
+            to: t,
+            prepareActivities: [],
+            finalizeActivities: [],
+            conditions: [],
+            signalKinds: [],
+          });
       }
     }
   } else if (method === 'state') {
-    const node = args[1] && unwrap(args[1]).kind === ts.SyntaxKind.Identifier
-      ? (decls.get(unwrap(args[1]).text)?.init && unwrap(decls.get(unwrap(args[1]).text).init))
-      : args[1] && unwrap(args[1]);
+    const node =
+      args[1] && unwrap(args[1]).kind === ts.SyntaxKind.Identifier
+        ? decls.get(unwrap(args[1]).text)?.init && unwrap(decls.get(unwrap(args[1]).text).init)
+        : args[1] && unwrap(args[1]);
     for (const to of collectTargets(node, decls)) {
-      edges.push({ on: '(auto)', kind: 'auto', to, prepareActivities: [], finalizeActivities: [], conditions: [], signalKinds: [] });
+      edges.push({
+        on: '(auto)',
+        kind: 'auto',
+        to,
+        prepareActivities: [],
+        finalizeActivities: [],
+        conditions: [],
+        signalKinds: [],
+      });
     }
   }
   // Resolve the SELF sentinel to this state's own name (a self-loop).
@@ -611,7 +693,15 @@ function edgesFromCall(call, decls, src) {
 }
 
 const autoEdges = (node, decls) =>
-  [...collectTargets(node, decls)].map((to) => ({ on: '(auto)', kind: 'auto', to, prepareActivities: [], finalizeActivities: [], conditions: [], signalKinds: [] }));
+  [...collectTargets(node, decls)].map((to) => ({
+    on: '(auto)',
+    kind: 'auto',
+    to,
+    prepareActivities: [],
+    finalizeActivities: [],
+    conditions: [],
+    signalKinds: [],
+  }));
 
 /** Extract edges + the state's binding name from a registry entry's value object. */
 function edgesForEntry(entryObj, decls, src) {
@@ -635,7 +725,11 @@ function edgesForEntry(entryObj, decls, src) {
       }
       if (ts.isCallExpression(v)) {
         let edges = edgesFromCall(v, decls, src);
-        if (edges.length === 0 && ts.isIdentifier(v.expression) && v.expression.text === 'definePureState') {
+        if (
+          edges.length === 0 &&
+          ts.isIdentifier(v.expression) &&
+          v.expression.text === 'definePureState'
+        ) {
           const handler = v.arguments[0] && unwrap(v.arguments[0]);
           const hNode =
             handler && ts.isIdentifier(handler) ? unwrap(decls.get(handler.text)?.init) : handler;
@@ -645,8 +739,10 @@ function edgesForEntry(entryObj, decls, src) {
       }
       if (ts.isIdentifier(v)) {
         const init = unwrap(decls.get(v.text)?.init);
-        if (init && ts.isCallExpression(init)) return { edges: edgesFromCall(init, decls, src), bindingName: v.text };
-        if (init && ts.isObjectLiteralExpression(init)) return { edges: autoEdges(init, decls), bindingName: v.text };
+        if (init && ts.isCallExpression(init))
+          return { edges: edgesFromCall(init, decls, src), bindingName: v.text };
+        if (init && ts.isObjectLiteralExpression(init))
+          return { edges: autoEdges(init, decls), bindingName: v.text };
       }
     }
   }
@@ -688,7 +784,9 @@ function parseStatesObject(obj, registryName, src, decls) {
       }
     }
     const doc =
-      (bindingName && jsdocBefore(src, `const ${bindingName} `)) || jsdocBefore(src, `${name}:`) || null;
+      (bindingName && jsdocBefore(src, `const ${bindingName} `)) ||
+      jsdocBefore(src, `${name}:`) ||
+      null;
     states.push({ name, timeout, transitional, edges, doc });
   }
   return { registry: registryName, states };
@@ -753,7 +851,6 @@ function findRegistries(src) {
 // Rendering
 // ============================================================================
 
-
 /**
  * Short trigger token for an aggregated Mermaid edge label. Bare names only — no
  * ':' (Mermaid stateDiagram-v2 splits target from label on the first colon, and a
@@ -764,7 +861,9 @@ function triggerToken(edge) {
   if (on === '(auto)' || on === '') return null;
   if (kind === 'timeout') return 'timeout';
   if (kind === 'signal') {
-    return edge.signalKinds && edge.signalKinds.length > 0 ? edge.signalKinds.join(' / ') : 'signal';
+    return edge.signalKinds && edge.signalKinds.length > 0
+      ? edge.signalKinds.join(' / ')
+      : 'signal';
   }
   return on;
 }
@@ -847,7 +946,9 @@ function stateSection(s) {
       const key = `${edge.on}->${to}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const dest = to.startsWith('__terminal:') ? `⇒ ${to.replace('__terminal:', '')}` : `\`${to}\``;
+      const dest = to.startsWith('__terminal:')
+        ? `⇒ ${to.replace('__terminal:', '')}`
+        : `\`${to}\``;
       const trigger = triggerLabel(edge);
       const notes = formatNotes(edge);
       lines.push(`| ${trigger} | ${dest} | ${notes} |`);
@@ -861,14 +962,19 @@ function stateSection(s) {
 }
 
 function domainHeading(domain, registry) {
-  const title = domain.length <= 3 ? domain.toUpperCase() : domain.charAt(0).toUpperCase() + domain.slice(1);
+  const title =
+    domain.length <= 3 ? domain.toUpperCase() : domain.charAt(0).toUpperCase() + domain.slice(1);
   return `${title} — \`${registry}\``;
 }
 
 function generateSection(machine, src, rel, initialState) {
   const domain = domainOfRel(rel);
   const registryDoc = jsdocBefore(src, `export const ${machine.registry}`);
-  const parts = [`## ${domainHeading(domain, machine.registry)}`, '', `Source: [${rel}](../../${rel})`];
+  const parts = [
+    `## ${domainHeading(domain, machine.registry)}`,
+    '',
+    `Source: [${rel}](../../${rel})`,
+  ];
   if (registryDoc) {
     parts.push('');
     parts.push(registryDoc);
@@ -893,7 +999,11 @@ function collectMachines() {
   const machines = [];
   const seenRegistries = new Set();
   const seenStateSets = new Set();
-  const stateSetKey = (m) => m.states.map((s) => s.name).sort().join(',');
+  const stateSetKey = (m) =>
+    m.states
+      .map((s) => s.name)
+      .sort()
+      .join(',');
   for (const file of files.sort()) {
     const src = fs.readFileSync(file, 'utf-8');
     const rel = path.relative(ROOT, file);
@@ -911,7 +1021,9 @@ function collectMachines() {
       const dir = path.dirname(file);
       for (const wf of fs.readdirSync(dir)) {
         if (!/workflow/.test(wf) || !wf.endsWith('.ts')) continue;
-        const im = fs.readFileSync(path.join(dir, wf), 'utf-8').match(/initialState\s*:\s*'([^']+)'/);
+        const im = fs
+          .readFileSync(path.join(dir, wf), 'utf-8')
+          .match(/initialState\s*:\s*'([^']+)'/);
         if (im && machine.states.some((s) => s.name === im[1])) {
           initialState = im[1];
           break;
@@ -991,7 +1103,11 @@ function buildWorkflowIdSegment(sf, name) {
     ) {
       const call = unwrap(n.initializer);
       const callee = call.expression;
-      const fn = ts.isPropertyAccessExpression(callee) ? callee.name.text : ts.isIdentifier(callee) ? callee.text : '';
+      const fn = ts.isPropertyAccessExpression(callee)
+        ? callee.name.text
+        : ts.isIdentifier(callee)
+          ? callee.text
+          : '';
       if (fn === 'buildWorkflowId' && call.arguments[1]) {
         const a = unwrap(call.arguments[1]);
         if (ts.isStringLiteral(a)) seg = a.text;
@@ -1114,12 +1230,16 @@ function collectCrossDomainEdges() {
           const name = ts.isStringLiteral(a) ? a.text : ts.isIdentifier(a) ? a.text : null;
           const to = name ? workflowNameDomain.get(name) || domainFromName(name) : null;
           if (to && to !== from) edges.push({ from, to, kind: 'startChild', label: name });
-          else if (ts.isStringLiteral(a) && !to) unresolved.push(`${from}: startChild('${a.text}') → no known domain`);
+          else if (ts.isStringLiteral(a) && !to)
+            unresolved.push(`${from}: startChild('${a.text}') → no known domain`);
         }
         // client.workflow.start|execute|signalWithStart('<name>Workflow', …) — an activity
         // launching another domain's workflow (e.g. checkout's submitOrder starts the OMS order).
         if (
-          (fn === 'start' || fn === 'execute' || fn === 'signalWithStart' || fn === 'executeWorkflow') &&
+          (fn === 'start' ||
+            fn === 'execute' ||
+            fn === 'signalWithStart' ||
+            fn === 'executeWorkflow') &&
           ts.isPropertyAccessExpression(n.expression) &&
           ts.isPropertyAccessExpression(n.expression.expression) &&
           n.expression.expression.name.text === 'workflow' &&
@@ -1134,12 +1254,23 @@ function collectCrossDomainEdges() {
         if (fn === 'signal' && ts.isPropertyAccessExpression(n.expression)) {
           const recv = unwrap(n.expression.expression);
           let idExpr = null;
-          if (ts.isIdentifier(recv) && handleVars.has(recv.text)) idExpr = handleVars.get(recv.text);
-          else if (ts.isCallExpression(recv) && calleeName(recv) === 'getExternalWorkflowHandle') idExpr = recv.arguments[0];
+          if (ts.isIdentifier(recv) && handleVars.has(recv.text))
+            idExpr = handleVars.get(recv.text);
+          else if (ts.isCallExpression(recv) && calleeName(recv) === 'getExternalWorkflowHandle')
+            idExpr = recv.arguments[0];
           if (idExpr) {
             const to = handleTargetDomain(idExpr, sf);
-            if (to && to !== from) edges.push({ from, to, kind: 'signal', label: signalName(n.arguments[0], signalDefs) });
-            else if (!to) unresolved.push(`${from}: signal via getExternalWorkflowHandle(${idExprName(idExpr) ?? '?'}) → no known domain`);
+            if (to && to !== from)
+              edges.push({
+                from,
+                to,
+                kind: 'signal',
+                label: signalName(n.arguments[0], signalDefs),
+              });
+            else if (!to)
+              unresolved.push(
+                `${from}: signal via getExternalWorkflowHandle(${idExprName(idExpr) ?? '?'}) → no known domain`,
+              );
           }
         }
       }
@@ -1274,8 +1405,12 @@ function buildGraph(machines, crossEdges) {
             kind: e.kind,
             to: e.to,
             ...(e.conditions && e.conditions.length ? { conditions: e.conditions } : {}),
-            ...(e.prepareActivities && e.prepareActivities.length ? { prepareActivities: e.prepareActivities } : {}),
-            ...(e.finalizeActivities && e.finalizeActivities.length ? { finalizeActivities: e.finalizeActivities } : {}),
+            ...(e.prepareActivities && e.prepareActivities.length
+              ? { prepareActivities: e.prepareActivities }
+              : {}),
+            ...(e.finalizeActivities && e.finalizeActivities.length
+              ? { finalizeActivities: e.finalizeActivities }
+              : {}),
             ...(e.signalKinds && e.signalKinds.length ? { signalKinds: e.signalKinds } : {}),
           });
         }
@@ -1300,10 +1435,15 @@ function buildGraph(machines, crossEdges) {
     }),
     crossDomain: [
       ...new Map(
-        crossEdges.map((e) => [`${e.from}|${e.to}|${e.kind}|${e.label}`, { from: e.from, to: e.to, kind: e.kind, label: e.label }]),
+        crossEdges.map((e) => [
+          `${e.from}|${e.to}|${e.kind}|${e.label}`,
+          { from: e.from, to: e.to, kind: e.kind, label: e.label },
+        ]),
       ).values(),
     ].sort((a, b) =>
-      `${a.from}|${a.to}|${a.kind}|${a.label}`.localeCompare(`${b.from}|${b.to}|${b.kind}|${b.label}`),
+      `${a.from}|${a.to}|${a.kind}|${a.label}`.localeCompare(
+        `${b.from}|${b.to}|${b.kind}|${b.label}`,
+      ),
     ),
   };
 }
@@ -1360,11 +1500,12 @@ function helpersForStateCall(call, decls) {
       for (const p of arg.properties) {
         if (ts.isSpreadAssignment(p)) {
           const e = unwrap(p.expression);
-          const fnName = ts.isCallExpression(e) && ts.isIdentifier(e.expression)
-            ? e.expression.text
-            : ts.isIdentifier(e)
-              ? e.text
-              : null;
+          const fnName =
+            ts.isCallExpression(e) && ts.isIdentifier(e.expression)
+              ? e.expression.text
+              : ts.isIdentifier(e)
+                ? e.text
+                : null;
           if (fnName) {
             const body = bodyOf(decls.get(fnName));
             if (body) calledLocalFns(body, decls, out);
@@ -1394,7 +1535,11 @@ function unconditionalLiteralNext(decl, decls) {
     const returns = [];
     const visit = (n) => {
       if (ts.isReturnStatement(n) && n.expression) returns.push(n.expression);
-      if (n !== body && (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n))) return;
+      if (
+        n !== body &&
+        (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n))
+      )
+        return;
       n.forEachChild(visit);
     };
     visit(body);
@@ -1428,7 +1573,10 @@ function phantomEdgeProblems() {
     const visit = (n) => {
       if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
         const method = n.expression.name.text;
-        if ((method === 'transitions' || method === 'route' || method === 'state') && n.arguments[0]) {
+        if (
+          (method === 'transitions' || method === 'route' || method === 'state') &&
+          n.arguments[0]
+        ) {
           const self = evalTarget(n.arguments[0], decls);
           if (self && !self.startsWith('__terminal:')) {
             for (const h of helpersForStateCall(n, decls)) {
@@ -1463,11 +1611,16 @@ function run() {
   if (STRICT) {
     const problems = strictCheck(machines);
     if (problems.length > 0) {
-      console.error('✗ --strict: states with no extracted transitions:\n  ' + problems.join('\n  '));
+      console.error(
+        '✗ --strict: states with no extracted transitions:\n  ' + problems.join('\n  '),
+      );
       process.exit(1);
     }
     if (crossUnresolved && crossUnresolved.length > 0) {
-      console.error('✗ --strict: cross-domain targets that resolve to no known domain:\n  ' + crossUnresolved.join('\n  '));
+      console.error(
+        '✗ --strict: cross-domain targets that resolve to no known domain:\n  ' +
+          crossUnresolved.join('\n  '),
+      );
       process.exit(1);
     }
     const phantom = phantomEdgeProblems();
@@ -1482,10 +1635,14 @@ function run() {
 
   if (CHECK) {
     const stale = [];
-    if ((fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf-8') : '') !== doc) stale.push('state-machine-diagrams.md');
-    if ((fs.existsSync(OUT_JSON) ? fs.readFileSync(OUT_JSON, 'utf-8') : '') !== json) stale.push('state-graph.json');
+    if ((fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf-8') : '') !== doc)
+      stale.push('state-machine-diagrams.md');
+    if ((fs.existsSync(OUT_JSON) ? fs.readFileSync(OUT_JSON, 'utf-8') : '') !== json)
+      stale.push('state-graph.json');
     if (stale.length > 0) {
-      console.error(`✗ --check: ${stale.join(' and ')} out of date. Run \`npm run docs:diagrams\`.`);
+      console.error(
+        `✗ --check: ${stale.join(' and ')} out of date. Run \`npm run docs:diagrams\`.`,
+      );
       process.exit(1);
     }
     console.log('✓ --check: diagrams and state-graph.json are up to date.');

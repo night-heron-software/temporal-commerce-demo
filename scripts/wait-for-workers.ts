@@ -86,11 +86,15 @@ async function waitForWorkers() {
       break;
     } catch (err) {
       if (attempt === MAX_CONNECT_RETRIES) {
-        throw new Error(`Failed to connect to Temporal after ${MAX_CONNECT_RETRIES} attempts: ${err}`);
+        throw new Error(
+          `Failed to connect to Temporal after ${MAX_CONNECT_RETRIES} attempts: ${err}`,
+        );
       }
       const delay = Math.min(attempt * 3, 15);
-      console.log(`   ⚠️ Temporal connection attempt ${attempt}/${MAX_CONNECT_RETRIES} failed, retrying in ${delay}s...`);
-      await new Promise(resolve => setTimeout(resolve, delay * 1000));
+      console.log(
+        `   ⚠️ Temporal connection attempt ${attempt}/${MAX_CONNECT_RETRIES} failed, retrying in ${delay}s...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay * 1000));
     }
   }
   const verifiedClient = client!;

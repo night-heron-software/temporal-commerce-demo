@@ -62,7 +62,10 @@ describe('state-graph.json', () => {
     (_registry, machine) => {
       for (const state of machine.states) {
         if (state.transitional) continue;
-        expect(state.transitions.length, `state '${state.name}' has no outgoing edges`).toBeGreaterThan(0);
+        expect(
+          state.transitions.length,
+          `state '${state.name}' has no outgoing edges`,
+        ).toBeGreaterThan(0);
       }
     },
   );

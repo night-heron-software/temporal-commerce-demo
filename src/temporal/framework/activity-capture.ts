@@ -74,7 +74,10 @@ function capture<T>(activityType: string, args: unknown, run: () => Promise<T>):
 }
 
 const outbound: WorkflowOutboundCallsInterceptor = {
-  scheduleActivity(input: ActivityInput, next: Next<WorkflowOutboundCallsInterceptor, 'scheduleActivity'>) {
+  scheduleActivity(
+    input: ActivityInput,
+    next: Next<WorkflowOutboundCallsInterceptor, 'scheduleActivity'>,
+  ) {
     return capture(input.activityType, input.args, () => next(input));
   },
   scheduleLocalActivity(

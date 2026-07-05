@@ -39,8 +39,6 @@ import {
 // Signal Definition (imported from definitions.ts)
 // ==================
 
-
-
 const inventoryChangedSignal = Inventory.inventoryChangedSignal;
 type InventoryChangedPayload = Inventory.InventoryChangedPayload;
 export { inventoryChangedSignal };

@@ -96,15 +96,34 @@ describe('decodeHistoryEvents', () => {
 
   it('decodes payloads only for signal / accepted-update events via the injected decoder', () => {
     const raw = [
-      { eventId: 1, activityTaskScheduledEventAttributes: { activityType: { name: 'x' }, input: { payloads: [] } } },
-      { eventId: 2, workflowExecutionSignaledEventAttributes: { signalName: 'fulfillmentStatus', input: { payloads: [1] } } },
-      { eventId: 3, workflowExecutionUpdateAcceptedEventAttributes: { acceptedRequest: { input: { name: 'setShipping', args: { payloads: [1] } } } } },
+      {
+        eventId: 1,
+        activityTaskScheduledEventAttributes: {
+          activityType: { name: 'x' },
+          input: { payloads: [] },
+        },
+      },
+      {
+        eventId: 2,
+        workflowExecutionSignaledEventAttributes: {
+          signalName: 'fulfillmentStatus',
+          input: { payloads: [1] },
+        },
+      },
+      {
+        eventId: 3,
+        workflowExecutionUpdateAcceptedEventAttributes: {
+          acceptedRequest: { input: { name: 'setShipping', args: { payloads: [1] } } },
+        },
+      },
     ];
     const decoder = (attrsKey: string) => ({ decodedFor: attrsKey });
     const out = decodeHistoryEvents(raw, decoder);
     expect(out[0].payload).toBeUndefined(); // activity — not a transition driver
     expect(out[1].payload).toEqual({ decodedFor: 'workflowExecutionSignaledEventAttributes' });
-    expect(out[2].payload).toEqual({ decodedFor: 'workflowExecutionUpdateAcceptedEventAttributes' });
+    expect(out[2].payload).toEqual({
+      decodedFor: 'workflowExecutionUpdateAcceptedEventAttributes',
+    });
   });
 });
 
@@ -113,7 +132,9 @@ describe('diffSnapshots', () => {
     expect(diffSnapshots({ status: 'processing' }, { status: 'shipped' })).toEqual([
       { path: 'status', kind: 'changed', before: 'processing', after: 'shipped' },
     ]);
-    expect(diffSnapshots({}, { note: 'hi' })).toEqual([{ path: 'note', kind: 'added', after: 'hi' }]);
+    expect(diffSnapshots({}, { note: 'hi' })).toEqual([
+      { path: 'note', kind: 'added', after: 'hi' },
+    ]);
     expect(diffSnapshots({ note: 'hi' }, {})).toEqual([
       { path: 'note', kind: 'removed', before: 'hi' },
     ]);
@@ -150,7 +171,11 @@ describe('deriveTransitions', () => {
       ev('ActivityTaskScheduled', '2026-06-21T00:00:01.000Z', 'activity: queryCart'), // ignored
       ev('WorkflowExecutionUpdateAccepted', '2026-06-21T00:00:02.000Z', 'update: setShipping'),
       ev('WorkflowExecutionSignaled', '2026-06-21T00:00:03.000Z', 'signal: fulfillmentStatus'),
-      ev('StartChildWorkflowExecutionInitiated', '2026-06-21T00:00:04.000Z', 'child: store-fulfillment-o1'),
+      ev(
+        'StartChildWorkflowExecutionInitiated',
+        '2026-06-21T00:00:04.000Z',
+        'child: store-fulfillment-o1',
+      ),
       ev('WorkflowExecutionCompleted', '2026-06-21T00:00:05.000Z'),
     ];
     const out = deriveTransitions(events);
@@ -206,7 +231,13 @@ describe('deriveTransitions', () => {
 
   it('carries the triggering payload onto update/signal steps and the state they cause', () => {
     const events: TraceEvent[] = [
-      { eventId: '1', eventType: 'WorkflowExecutionSignaled', timestamp: '2026-06-21T00:00:04.000Z', detail: 'signal: fulfillmentStatus', payload: { status: 'shipped' } },
+      {
+        eventId: '1',
+        eventType: 'WorkflowExecutionSignaled',
+        timestamp: '2026-06-21T00:00:04.000Z',
+        detail: 'signal: fulfillmentStatus',
+        payload: { status: 'shipped' },
+      },
     ];
     const out = deriveTransitions(events, [
       { status: 'shipped', timestamp: '2026-06-21T00:00:05.000Z' },

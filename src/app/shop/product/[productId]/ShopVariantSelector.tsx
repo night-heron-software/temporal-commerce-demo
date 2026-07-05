@@ -96,13 +96,46 @@ interface OptionGroup {
 // ─── Size sort order ─────────────────────────────────────────────────────────
 const SIZE_ORDER = [
   // Infant/Toddler
-  'NB', '0-3M', '3-6M', '6-9M', '9-12M', '12mo', '12-18M', '18mo', '18-24M', '24mo',
-  '2T', '3T', '4T', '5T',
+  'NB',
+  '0-3M',
+  '3-6M',
+  '6-9M',
+  '9-12M',
+  '12mo',
+  '12-18M',
+  '18mo',
+  '18-24M',
+  '24mo',
+  '2T',
+  '3T',
+  '4T',
+  '5T',
   // Standard
-  'XXS', 'XS', 'Small', 'S', 'Medium', 'M', 'Large', 'L', 'XL',
-  '1X', '2XL', 'XXL', '2X', '3XL', 'XXXL', '3X', '4XL', '4X', '5XL', '5X', '6XL', '6X',
+  'XXS',
+  'XS',
+  'Small',
+  'S',
+  'Medium',
+  'M',
+  'Large',
+  'L',
+  'XL',
+  '1X',
+  '2XL',
+  'XXL',
+  '2X',
+  '3XL',
+  'XXXL',
+  '3X',
+  '4XL',
+  '4X',
+  '5XL',
+  '5X',
+  '6XL',
+  '6X',
   // Universal
-  'One Size', 'OS',
+  'One Size',
+  'OS',
 ];
 
 function sortSizes(values: OptionValue[]): void {
@@ -135,7 +168,7 @@ export default function ShopVariantSelector({
   currentVariantId,
   currentOptions,
   relatedVariants,
-  onVariantChange
+  onVariantChange,
 }: VariantSelectorProps) {
   // All variants with options — only those with options can participate in selection
   const allVariants = useMemo(() => {
@@ -144,7 +177,7 @@ export default function ShopVariantSelector({
       blankSku: '',
       price: { amount: 0, currency: 'USD' },
       available: true,
-      options: currentOptions
+      options: currentOptions,
     };
     const hasCurrentInRelated = relatedVariants.some((v) => v.id === currentVariantId);
     const combined = hasCurrentInRelated ? relatedVariants : [currentVariant, ...relatedVariants];
@@ -185,10 +218,7 @@ export default function ShopVariantSelector({
   // When Size=L is selected, only colors that have a variant with Size=L show as available.
   // When nothing is selected, all globally-available values show as available.
   const optionGroups = useMemo(() => {
-    const groups = new Map<
-      string,
-      Map<string, { hex?: string }>
-    >();
+    const groups = new Map<string, Map<string, { hex?: string }>>();
 
     // First pass: collect all option values and their hex codes
     allVariants.forEach((variant) => {
@@ -219,14 +249,14 @@ export default function ShopVariantSelector({
           if (!variant.available) return false;
           // Must have this option value
           const hasValue = variant.options?.some(
-            (opt) => getOptionType(opt) === type && getOptionLabel(opt) === label
+            (opt) => getOptionType(opt) === type && getOptionLabel(opt) === label,
           );
           if (!hasValue) return false;
           // Must also match all OTHER selected options
           for (const [selType, selLabel] of selections) {
             if (selType === type) continue; // skip the option type we're checking
             const variantHasOther = variant.options?.some(
-              (opt) => getOptionType(opt) === selType && getOptionLabel(opt) === selLabel
+              (opt) => getOptionType(opt) === selType && getOptionLabel(opt) === selLabel,
             );
             if (!variantHasOther) return false;
           }
@@ -236,7 +266,7 @@ export default function ShopVariantSelector({
         optionValues.push({
           label,
           hex: info.hex,
-          available
+          available,
         });
       });
 
@@ -301,25 +331,22 @@ export default function ShopVariantSelector({
 
       return bestVariant;
     },
-    [allVariants]
+    [allVariants],
   );
 
   // Handle option click — toggle: re-clicking a selected option deselects it
-  const handleOptionSelect = useCallback(
-    (type: string, label: string) => {
-      setSelections((prev) => {
-        const next = new Map(prev);
-        if (prev.get(type) === label) {
-          // Toggle off — deselect this option
-          next.delete(type);
-        } else {
-          next.set(type, label);
-        }
-        return next;
-      });
-    },
-    []
-  );
+  const handleOptionSelect = useCallback((type: string, label: string) => {
+    setSelections((prev) => {
+      const next = new Map(prev);
+      if (prev.get(type) === label) {
+        // Toggle off — deselect this option
+        next.delete(type);
+      } else {
+        next.set(type, label);
+      }
+      return next;
+    });
+  }, []);
 
   // When selections change, find and report the best matching variant.
   // Only update the parent when all option types are selected (partial = browsing).
@@ -358,7 +385,9 @@ export default function ShopVariantSelector({
                     style={{ backgroundColor: value.hex }}
                   />
                 )}
-                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{value.label}</span>
+                <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  {value.label}
+                </span>
               </div>
             );
           })}
@@ -373,7 +402,9 @@ export default function ShopVariantSelector({
       <div className="space-y-6">
         {optionGroups.map((group) => (
           <div key={group.type}>
-            <label className="block text-sm font-medium text-zinc-500 mb-3">{group.displayLabel}</label>
+            <label className="block text-sm font-medium text-zinc-500 mb-3">
+              {group.displayLabel}
+            </label>
             <div className="flex flex-wrap gap-2">
               {group.values.map((value) => {
                 const isSelected = selections.get(group.type) === value.label;
@@ -406,7 +437,9 @@ export default function ShopVariantSelector({
                       />
                     )}
                     {value.label}
-                    {!value.available && <span className="sr-only">(Unavailable with current selection)</span>}
+                    {!value.available && (
+                      <span className="sr-only">(Unavailable with current selection)</span>
+                    )}
                   </button>
                 );
               })}

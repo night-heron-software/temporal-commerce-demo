@@ -40,20 +40,23 @@ Runtime.install({
     debug: (message, meta) => log.debug({ ...meta }, String(message)),
     info: (message, meta) => log.info({ ...meta }, String(message)),
     warn: (message, meta) => log.warn({ ...meta }, String(message)),
-    error: (message, meta) => log.error({ ...meta }, String(message))
-  }
+    error: (message, meta) => log.error({ ...meta }, String(message)),
+  },
 });
 
 async function run() {
   // Build TLS config for Temporal Cloud (same pattern as temporal-client.ts)
   const tlsCert = process.env.TEMPORAL_TLS_CERT;
   const tlsKey = process.env.TEMPORAL_TLS_KEY;
-  const tls = tlsCert && tlsKey ? {
-    clientCertPair: {
-      crt: Buffer.from(tlsCert, 'base64'),
-      key: Buffer.from(tlsKey, 'base64'),
-    }
-  } : undefined;
+  const tls =
+    tlsCert && tlsKey
+      ? {
+          clientCertPair: {
+            crt: Buffer.from(tlsCert, 'base64'),
+            key: Buffer.from(tlsKey, 'base64'),
+          },
+        }
+      : undefined;
 
   // Get OTel worker config (interceptors/sinks) — no-op when OTEL_ENABLED !== 'true'
   const otelConfig = await getWorkerOtelConfig();
@@ -68,17 +71,25 @@ async function run() {
       break;
     } catch (err) {
       if (attempt === MAX_RETRIES) {
-        throw new Error(`Failed to connect to Temporal at ${TEMPORAL_ADDRESS} after ${MAX_RETRIES} attempts: ${err}`);
+        throw new Error(
+          `Failed to connect to Temporal at ${TEMPORAL_ADDRESS} after ${MAX_RETRIES} attempts: ${err}`,
+        );
       }
       const delay = Math.min(attempt * 3, 15);
-      log.warn({ attempt, maxRetries: MAX_RETRIES, delaySec: delay }, `Temporal connection failed, retrying in ${delay}s...`);
-      await new Promise(resolve => setTimeout(resolve, delay * 1000));
+      log.warn(
+        { attempt, maxRetries: MAX_RETRIES, delaySec: delay },
+        `Temporal connection failed, retrying in ${delay}s...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay * 1000));
     }
   }
   if (!connection) {
     throw new Error(`Failed to establish Temporal connection after ${MAX_RETRIES} attempts`);
   }
-  log.info({ address: TEMPORAL_ADDRESS, namespace: TEMPORAL_NAMESPACE, tls: !!tls }, 'Connected to Temporal — starting all domain workers');
+  log.info(
+    { address: TEMPORAL_ADDRESS, namespace: TEMPORAL_NAMESPACE, tls: !!tls },
+    'Connected to Temporal — starting all domain workers',
+  );
 
   const onShutdown = () => {
     log.info('Shutdown signal received. Draining workers...');

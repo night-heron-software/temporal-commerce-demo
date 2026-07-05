@@ -44,14 +44,13 @@ export interface FulfillerOrderWorkflowContext {
 }
 
 // Signals and Queries defined locally for the child workflow
-export const childFulfillerStatusSignal = wf.defineSignal<[Fulfillers.FulfillerStatusUpdate]>('fulfillerStatusUpdate');
+export const childFulfillerStatusSignal =
+  wf.defineSignal<[Fulfillers.FulfillerStatusUpdate]>('fulfillerStatusUpdate');
 export const childCancelSignal = wf.defineSignal('cancel');
-export const getFulfillerOrderStateQuery = wf.defineQuery<FulfillmentFulfillerOrderState>('getFulfillerOrderState');
+export const getFulfillerOrderStateQuery =
+  wf.defineQuery<FulfillmentFulfillerOrderState>('getFulfillerOrderState');
 
-async function notifyParent(
-  so: FulfillmentFulfillerOrderState,
-  orderId: string,
-) {
+async function notifyParent(so: FulfillmentFulfillerOrderState, orderId: string) {
   try {
     const parentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
     const parentHandle = wf.getExternalWorkflowHandle(parentWorkflowId);
@@ -87,7 +86,10 @@ export async function fulfillerOrderWorkflow(
   const signals: SignalRegistration<FulfillerOrderSignal>[] = [
     {
       definition: childFulfillerStatusSignal,
-      toSignal: (update: Fulfillers.FulfillerStatusUpdate) => ({ kind: 'fulfillerStatus' as const, update }),
+      toSignal: (update: Fulfillers.FulfillerStatusUpdate) => ({
+        kind: 'fulfillerStatus' as const,
+        update,
+      }),
     },
     {
       definition: childCancelSignal,
@@ -96,15 +98,15 @@ export async function fulfillerOrderWorkflow(
   ];
 
   const processingDelayMs = parseInt(
-    (wf.workflowInfo().memo?.processingDelayMs as string) || "15000",
+    (wf.workflowInfo().memo?.processingDelayMs as string) || '15000',
     10,
   );
   const shippingDelayMs = parseInt(
-    (wf.workflowInfo().memo?.shippingDelayMs as string) || "15000",
+    (wf.workflowInfo().memo?.shippingDelayMs as string) || '15000',
     10,
   );
   const deliveryDelayMs = parseInt(
-    (wf.workflowInfo().memo?.deliveryDelayMs as string) || "15000",
+    (wf.workflowInfo().memo?.deliveryDelayMs as string) || '15000',
     10,
   );
 
@@ -120,7 +122,12 @@ export async function fulfillerOrderWorkflow(
     onContextUpdate: (newCtx: FulfillerOrderWorkflowContext) => {
       Object.assign(context, newCtx);
     },
-    onTransition: async (from: FulfillerOrderStateName, to: FulfillerOrderStateName | `__terminal:${string}`, event: 'timeout' | 'signal', currentCtx: FulfillerOrderWorkflowContext) => {
+    onTransition: async (
+      from: FulfillerOrderStateName,
+      to: FulfillerOrderStateName | `__terminal:${string}`,
+      event: 'timeout' | 'signal',
+      currentCtx: FulfillerOrderWorkflowContext,
+    ) => {
       await notifyParent(currentCtx.so, currentCtx.orderId);
 
       if (to === 'shipped') {

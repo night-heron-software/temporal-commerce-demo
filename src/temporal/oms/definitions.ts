@@ -28,7 +28,7 @@ import type {
 export const updateStatusUpdate = defineUpdate<OrderState, [UpdateStatusSignal]>('updateStatus');
 export const cancelOrderUpdate = defineUpdate<OrderState, [CancelOrderSignal]>('cancelOrder');
 export const submitFeedbackUpdate = defineUpdate<OrderState, [SubmitFeedbackSignal]>(
-  'submitFeedback'
+  'submitFeedback',
 );
 export const refundOrderUpdate = defineUpdate<OrderState, [RefundOrderSignal]>('refundOrder');
 export const requestReturnUpdate = defineUpdate<OrderState, [RequestReturnSignal]>('requestReturn');

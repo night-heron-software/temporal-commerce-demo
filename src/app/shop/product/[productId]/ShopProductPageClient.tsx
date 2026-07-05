@@ -55,7 +55,10 @@ async function getProductDetail(productId: string): Promise<ProductDetailRespons
   }
 }
 
-export default function ShopProductPageClient({ productId, initialVariantId }: ShopProductPageClientProps) {
+export default function ShopProductPageClient({
+  productId,
+  initialVariantId,
+}: ShopProductPageClientProps) {
   const [data, setData] = useState<ProductDetailResponse | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<VariantWithImages | null>(null);
   const [isLoading, setIsLoading] = useState(true);

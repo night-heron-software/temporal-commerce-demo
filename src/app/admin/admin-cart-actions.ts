@@ -11,9 +11,7 @@ import { getTemporalClient } from '@/lib';
 import { Cart } from '@/temporal/contracts';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
-export type ActionResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: string };
+export type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
 export interface CartSummary {
   cartId: string;

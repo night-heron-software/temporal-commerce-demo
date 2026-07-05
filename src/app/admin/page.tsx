@@ -7,8 +7,8 @@ export default function AdminDashboardPage() {
         Temporal Commerce Demo
       </h1>
       <p className="text-zinc-500 dark:text-zinc-400 mb-8">
-        Admin panel for monitoring orders, inventory, and controlling fulfillment workflows —
-        plus developer tools for tracing workflow journeys.
+        Admin panel for monitoring orders, inventory, and controlling fulfillment workflows — plus
+        developer tools for tracing workflow journeys.
       </p>
 
       <div className="grid md:grid-cols-2 gap-6">

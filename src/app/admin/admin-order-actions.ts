@@ -17,9 +17,7 @@ import {
 import type { OrderState, UpdateStatusSignal, OrderStatus } from '@/temporal/oms/types';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
-export type ActionResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: string };
+export type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
 export interface OrderSummary {
   orderId: string;
@@ -46,7 +44,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       status: string;
       created_at: Date | null;
     }>(
-      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders`
+      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders`,
     );
 
     const sorted = rows.sort((a, b) => {
@@ -100,7 +98,7 @@ export async function getOrderState(orderId: string): Promise<ActionResult<Order
 export async function updateOrderStatus(
   orderId: string,
   status: OrderStatus,
-  note?: string
+  note?: string,
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();
@@ -122,7 +120,7 @@ export async function updateOrderStatus(
  */
 export async function cancelOrder(
   orderId: string,
-  reason?: string
+  reason?: string,
 ): Promise<ActionResult<OrderState>> {
   try {
     const client = await getTemporalClient();

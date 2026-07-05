@@ -65,15 +65,12 @@ export async function POST(request: NextRequest) {
       body: {
         query: {
           bool: {
-            must: [
-              { term: { 'email': shopper.email } },
-              { term: { 'status': 'active' } }
-            ]
-          }
+            must: [{ term: { email: shopper.email } }, { term: { status: 'active' } }],
+          },
         },
         sort: [{ updatedAt: 'desc' }],
-        size: 1
-      }
+        size: 1,
+      },
     });
 
     const hits = esResponse.hits?.hits ?? [];
@@ -82,27 +79,25 @@ export async function POST(request: NextRequest) {
       // 1. Recover existing active cart
       const recoveredCartId = hits[0]._source.cartId;
       console.log(`Recovered active cart ${recoveredCartId} for user ${shopper.email}`);
-      
+
       // Overwrite the guest cart ID with the recovered cart ID
       cookieStore.set('cartId', recoveredCartId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 30 * 24 * 60 * 60,
-        path: '/'
+        path: '/',
       });
     } else {
       // 2. Link current guest cart (if any) to the user
       const currentCartId = cookieStore.get('cartId')?.value;
       if (currentCartId) {
         const { executeCartUpdate } = await import('@/app/shop/cart-actions');
-        
+
         console.log(`Linking guest cart ${currentCartId} to user ${shopper.email}`);
-        await executeCartUpdate(
-          currentCartId,
-          'cartUpdate',
-          [{ type: 'linkUser', email: shopper.email, userId: shopper.id }]
-        );
+        await executeCartUpdate(currentCartId, 'cartUpdate', [
+          { type: 'linkUser', email: shopper.email, userId: shopper.id },
+        ]);
       }
     }
   } catch (error) {

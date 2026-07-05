@@ -35,7 +35,14 @@ describe('selectPreemptibleReservations', () => {
   const heldFor = (ms: number) => new Date(NOW - ms);
   const expiring = new Date(NOW + 60_000);
 
-  const reservation = (over: Partial<{ cart_id: string; quantity: number; created_at: Date; expires_at: Date | null }> = {}) => ({
+  const reservation = (
+    over: Partial<{
+      cart_id: string;
+      quantity: number;
+      created_at: Date;
+      expires_at: Date | null;
+    }> = {},
+  ) => ({
     cart_id: 'other-cart',
     quantity: 2,
     created_at: heldFor(MIN_HOLD_MS + 60_000),
@@ -43,7 +50,14 @@ describe('selectPreemptibleReservations', () => {
     ...over,
   });
 
-  const opts = (over: Partial<{ totalAvailable: number; quantityNeeded: number; requestingCartId: string; nowMs: number }> = {}) => ({
+  const opts = (
+    over: Partial<{
+      totalAvailable: number;
+      quantityNeeded: number;
+      requestingCartId: string;
+      nowMs: number;
+    }> = {},
+  ) => ({
     totalAvailable: 0,
     quantityNeeded: 2,
     requestingCartId: 'my-cart',
@@ -61,7 +75,7 @@ describe('selectPreemptibleReservations', () => {
     expect(selectPreemptibleReservations([fresh], opts())).toEqual([]);
   });
 
-  it('never preempts the requesting cart\'s own reservation', () => {
+  it("never preempts the requesting cart's own reservation", () => {
     const mine = reservation({ cart_id: 'my-cart' });
     expect(selectPreemptibleReservations([mine], opts())).toEqual([]);
   });
@@ -75,7 +89,10 @@ describe('selectPreemptibleReservations', () => {
     const oldest = reservation({ quantity: 2, created_at: heldFor(MIN_HOLD_MS + 3_000) });
     const middle = reservation({ quantity: 2, created_at: heldFor(MIN_HOLD_MS + 2_000) });
     const newest = reservation({ quantity: 2, created_at: heldFor(MIN_HOLD_MS + 1_000) });
-    const picked = selectPreemptibleReservations([newest, oldest, middle], opts({ quantityNeeded: 3 }));
+    const picked = selectPreemptibleReservations(
+      [newest, oldest, middle],
+      opts({ quantityNeeded: 3 }),
+    );
     expect(picked).toEqual([oldest, middle]);
   });
 

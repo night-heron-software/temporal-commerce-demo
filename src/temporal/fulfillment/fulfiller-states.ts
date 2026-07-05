@@ -83,8 +83,7 @@ const fulfillerStatusEntry = {
     signal: Extract<FulfillerOrderSignal, { kind: 'fulfillerStatus' }>,
   ) {
     const context = apply(ctx, { type: 'fulfillerStatus', update: signal.update });
-    const addedShipment =
-      (context.so.shipments?.length ?? 0) > (ctx.so.shipments?.length ?? 0);
+    const addedShipment = (context.so.shipments?.length ?? 0) > (ctx.so.shipments?.length ?? 0);
     return {
       context,
       next: routeByStatus(context),

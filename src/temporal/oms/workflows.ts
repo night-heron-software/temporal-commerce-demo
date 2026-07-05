@@ -182,7 +182,11 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
       // Cancel the child fulfillment workflow if it exists
       try {
-        const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', input.order.orderId);
+        const fulfillmentWorkflowId = buildWorkflowId(
+          DEMO_STORE_ID,
+          'fulfillment',
+          input.order.orderId,
+        );
         const handle = getExternalWorkflowHandle(fulfillmentWorkflowId);
         await handle.cancel();
       } catch (e) {

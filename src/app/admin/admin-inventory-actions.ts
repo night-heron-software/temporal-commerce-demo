@@ -31,10 +31,10 @@ export async function getInventoryStock(): Promise<{
 
     const rows = await executeCql<DbRow>(
       `SELECT blank_sku, fulfiller_id, fulfiller_name, total_stock, reserved_stock, cost
-       FROM inventory_stock_w`
+       FROM inventory_stock_w`,
     );
 
-    const data: StockSummaryRow[] = rows.map(r => ({
+    const data: StockSummaryRow[] = rows.map((r) => ({
       blankSku: r.blank_sku,
       fulfillerId: r.fulfiller_id,
       fulfillerName: r.fulfiller_name,
@@ -88,10 +88,10 @@ export async function getInventoryReservations(): Promise<{
     const rows = await executeCql<DbRow>(
       `SELECT reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
               quantity, status, expires_at, created_at
-       FROM inventory_reservations_w`
+       FROM inventory_reservations_w`,
     );
 
-    const data: ReservationRow[] = rows.map(r => ({
+    const data: ReservationRow[] = rows.map((r) => ({
       reservationId: r.reservation_id,
       blankSku: r.blank_sku,
       cartId: r.cart_id,
@@ -104,7 +104,12 @@ export async function getInventoryReservations(): Promise<{
     }));
 
     // Active first (TEMPORARY, CONFIRMED), then by created_at desc
-    const statusOrder: Record<string, number> = { TEMPORARY: 0, CONFIRMED: 1, RELEASED: 2, CANCELLED: 3 };
+    const statusOrder: Record<string, number> = {
+      TEMPORARY: 0,
+      CONFIRMED: 1,
+      RELEASED: 2,
+      CANCELLED: 3,
+    };
     data.sort((a, b) => {
       const sa = statusOrder[a.status] ?? 9;
       const sb = statusOrder[b.status] ?? 9;
@@ -143,7 +148,14 @@ export async function getInventoryStats(): Promise<{
     if (!stockResult.success || !reservationResult.success) {
       return {
         success: false,
-        data: { totalSkus: 0, totalStock: 0, totalReserved: 0, totalAvailable: 0, activeReservations: 0, lowStockSkus: 0 },
+        data: {
+          totalSkus: 0,
+          totalStock: 0,
+          totalReserved: 0,
+          totalAvailable: 0,
+          activeReservations: 0,
+          lowStockSkus: 0,
+        },
         error: stockResult.error || reservationResult.error,
       };
     }
@@ -159,14 +171,23 @@ export async function getInventoryStats(): Promise<{
         totalStock: stock.reduce((s, r) => s + r.totalStock, 0),
         totalReserved: stock.reduce((s, r) => s + r.reservedStock, 0),
         totalAvailable: stock.reduce((s, r) => s + r.availableStock, 0),
-        activeReservations: reservations.filter(r => r.status === 'TEMPORARY' || r.status === 'CONFIRMED').length,
-        lowStockSkus: stock.filter(r => r.availableStock < LOW_STOCK_THRESHOLD).length,
+        activeReservations: reservations.filter(
+          (r) => r.status === 'TEMPORARY' || r.status === 'CONFIRMED',
+        ).length,
+        lowStockSkus: stock.filter((r) => r.availableStock < LOW_STOCK_THRESHOLD).length,
       },
     };
   } catch (error) {
     return {
       success: false,
-      data: { totalSkus: 0, totalStock: 0, totalReserved: 0, totalAvailable: 0, activeReservations: 0, lowStockSkus: 0 },
+      data: {
+        totalSkus: 0,
+        totalStock: 0,
+        totalReserved: 0,
+        totalAvailable: 0,
+        activeReservations: 0,
+        lowStockSkus: 0,
+      },
       error: String(error),
     };
   }

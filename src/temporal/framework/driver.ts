@@ -27,7 +27,9 @@ function isTerminalState(name: string): boolean {
 
 /** The `type` field of a command event, when present — a friendly trigger name. */
 function triggerName(value: unknown): string | undefined {
-  return value && typeof value === 'object' && typeof (value as { type?: unknown }).type === 'string'
+  return value &&
+    typeof value === 'object' &&
+    typeof (value as { type?: unknown }).type === 'string'
     ? (value as { type: string }).type
     : undefined;
 }
@@ -265,7 +267,13 @@ export async function runStateMachine<
       // 7. Trigger onTransition Hook
       if (config.onTransition) {
         try {
-          await config.onTransition(previousStateName, output.next, inputEventDesc, ctx, input.timestamp);
+          await config.onTransition(
+            previousStateName,
+            output.next,
+            inputEventDesc,
+            ctx,
+            input.timestamp,
+          );
         } catch (transitionErr) {
           log.error('onTransition hook threw an error', {
             from: previousStateName,
