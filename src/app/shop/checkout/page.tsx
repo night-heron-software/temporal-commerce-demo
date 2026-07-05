@@ -7,7 +7,8 @@ import { beginCheckout, getCheckoutState } from '@/app/shop/cart-actions';
 import Link from 'next/link';
 
 /** How long to wait for the checkout workflow to reach an actionable step. */
-const CHECKOUT_READY_TIMEOUT_MS = 30_000;
+const CHECKOUT_READY_TIMEOUT_MS =
+  Number(process.env.NEXT_PUBLIC_CHECKOUT_READY_TIMEOUT_MS) || 30_000;
 const POLL_INTERVAL_MS = 1_000;
 
 /** Route for each actionable checkout step; terminal steps handled separately. */

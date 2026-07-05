@@ -9,6 +9,7 @@
 
 import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
+import { createLogger } from '@/lib/logger';
 import { getTemporalClient } from '@/lib/temporal-client';
 import { Cart, Checkout, Constants } from '@/temporal/contracts';
 import {
@@ -16,6 +17,8 @@ import {
   buildWorkflowStartOptions,
   DEMO_STORE_ID,
 } from '@/temporal/contracts/constants';
+
+const log = createLogger('cart-actions');
 
 const CART_ID_COOKIE = 'cartId';
 
@@ -108,7 +111,7 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
   } catch (e) {
     const reason = classifyUpdateError(e);
     if (reason) {
-      console.info(`[executeCartUpdate] cart ${cartId}: ${reason}`);
+      log.info({ cartId, reason }, 'Cart update produced no result');
       return null;
     }
     throw e;
@@ -160,9 +163,9 @@ export async function getCart(cartId: string): Promise<Cart.CartDetails | null> 
   } catch (e: unknown) {
     const err = e as { name?: string };
     if (err?.name === 'WorkflowNotFoundError') {
-      console.info(`[getCart] Cart workflow not found for ${cartId}`);
+      log.info({ cartId }, 'Cart workflow not found');
     } else {
-      console.error('Failed to get cart', e);
+      log.error({ cartId, err: e }, 'Failed to get cart');
     }
     return null;
   }
@@ -240,8 +243,9 @@ export async function setShippingAddress(
 
   // Recovery: the checkout workflow was dead (timed out / terminated / already
   // completed) — start a fresh attempt and retry the update against it.
-  console.info(
-    `[setShippingAddress] checkout ${checkoutWfId} unavailable (${outcome.reason}); starting a fresh checkout`,
+  log.info(
+    { checkoutWorkflowId: checkoutWfId, reason: outcome.reason },
+    'Checkout unavailable; starting a fresh checkout',
   );
   await beginCheckout(cartId);
   const newId = await getCheckoutWorkflowId(cartId);

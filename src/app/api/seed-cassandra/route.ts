@@ -5,8 +5,11 @@
  */
 import { NextResponse } from 'next/server';
 import { executeCql, cassandraTypes as types } from '@/lib';
+import { createLogger } from '@/lib/logger';
 import path from 'path';
 import fs from 'fs/promises';
+
+const log = createLogger('api-seed-cassandra');
 
 interface SampleData {
   collections: Array<{
@@ -184,7 +187,7 @@ export async function POST() {
       results,
     });
   } catch (error) {
-    console.error('Failed to seed database:', error);
+    log.error({ err: error }, 'Failed to seed database');
     return NextResponse.json(
       { success: false, error: `Failed to seed database: ${error}`, results },
       { status: 500 },

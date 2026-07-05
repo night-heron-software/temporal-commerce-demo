@@ -8,6 +8,9 @@
  */
 
 import { executeCql } from '@/lib';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('order-actions');
 
 export interface ShippingAddress {
   firstName: string;
@@ -112,7 +115,7 @@ export async function getOrdersByEmail(email: string): Promise<{
 
     return { success: true, data };
   } catch (e) {
-    console.error('Failed to get orders by email:', e);
+    log.error({ err: e }, 'Failed to get orders by email');
     const message = e instanceof Error ? e.message : 'Unknown error';
     return { success: false, data: [], error: `Failed to load orders: ${message}` };
   }

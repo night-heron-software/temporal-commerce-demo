@@ -9,6 +9,7 @@
 
 import { getTemporalClient } from '@/lib';
 import { executeCqlAll } from '@/lib';
+import { createLogger } from '@/lib/logger';
 import {
   getOrderStateQuery,
   updateStatusUpdate,
@@ -16,6 +17,8 @@ import {
 } from '@/temporal/oms/definitions';
 import type { OrderState, UpdateStatusSignal, OrderStatus } from '@/temporal/oms/types';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
+
+const log = createLogger('admin-order-actions');
 
 export type ActionResult<T> = { success: true; data: T } | { success: false; error: string };
 
@@ -65,7 +68,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
 
     return { success: true, data };
   } catch (e) {
-    console.error('Failed to get all orders:', e);
+    log.error({ err: e }, 'Failed to get all orders');
     const message = e instanceof Error ? e.message : 'Unknown error';
     return { success: false, error: `Failed to load orders: ${message}` };
   }
@@ -82,7 +85,7 @@ export async function getOrderState(orderId: string): Promise<ActionResult<Order
     const state = await handle.query(getOrderStateQuery);
     return { success: true, data: state };
   } catch (e) {
-    console.error('Failed to get order state:', e);
+    log.error({ orderId, err: e }, 'Failed to get order state');
     const message = e instanceof Error ? e.message : 'Unknown error';
     const isNotFound = message.includes('not found') || message.includes('NOT_FOUND');
     return {
@@ -109,7 +112,7 @@ export async function updateOrderStatus(
     });
     return { success: true, data: state };
   } catch (e) {
-    console.error('Failed to update order status:', e);
+    log.error({ orderId, status, err: e }, 'Failed to update order status');
     const message = e instanceof Error ? e.message : 'Unknown error';
     return { success: false, error: `Failed to update order: ${message}` };
   }
@@ -131,7 +134,7 @@ export async function cancelOrder(
     });
     return { success: true, data: state };
   } catch (e) {
-    console.error('Failed to cancel order:', e);
+    log.error({ orderId, err: e }, 'Failed to cancel order');
     const message = e instanceof Error ? e.message : 'Unknown error';
     return { success: false, error: `Failed to cancel order: ${message}` };
   }

@@ -5,6 +5,9 @@
  */
 
 import { getElasticsearchClient } from '@/lib/es-client';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('admin-search-actions');
 
 const ALL_INDICES = [
   'products',
@@ -207,7 +210,7 @@ export async function searchElasticsearch(
       took: response.took,
     };
   } catch (error) {
-    console.error('Search failed:', error);
+    log.error({ err: error }, 'Search failed');
     return { success: false, results: [], total: 0, took: 0, error: String(error) };
   }
 }
