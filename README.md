@@ -1,12 +1,53 @@
 # Temporal Commerce Demo
 
+[![CI](https://github.com/night-heron-software/temporal-commerce-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/night-heron-software/temporal-commerce-demo/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
+[![Temporal SDK](https://img.shields.io/badge/Temporal_TypeScript_SDK-1.19-7744ee)](https://temporal.io)
+
 A full-stack e-commerce application demonstrating [Temporal](https://temporal.io) durable execution patterns — cart management, checkout orchestration, order processing, and simulated fulfillment.
 
 Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasticsearch**.
 
+![Order Trace tool showing one order's journey across five parallel workflows](docs/images/order-trace.png)
+
+*The built-in Order Trace tool: one order's full cross-domain lifecycle — cart → checkout → OMS → fulfillment → fulfiller order — reconstructed from workflow state transitions recorded to Cassandra.*
+
 > **Note:** This demo is derived from a much more comprehensive e-commerce platform currently under active development. It is a standalone extraction designed to showcase Temporal patterns without the full platform's multi-tenant, multi-supplier, and plugin architecture.
 
-> **AI Disclosure:** AI tooling was used extensively for code generation and documentation. Not all output has been thoroughly reviewed yet. The product catalog — including images, descriptions, and metadata — was created using [Printify](https://printify.com/). All products were first created as real products in a Printify store; the data and mockup images were then exported and adapted for this demo.
+> **AI Disclosure:** AI tooling was used extensively for code generation and documentation. Correctness is enforced by the project's verification gates rather than line-by-line review: a three-level test suite (pure decider unit tests, workflow tests against Temporal's time-skipping test server, and a cross-domain e2e), CI checks for lint / types / formatting / diagram freshness, and custom ESLint rules that enforce the architecture's invariants. The product catalog — including images, descriptions, and metadata — was created using [Printify](https://printify.com/). All products were first created as real products in a Printify store; the data and mockup images were then exported and adapted for this demo.
+
+## Why This Exists
+
+Every e-commerce system is a distributed state machine. The traditional approach wires cart, payment, inventory, and fulfillment together with REST calls, message queues, cron jobs, and reconciliation scripts. This project demonstrates that Temporal can replace that entire infrastructure layer:
+
+- **No message queue** — workflow signals replace all async messaging.
+- **No cron jobs** — `condition(() => dirty, '5m')` replaces "run every 5 minutes".
+- **No dead-letter queues** — Temporal retry policies and activity timeouts absorb transient failures.
+- **No saga orchestrator** — the checkout workflow *is* the saga.
+- **No distributed transaction coordinator** — `updateWithStart` gives atomic create-or-update.
+
+**Scale:** ~19,000 LOC · 6 Temporal workflow domains · 260+ products · 10,600 variants
+
+## What This Demonstrates
+
+- **Workflows as state machines** — domain workflows are authored as **prepare → decide → finalize** loops around pure, unit-tested deciders (`src/temporal/framework`).
+- **Cross-domain correlation** — every workflow carries a parseable `demo.{domain}.{entityId}` ID plus correlation Search Attributes, so one Temporal visibility query (`CorrelationId = '<cartId>'`) returns the whole cart → checkout → order → fulfillment journey.
+- **Transition recording** — every state transition is snapshotted to Cassandra with full context, powering the Order Trace dev tool shown above.
+- **Diagrams generated from source** — every state machine's diagram is auto-generated: see the [State Machine Reference](docs/reference/state-machine-diagrams.md) (Mermaid diagrams, per-state trigger tables, and the cross-domain orchestration graph), regenerated with `npm run docs:diagrams` and kept fresh by CI.
+- **Three-level testing without Docker** — pure decider unit tests, workflow tests on Temporal's time-skipping test server, and a full cart→checkout→OMS→fulfillment e2e (`npm test` needs no containers).
+
+### Temporal Workflows
+
+| Workflow | Purpose | Key Patterns |
+| ---------- | --------- | -------------- |
+| **Cart** | Manages shopping cart state as a long-running workflow | `updateWithStart`, Query/Update handlers, entity lifecycle |
+| **Checkout** | Orchestrates shipping → payment → order submission | State machine, step validation, `continueAsNew` |
+| **Order** | Processes order from placement through fulfillment | Supplier routing, assignment tracking, status projections |
+| **Fulfillment** | Simulates supplier order submission and shipping | Timer-based simulation, shipment tracking |
+| **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
+| **Identity** | Email-based shopper auth and address persistence | Cookie sessions, auto-create accounts, address pre-fill |
 
 ## Architecture
 
@@ -29,34 +70,23 @@ graph TB
     temporal -->|"Activities"| elasticsearch[("Elasticsearch<br/>:9200")]
 ```
 
-### Temporal Workflows
+## See It in Action
 
-| Workflow | Purpose | Key Patterns |
-| ---------- | --------- | -------------- |
-| **Cart** | Manages shopping cart state as a long-running workflow | `updateWithStart`, Query/Update handlers, entity lifecycle |
-| **Checkout** | Orchestrates shipping → payment → order submission | State machine, step validation, `continueAsNew` |
-| **Order** | Processes order from placement through fulfillment | Supplier routing, assignment tracking, status projections |
-| **Fulfillment** | Simulates supplier order submission and shipping | Timer-based simulation, shipment tracking |
-| **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
-| **Identity** | Email-based shopper auth and address persistence | Cookie sessions, auto-create accounts, address pre-fill |
+| Storefront | Checkout |
+| --- | --- |
+| ![Storefront catalog with faceted Elasticsearch search](docs/images/storefront.png) | ![Multi-step checkout backed by a Temporal workflow](docs/images/checkout.png) |
 
-Domain workflows are authored as **prepare → decide → finalize state machines** around
-pure, unit-tested deciders (`src/temporal/framework`). Every workflow carries a parseable
-`demo.{domain}.{entityId}` ID plus correlation Search Attributes, so one Temporal
-visibility query (`CorrelationId = '<cartId>'`) returns the whole
-cart → checkout → order → fulfillment journey; each state transition is also recorded to
-Cassandra with a full context snapshot for the order-trace tool.
+*Left: the storefront catalog — faceted search served by Elasticsearch. Right: the multi-step checkout; every step is a Temporal Update with validation guards enforcing the state machine.*
 
-Every machine's diagram is auto-generated from source: see the
-[State Machine Reference](docs/reference/state-machine-diagrams.md) (Mermaid diagrams,
-per-state trigger tables, and the cross-domain orchestration graph), regenerated with
-`npm run docs:diagrams` and kept fresh by CI.
+![Temporal UI listing all five workflows of one order via a CorrelationId query](docs/images/temporal-ui.png)
+
+*One visibility query in the Temporal UI (`CorrelationId = "<cartId>"`) returns the entire journey: cart, checkout, order, fulfillment, and fulfiller-order workflows.*
 
 ## Quick Start
 
 ### Prerequisites
 
-- **Node.js** ≥ 20
+- **Node.js** ≥ 22
 - **Docker** (for Cassandra, Elasticsearch, Temporal)
 
 > **Apple Silicon (M4 / M5) note:** the Elasticsearch images are pinned to a tag whose bundled JDK
@@ -118,6 +148,18 @@ This starts the Next.js dev server and Temporal workers concurrently.
 
 See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 
+## Documentation
+
+| Document | What's Inside |
+| --- | --- |
+| [Getting Started](GETTING_STARTED.md) | Clone-to-running setup, including Apple Silicon troubleshooting |
+| [Project Description](docs/project-description.md) | The full architecture narrative: why Temporal, domain walkthroughs, diagrams |
+| [Developer Guide](docs/developer-guide.md) | Day-to-day development: conventions, testing, debugging |
+| [Temporal Lessons Learned](docs/temporal-lessons-learned.md) | 25 practical lessons from building on the Temporal TypeScript SDK |
+| [State Machine Reference](docs/reference/state-machine-diagrams.md) | Auto-generated Mermaid diagrams + trigger tables for every workflow |
+| [Demo Instructions](docs/demo-instructions.md) | Script for a 4–5 minute live demonstration |
+| [Cloud Deployment](docs/cloud-deployment.md) | Deploying to Temporal Cloud + Google Cloud Run |
+
 ## Project Structure
 
 ```text
@@ -140,6 +182,7 @@ temporal-commerce-demo/
 │   ├── lib/                # Shared: Cassandra, ES, Temporal clients
 │   └── temporal/
 │       ├── contracts/      # Shared type definitions
+│       ├── framework/      # prepare → decide → finalize state machine kit
 │       ├── cart/           # Cart workflow + activities
 │       ├── checkout/       # Checkout workflow + activities
 │       ├── oms/            # Order management workflow
@@ -179,27 +222,35 @@ npm run infra:up:obs
 - **Search**: Elasticsearch (product search with faceted filtering)
 - **Infrastructure**: Docker Compose (local), compatible with Temporal Cloud + Google Cloud Run
 
+## Demo Limitations
+
+Deliberate simplifications that keep the focus on the Temporal patterns:
+
+- **Payments are mocked** — the payment step exercises the state machine, not a real gateway.
+- **Emails are stubbed** — order confirmation / shipping notifications are activities that log instead of send (`src/lib/email-service.ts`).
+- **The `/admin` area is intentionally unauthenticated** — shopper auth is real (bcrypt, cookie sessions, tested); admin auth is out of scope for the demo.
+- **Fulfillment is simulated** — supplier processing and shipping are timer-driven workflow simulations.
+
 ## AI Agent Tooling & Configuration
 
 This repository includes metadata, configuration, and workflow automation guides optimized for AI coding assistants (such as Antigravity, Claude, and Gemini). These files help AI agents understand the codebase architecture, follow developer preferences, and automate repository tasks:
 
 ### Configuration Files
-- **[AGENTS.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/AGENTS.md) / [CLAUDE.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/CLAUDE.md)**: Workspace-level agent rules and framework-specific guidelines (e.g. Next.js App Router rules).
-- **[.antigravityignore](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.antigravityignore)**: Instructs AI agents to ignore build output (`.next/`, `dist/`), dependencies (`node_modules/`), and temporary OS/IDE files to maintain a clean context window.
-- **[.agent/rules.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/rules.md)**: Project-specific design standards, architecture constraints (e.g. Temporal determinism rules), and gotchas.
+- **[AGENTS.md](AGENTS.md) / [CLAUDE.md](CLAUDE.md)**: Workspace-level agent rules and framework-specific guidelines (e.g. Next.js App Router rules).
+- **[.antigravityignore](.antigravityignore)**: Instructs AI agents to ignore build output (`.next/`, `dist/`), dependencies (`node_modules/`), and temporary OS/IDE files to maintain a clean context window.
+- **[.agent/rules.md](.agent/rules.md)**: Project-specific design standards, architecture constraints (e.g. Temporal determinism rules), and gotchas.
 
 ### Skills & Workflows
-- **[.agent/skills/](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/skills/)**: Custom domain-specific knowledge folders (e.g. [nextjs.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/skills/nextjs.md), [typescript-temporal.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/skills/typescript-temporal.md)) containing guidelines to assist agents in writing correct, idiomatic code.
-- **[.agent/workflows/](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/)**: Executable/runnable step-by-step guides that AI agents use to automate repository maintenance, testing, and debugging workflows:
-  - **[demo-start-local-dev.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-start-local-dev.md)**: Start database containers, storefront, and workers.
-  - **[demo-initialize.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-initialize.md)**: Wipe, re-initialize database container schemas, and seed data.
-  - **[demo-status.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-status.md)**: Check platform and infrastructure health.
-  - **[demo-verify.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-verify.md)** / **[demo-e2e-test.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-e2e-test.md)**: Automated end-to-end checks, Cassandra schema consistency validation, and checkout flows.
-  - **[demo-temporal-worker-changes.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-temporal-worker-changes.md)**: Safe deployment guidelines for worker and workflow changes.
-  - **[demo-project-hygiene.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-project-hygiene.md)**: Check for git hygiene, secrets protection, and metadata cleanup.
-  - **[demo-shutdown.md](file:///Users/jeffromine/src/portfolio/temporal-commerce-demo/.agent/workflows/demo-shutdown.md)**: Gracefully stop all background services.
+- **[.agent/skills/](.agent/skills/)**: Custom domain-specific knowledge folders (e.g. [nextjs.md](.agent/skills/nextjs.md), [typescript-temporal.md](.agent/skills/typescript-temporal.md)) containing guidelines to assist agents in writing correct, idiomatic code.
+- **[.agent/workflows/](.agent/workflows/)**: Executable/runnable step-by-step guides that AI agents use to automate repository maintenance, testing, and debugging workflows:
+  - **[demo-start-local-dev.md](.agent/workflows/demo-start-local-dev.md)**: Start database containers, storefront, and workers.
+  - **[demo-initialize.md](.agent/workflows/demo-initialize.md)**: Wipe, re-initialize database container schemas, and seed data.
+  - **[demo-status.md](.agent/workflows/demo-status.md)**: Check platform and infrastructure health.
+  - **[demo-verify.md](.agent/workflows/demo-verify.md)** / **[demo-e2e-test.md](.agent/workflows/demo-e2e-test.md)**: Automated end-to-end checks, Cassandra schema consistency validation, and checkout flows.
+  - **[demo-temporal-worker-changes.md](.agent/workflows/demo-temporal-worker-changes.md)**: Safe deployment guidelines for worker and workflow changes.
+  - **[demo-project-hygiene.md](.agent/workflows/demo-project-hygiene.md)**: Check for git hygiene, secrets protection, and metadata cleanup.
+  - **[demo-shutdown.md](.agent/workflows/demo-shutdown.md)**: Gracefully stop all background services.
 
 ## License
 
 MIT
-

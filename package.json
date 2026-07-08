@@ -2,6 +2,29 @@
   "name": "temporal-commerce-demo",
   "version": "0.1.0",
   "private": true,
+  "description": "Full-stack e-commerce demo of Temporal durable execution — cart, checkout, order management, and fulfillment as workflows. Next.js 16, Temporal TypeScript SDK, Cassandra, Elasticsearch.",
+  "keywords": [
+    "temporal",
+    "temporal-workflow",
+    "durable-execution",
+    "workflow-orchestration",
+    "nextjs",
+    "typescript",
+    "react",
+    "cassandra",
+    "elasticsearch",
+    "ecommerce",
+    "cqrs",
+    "state-machine",
+    "saga-pattern"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/night-heron-software/temporal-commerce-demo.git"
+  },
+  "homepage": "https://github.com/night-heron-software/temporal-commerce-demo#readme",
+  "author": "Jeff Romine",
+  "license": "MIT",
   "engines": {
     "node": ">=22"
   },
