@@ -41,6 +41,7 @@ vi.mock('./activities', () => ({
 }));
 
 import {
+  createPaymentIntent,
   processPayment,
   queryCart,
   releaseReservations,
@@ -84,6 +85,7 @@ const address = {
   email: 'a@b.c',
 };
 
+/** Both prerequisites satisfied — ready to submit. */
 const readyCtx = () =>
   makeCtx({
     reservations: [{ reservationId: 'r-1' } as never],
@@ -108,9 +110,9 @@ const recompute = { kind: 'signal' as const, result: { cartVersion: 2 }, timesta
 beforeEach(() => vi.clearAllMocks());
 
 describe('validating (transitional)', () => {
-  it('successful reservations move to shipping', async () => {
+  it('successful reservations move to collecting', async () => {
     const out = await CHECKOUT_STATES.validating.fn(makeCtx(), timeout);
-    expect(out.next).toBe('shipping');
+    expect(out.next).toBe('collecting');
     expect(out.context.reservations).toHaveLength(1);
     expect(renewReservationsForCheckout).toHaveBeenCalledWith('cart-1', expect.any(Array));
   });
@@ -127,93 +129,84 @@ describe('validating (transitional)', () => {
   });
 });
 
-describe('shipping', () => {
-  it('setShipping prices the order, creates the intent, and advances to payment', async () => {
-    const out = await CHECKOUT_STATES.shipping.fn(
+describe('collecting — setShipping / setPayment', () => {
+  it('setShipping prices the order, creates the intent, and stays collecting', async () => {
+    const out = await CHECKOUT_STATES.collecting.fn(
       makeCtx(),
       ev({ type: 'setShipping', shippingAddress: address }),
     );
-    expect(out.next).toBe('payment');
+    expect(out.next).toBe('collecting');
+    expect(out.context.state.shippingAddress).toEqual(address);
     expect(out.context.state.clientSecret).toBe('cs_1');
     expect(out.context.totalPrice).toBeCloseTo(15.8);
   });
 
-  it('setPayment is rejected before shipping is set', async () => {
-    const out = await CHECKOUT_STATES.shipping.fn(
+  it('setPayment is order-independent (records payment, stays collecting)', async () => {
+    const out = await CHECKOUT_STATES.collecting.fn(
       makeCtx(),
       ev({ type: 'setPayment', paymentMethod: { type: 'mock', token: 'tok_1' } }),
     );
-    expect(out.next).toBe('shipping');
-    expect(out.error).toMatch(/Cannot 'setPayment' from state: shipping/);
-  });
-
-  it('timeout cancels the checkout and releases reservations', async () => {
-    const ctx = makeCtx({ reservations: [{ reservationId: 'r-1' } as never] });
-    const out = await CHECKOUT_STATES.shipping.fn(ctx, timeout);
-    expect(out.next).toBe(terminal('cancelled'));
-    expect(releaseReservations).toHaveBeenCalled();
-  });
-});
-
-describe('payment', () => {
-  const paidCtx = () =>
-    makeCtx({
-      state: {
-        step: 'payment',
-        isGuest: true,
-        shippingAddress: address,
-        shippingCost: 5,
-        tax: 0.8,
-      },
-    });
-
-  it('setPayment advances to review', async () => {
-    const out = await CHECKOUT_STATES.payment.fn(
-      paidCtx(),
-      ev({ type: 'setPayment', paymentMethod: { type: 'mock', token: 'tok_1' } }),
-    );
-    expect(out.next).toBe('review');
+    expect(out.next).toBe('collecting');
     expect(out.context.state.paymentMethod?.token).toBe('tok_1');
   });
 
-  it('setPayment without a shipping address is rejected', async () => {
-    const out = await CHECKOUT_STATES.payment.fn(
+  it('a PaymentIntent init failure surfaces on the state and stays collecting', async () => {
+    vi.mocked(createPaymentIntent).mockRejectedValueOnce(new Error('provider down'));
+    const out = await CHECKOUT_STATES.collecting.fn(
       makeCtx(),
-      ev({ type: 'setPayment', paymentMethod: { type: 'mock', token: 'tok_1' } }),
+      ev({ type: 'setShipping', shippingAddress: address }),
     );
-    expect(out.next).toBe('payment');
-    expect(out.error).toMatch(/shipping address required/i);
+    expect(out.next).toBe('collecting');
+    expect(out.error).toMatch(/unable to initialize payment/i);
+    expect(out.context.state.error).toMatch(/unable to initialize payment/i);
+    // Pricing still folded so the shopper sees the computed totals.
+    expect(out.context.shippingCost).toBe(5);
   });
 });
 
-describe('review — submitOrder', () => {
-  it('runs the pipeline and completes the checkout', async () => {
-    const out = await CHECKOUT_STATES.review.fn(readyCtx(), ev({ type: 'submitOrder' }));
+describe('collecting — submitOrder', () => {
+  it('missing prerequisites are rejected without running the pipeline', async () => {
+    const out = await CHECKOUT_STATES.collecting.fn(makeCtx(), ev({ type: 'submitOrder' }));
+    expect(out.next).toBe('collecting');
+    expect(out.error).toMatch(/shipping and payment required/i);
+    expect(processPayment).not.toHaveBeenCalled();
+  });
+
+  it('happy path runs the saga and completes', async () => {
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
     expect(out.next).toBe(terminal('complete'));
     expect(out.context.state.order?.orderId).toBe('o-1');
     expect(startOrderManagementWorkflow).toHaveBeenCalled();
   });
 
-  it('payment failure returns to payment with the error', async () => {
-    vi.mocked(processPayment).mockResolvedValueOnce(false as never);
-    const out = await CHECKOUT_STATES.review.fn(readyCtx(), ev({ type: 'submitOrder' }));
-    expect(out.next).toBe('payment');
-    expect(out.error).toMatch(/payment failed/i);
-  });
-
-  it('missing prerequisites are rejected without running the pipeline', async () => {
-    const ctx = makeCtx({ state: { step: 'review', isGuest: true, shippingCost: 0, tax: 0 } });
-    const out = await CHECKOUT_STATES.review.fn(ctx, ev({ type: 'submitOrder' }));
-    expect(out.next).toBe('review');
-    expect(out.error).toMatch(/shipping and payment required/i);
+  it('a stale reviewedCartVersion aborts with CART_CHANGED and un-freezes the cart', async () => {
+    const signal = vi.fn();
+    vi.mocked(getExternalWorkflowHandle).mockReturnValue({ signal, cancel: vi.fn() } as never);
+    vi.mocked(queryCart).mockResolvedValueOnce({
+      items: [],
+      subtotalPrice: 10,
+      totalDiscounts: 0,
+      appliedCoupons: [],
+      cartVersion: 7,
+    } as never);
+    const out = await CHECKOUT_STATES.collecting.fn(
+      readyCtx(),
+      ev({ type: 'submitOrder', reviewedCartVersion: 1 }),
+    );
+    expect(out.next).toBe('collecting');
+    expect(out.error).toBe('CART_CHANGED');
     expect(processPayment).not.toHaveBeenCalled();
+    expect(signal).toHaveBeenLastCalledWith(expect.anything(), { kind: 'submitAborted' });
   });
 
-  it('cancelCheckout from review releases reservations and terminates', async () => {
-    const out = await CHECKOUT_STATES.review.fn(readyCtx(), ev({ type: 'cancelCheckout' }));
-    expect(out.next).toBe(terminal('cancelled'));
-    expect(releaseReservations).toHaveBeenCalled();
-    expect(out.context.reservations).toEqual([]);
+  it('payment failure stays collecting with the error', async () => {
+    vi.mocked(processPayment).mockResolvedValueOnce(false as never);
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    expect(out.next).toBe('collecting');
+    expect(out.error).toMatch(/payment failed/i);
+    // Demo divergence from mono: reservations are kept for a submit retry (they
+    // expire via the inventory TTL), not released on payment failure.
+    expect(releaseReservations).not.toHaveBeenCalled();
   });
 
   it('submitOrder freezes the cart, re-pulls contents, and prices the fresh totals', async () => {
@@ -227,7 +220,7 @@ describe('review — submitOrder', () => {
       cartVersion: 3,
     } as never);
 
-    const out = await CHECKOUT_STATES.review.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
     expect(out.next).toBe(terminal('complete'));
     // Freeze phase announced to the parent; no abort on success.
     expect(signal).toHaveBeenCalledTimes(1);
@@ -241,18 +234,15 @@ describe('review — submitOrder', () => {
     vi.mocked(getExternalWorkflowHandle).mockReturnValue({ signal, cancel: vi.fn() } as never);
     vi.mocked(processPayment).mockResolvedValueOnce(false as never);
 
-    const out = await CHECKOUT_STATES.review.fn(readyCtx(), ev({ type: 'submitOrder' }));
-    expect(out.next).toBe('payment');
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    expect(out.next).toBe('collecting');
     expect(signal).toHaveBeenCalledWith(expect.anything(), { kind: 'submitStarted' });
     expect(signal).toHaveBeenLastCalledWith(expect.anything(), { kind: 'submitAborted' });
   });
 });
 
-describe('recompute nudge (inbound signal from the cart)', () => {
-  it('in shipping (no address yet) folds contents and stays in shipping', async () => {
-    const shippingCtx = makeCtx({
-      state: { step: 'shipping', isGuest: true, shippingCost: 0, tax: 0 },
-    });
+describe('collecting — recompute nudge (inbound signal from the cart)', () => {
+  it('without an address folds contents and leaves pricing alone', async () => {
     vi.mocked(queryCart).mockResolvedValueOnce({
       items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 3, price: 10 }],
       subtotalPrice: 30,
@@ -261,14 +251,14 @@ describe('recompute nudge (inbound signal from the cart)', () => {
       cartVersion: 2,
     } as never);
 
-    const out = await CHECKOUT_STATES.shipping.fn(shippingCtx, recompute);
-    expect(out.next).toBe('shipping');
+    const out = await CHECKOUT_STATES.collecting.fn(makeCtx(), recompute);
+    expect(out.next).toBe('collecting');
     expect(out.context.subtotalPrice).toBe(30);
     expect(out.context.cartVersion).toBe(2);
     expect(out.context.totalPrice).toBe(30);
   });
 
-  it('in review (address + payment set) re-prices and drops back to payment', async () => {
+  it('with address + payment set re-prices and un-checks payment', async () => {
     vi.mocked(queryCart).mockResolvedValueOnce({
       items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 10 }],
       subtotalPrice: 20,
@@ -277,11 +267,27 @@ describe('recompute nudge (inbound signal from the cart)', () => {
       cartVersion: 2,
     } as never);
 
-    const out = await CHECKOUT_STATES.review.fn(readyCtx(), recompute);
-    expect(out.next).toBe('payment');
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), recompute);
+    expect(out.next).toBe('collecting');
     expect(out.context.subtotalPrice).toBe(20);
     // Re-priced against the fresh subtotal; payment method un-checked.
     expect(out.context.totalPrice).toBeCloseTo(25.8);
     expect(out.context.state.paymentMethod).toBeUndefined();
+  });
+});
+
+describe('collecting — cancel / timeout', () => {
+  it('cancelCheckout releases reservations and terminates as cancelled', async () => {
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'cancelCheckout' }));
+    expect(out.next).toBe(terminal('cancelled'));
+    expect(releaseReservations).toHaveBeenCalled();
+    expect(out.context.reservations).toEqual([]);
+  });
+
+  it('the collecting 1h timeout cancels the checkout and releases reservations', async () => {
+    const ctx = makeCtx({ reservations: [{ reservationId: 'r-1' } as never] });
+    const out = await CHECKOUT_STATES.collecting.fn(ctx, timeout);
+    expect(out.next).toBe(terminal('cancelled'));
+    expect(releaseReservations).toHaveBeenCalled();
   });
 });

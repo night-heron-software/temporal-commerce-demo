@@ -58,9 +58,9 @@ describe('fulfiller-order decide/evolve', () => {
     expect(ctx.so.items[0].status).toBe('in_production');
   });
 
-  it('autoShipped creates the simulated shipment with the injected tracking number', () => {
+  it('simulatedShip creates the simulated shipment with the injected tracking number', () => {
     const ctx = apply(makeCtx({ status: 'in_production' }), {
-      type: 'autoShipped',
+      type: 'simulatedShip',
       trackingNumber: 'SIMABC123',
       at: 't2',
     });
@@ -72,8 +72,8 @@ describe('fulfiller-order decide/evolve', () => {
     expect(ctx.so.items[0].status).toBe('shipped');
   });
 
-  it('autoDelivered completes the order', () => {
-    const ctx = apply(makeCtx({ status: 'shipped' }), { type: 'autoDelivered', at: 't3' });
+  it('simulatedDeliver completes the order', () => {
+    const ctx = apply(makeCtx({ status: 'shipped' }), { type: 'simulatedDeliver', at: 't3' });
     expect(ctx.so.status).toBe('delivered');
     expect(ctx.so.completedAt).toBe('t3');
     expect(ctx.so.items[0].status).toBe('delivered');
@@ -101,7 +101,7 @@ describe('fulfiller-order decide/evolve', () => {
 
   it('fulfillerStatus delivered stamps the newest shipment', () => {
     const shipped = apply(makeCtx({ status: 'in_production' }), {
-      type: 'autoShipped',
+      type: 'simulatedShip',
       trackingNumber: 'SIM1',
       at: 't2',
     });

@@ -53,7 +53,10 @@ export interface SetPaymentSignal {
   paymentMethod: PaymentMethod;
 }
 
-export type SubmitOrderSignal = object;
+export interface SubmitOrderSignal {
+  /** The cartVersion the buyer reviewed; submit is rejected if the cart changed since. */
+  reviewedCartVersion?: number;
+}
 
 export type CancelCheckoutSignal = object;
 

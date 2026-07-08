@@ -99,81 +99,36 @@ Source: [src/temporal/checkout/states.ts](../../src/temporal/checkout/states.ts)
 ```mermaid
 stateDiagram-v2
   validating
-  shipping
-  payment
-  review
+  collecting
   [*] --> validating
-  validating --> shipping
+  validating --> collecting
   validating --> [*]: failed
-  shipping --> shipping: setShipping / acknowledgeCartChange / retargetParent / signal
-  shipping --> payment: setShipping / signal
-  shipping --> [*]: cancelCheckout → cancelled
-  payment --> shipping: setShipping / signal
-  payment --> payment: setShipping / setPayment / acknowledgeCartChange / retargetParent / signal
-  payment --> review: setPayment
-  payment --> [*]: cancelCheckout → cancelled
-  review --> shipping: setShipping / signal
-  review --> payment: setShipping / submitOrder / signal
-  review --> review: setPayment / submitOrder / acknowledgeCartChange / retargetParent
-  review --> [*]: submitOrder → complete
-  review --> [*]: cancelCheckout → cancelled
-  note right of shipping: timeout 1 hour
-  note right of payment: timeout 1 hour
-  note right of review: timeout 1 hour
+  collecting --> collecting: setShipping / setPayment / acknowledgeCartChange / retargetParent / submitOrder / signal
+  collecting --> [*]: cancelCheckout / timeout → cancelled
+  collecting --> [*]: submitOrder → complete
+  note right of collecting: timeout 1 hour
 ```
 
 ### State: `validating`
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| *(auto)* | `shipping` |  |
+| *(auto)* | `collecting` |  |
 | *(auto)* | ⇒ failed |  |
 
-### State: `shipping`
+### State: `collecting`
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: setShipping` | `shipping` | if: `prepared.paymentIntentError` |
-| `update: setShipping` | `payment` | if: `prepared.paymentIntentError` |
+| `update: setShipping` | `collecting` | if: `prepared.paymentIntentError` |
+| `update: setPayment` | `collecting` |  |
 | `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
-| `update: acknowledgeCartChange` | `shipping` |  |
-| `update: retargetParent` | `shipping` |  |
-| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
-| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
-
-**Timeout:** 1 hour
-
-### State: `payment`
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `update: setShipping` | `shipping` | if: `prepared.paymentIntentError` |
-| `update: setShipping` | `payment` | if: `prepared.paymentIntentError` |
-| `update: setPayment` | `payment` | if: `!ctx.state.shippingAddress` |
-| `update: setPayment` | `review` | if: `!ctx.state.shippingAddress` |
-| `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
-| `update: acknowledgeCartChange` | `payment` |  |
-| `update: retargetParent` | `payment` |  |
-| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
-| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
-
-**Timeout:** 1 hour
-
-### State: `review`
-
-| Trigger | Next | Notes |
-|---------|------|-------|
-| `update: setShipping` | `shipping` | if: `prepared.paymentIntentError` |
-| `update: setShipping` | `payment` | if: `prepared.paymentIntentError` |
-| `update: setPayment` | `review` |  |
-| `update: submitOrder` | `review` | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
-| `update: submitOrder` | `payment` | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
-| `update: submitOrder` | ⇒ complete | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success && prepared.error === 'Shipping and payment required'`; `!prepared.success` |
-| `update: cancelCheckout` | ⇒ cancelled | finalize: `releaseReservations` |
-| `update: acknowledgeCartChange` | `review` |  |
-| `update: retargetParent` | `review` |  |
-| `signal` | `payment` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
-| `signal` | `shipping` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
+| `update: acknowledgeCartChange` | `collecting` |  |
+| `update: retargetParent` | `collecting` |  |
+| `update: submitOrder` | `collecting` | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success` |
+| `update: submitOrder` | ⇒ complete | prepare: `freeze`, `queryCart`, `prepareSubmitOrder` · if: `!prepared.success` |
+| `timeout` | ⇒ cancelled | finalize: `releaseReservations` |
+| `signal` | `collecting` | prepare: `queryCart`, `calculateShipping`, `calculateTax` |
 
 **Timeout:** 1 hour
 

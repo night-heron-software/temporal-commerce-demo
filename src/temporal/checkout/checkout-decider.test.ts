@@ -49,8 +49,10 @@ const queriedCart = (overrides: Partial<QueriedCart> = {}): QueriedCart => ({
   ...overrides,
 });
 
+// The fold never writes the UI `step` — the workflow derives it from prerequisites
+// (deriveStep), so these tests assert the prerequisites themselves.
 describe('checkout decide/evolve', () => {
-  it('validated(success) stores reservations, folds the live cart, and moves to shipping', () => {
+  it('validated(success) → CartLoaded: stores reservations and folds the live cart', () => {
     const ctx = apply(makeCtx({ items: [], subtotalPrice: 0, totalPrice: 0 }), {
       type: 'validated',
       prepared: {
@@ -59,7 +61,6 @@ describe('checkout decide/evolve', () => {
         cart: queriedCart(),
       },
     });
-    expect(ctx.state.step).toBe('shipping');
     expect(ctx.reservations).toHaveLength(1);
     // Live contents replace the empty seed (no snapshot in the input).
     expect(ctx.items).toHaveLength(1);
@@ -67,16 +68,16 @@ describe('checkout decide/evolve', () => {
     expect(ctx.totalPrice).toBe(10);
   });
 
-  it('validated(failure) fails the checkout with the reservation error', () => {
+  it('validated(failure) → ValidationFailed: records the reservation error', () => {
     const ctx = apply(makeCtx(), {
       type: 'validated',
       prepared: { success: false, reservations: [], error: 'out of stock', cart: queriedCart() },
     });
-    expect(ctx.state.step).toBe('failed');
     expect(ctx.state.error).toBe('out of stock');
+    expect(ctx.reservations).toEqual([]);
   });
 
-  it('recompute folds fresh contents, re-prices when priced, and un-checks payment', () => {
+  it('recompute → Recomputed: folds fresh contents, re-prices, and un-checks payment', () => {
     const priced = makeCtx({
       state: {
         step: 'review',
@@ -110,71 +111,74 @@ describe('checkout decide/evolve', () => {
     expect(ctx.state.paymentMethod).toBeUndefined();
   });
 
-  it('recompute without an address folds contents but leaves pricing alone', () => {
+  it('recompute without re-pricing folds contents and keeps prior shipping/tax', () => {
     const ctx = apply(makeCtx(), {
       type: 'recompute',
       prepared: { cart: queriedCart({ subtotalPrice: 30, cartVersion: 3 }) },
     });
     expect(ctx.subtotalPrice).toBe(30);
     expect(ctx.cartVersion).toBe(3);
+    // Falls back to the context's current pricing (0 before an address is set).
     expect(ctx.shippingCost).toBe(0);
     expect(ctx.totalPrice).toBe(30);
   });
 
-  it('setShipping success prices the order and advances to payment', () => {
+  it('setShipping success → ShippingSet: prices the order and records the address', () => {
     const ctx = apply(makeCtx(), {
       type: 'setShipping',
       shippingAddress: address,
       prepared: { calculatedShipping: 5, calculatedTax: 0.8, clientSecret: 'cs_1' },
     });
-    expect(ctx.state.step).toBe('payment');
     expect(ctx.state.shippingAddress).toEqual(address);
     expect(ctx.state.clientSecret).toBe('cs_1');
+    expect(ctx.state.error).toBeUndefined();
     expect(ctx.shippingCost).toBe(5);
     expect(ctx.totalTax).toBe(0.8);
     expect(ctx.totalPrice).toBeCloseTo(15.8);
   });
 
-  it('setShipping with a PaymentIntent failure keeps pricing but records the error', () => {
+  it('setShipping with a PaymentIntent failure → ShippingFailed: keeps pricing, records the error', () => {
     const ctx = apply(makeCtx(), {
       type: 'setShipping',
       shippingAddress: address,
       prepared: { calculatedShipping: 5, calculatedTax: 0.8, paymentIntentError: 'no payment' },
     });
-    expect(ctx.state.step).toBe('validating'); // step unchanged on error
     expect(ctx.state.error).toBe('no payment');
+    expect(ctx.state.shippingAddress).toEqual(address);
     expect(ctx.shippingCost).toBe(5);
   });
 
-  it('setPayment records the method and moves to review', () => {
+  it('setPayment → PaymentSet: records the method and clears the error', () => {
     const ctx = apply(makeCtx(), {
       type: 'setPayment',
       paymentMethod: { type: 'mock', token: 'tok_1' },
     });
-    expect(ctx.state.step).toBe('review');
     expect(ctx.state.paymentMethod?.token).toBe('tok_1');
     expect(ctx.state.error).toBeUndefined();
   });
 
-  it('submitOrder success completes with the order; failure returns to payment with the error', () => {
-    const ok = apply(makeCtx(), { type: 'submitOrder', prepared: { success: true, order } });
-    expect(ok.state.step).toBe('complete');
+  it('submitOrder success → OrderSubmitted adopts newState; failure → SubmitRejected records the error', () => {
+    const base = makeCtx();
+    const ok = apply(base, {
+      type: 'submitOrder',
+      prepared: { success: true, order, newState: { ...base.state, order } },
+    });
     expect(ok.state.order?.orderId).toBe('o-1');
 
     const fail = apply(makeCtx(), {
       type: 'submitOrder',
       prepared: { success: false, error: 'Payment failed. Please try again.' },
     });
-    expect(fail.state.step).toBe('payment');
+    expect(fail.state.order).toBeUndefined();
     expect(fail.state.error).toMatch(/payment failed/i);
   });
 
-  it('cancelCheckout clears reservations and marks cancelled', () => {
+  it('cancelCheckout → Cancelled: clears reservations and the error', () => {
     const ctx = apply(makeCtx({ reservations: [{ reservationId: 'r-1' } as never] }), {
       type: 'cancelCheckout',
     });
-    expect(ctx.state.step).toBe('cancelled');
     expect(ctx.reservations).toEqual([]);
+    expect(ctx.state.error).toBeUndefined();
   });
 
   it('acknowledgeCartChange and retargetParent update the coordination fields', () => {
@@ -191,7 +195,6 @@ describe('checkout decide/evolve', () => {
   it('does not mutate the input context', () => {
     const ctx = makeCtx();
     apply(ctx, { type: 'setPayment', paymentMethod: { type: 'mock', token: 'tok_1' } });
-    expect(ctx.state.step).toBe('validating');
     expect(ctx.state.paymentMethod).toBeUndefined();
   });
 });

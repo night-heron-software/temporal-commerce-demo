@@ -138,16 +138,17 @@ describe('checkoutWorkflow (Temporal test env)', () => {
     );
   }, 120_000);
 
-  it('rejects out-of-order updates with the state-scoped error response', async () => {
+  it('rejects a premature submit with the prerequisites error (step stays derived)', async () => {
     const activities = makeActivities();
     await withWorkflowEnv(
       [{ taskQueue: CHECKOUT_TASK_QUEUE, workflowsPath: WORKFLOWS_PATH, activities }],
       async (env) => {
         const handle = await env.client.workflow.start(checkoutWorkflow, startOpts());
 
-        // submitOrder while still collecting the shipping address → formatted error response
+        // submitOrder while prerequisites are missing → formatted error response; the
+        // single `collecting` state derives the step from what's set (nothing yet → shipping)
         const rejected = await handle.executeUpdate(submitOrderUpdate, { args: [{}] });
-        expect(rejected.error).toMatch(/Cannot 'submitOrder' from state: shipping/);
+        expect(rejected.error).toMatch(/shipping and payment required/i);
         expect(rejected.step).toBe('shipping');
         expect(activities.processPayment).not.toHaveBeenCalled();
 

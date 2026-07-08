@@ -9,6 +9,10 @@
  * (`states.ts` prepare) and injected into the command as a `prepared` payload.
  *
  * `State` is the whole `CheckoutContext` (checkout state + pricing + reservations + parent link).
+ *
+ * The fold owns the pricing math `totalPrice = subtotal − discounts + shipping + tax` and never
+ * writes the UI-facing `step` — the workflow derives it from prerequisites (see `deriveStep` in
+ * `workflows.ts`), matching the mono's single-`collecting`-state design.
  */
 
 import type {
@@ -52,100 +56,112 @@ export interface ShippingPrepared {
 
 /** Result of the submit-order pipeline (payment → reservations → order → email → OMS). */
 export type SubmitOrderPrepared =
-  | { success: true; order: Order }
+  | { success: true; order: Order; newState: CheckoutState }
   | { success: false; error: string };
 
 // ── Commands & facts ────────────────────────────────────────────────────────
 
+/** The Chassaing "command": the intent enriched with its `prepare` result / payload by the shell. */
 export type CheckoutCommand =
   | { type: 'validated'; prepared: ValidatingPrepared }
   | { type: 'setShipping'; shippingAddress: ShippingAddress; prepared: ShippingPrepared }
   | { type: 'setPayment'; paymentMethod: PaymentMethod }
-  | { type: 'submitOrder'; prepared: SubmitOrderPrepared }
-  | { type: 'cancelCheckout' }
   | { type: 'acknowledgeCartChange'; cartVersion: number }
   | { type: 'retargetParent'; newParentCartWorkflowId: string }
+  | { type: 'cancelCheckout' }
+  | { type: 'submitOrder'; prepared: SubmitOrderPrepared }
   | { type: 'recompute'; prepared: RecomputePrepared };
 
+/** Past-tense domain facts. */
 export type CheckoutFact =
-  | { type: 'ValidationSucceeded'; reservations: ReservationInfo[]; cart: QueriedCart }
+  | { type: 'CartLoaded'; cart: QueriedCart; reservations: ReservationInfo[] }
   | { type: 'ValidationFailed'; error: string }
-  | { type: 'CartRecomputed'; cart: QueriedCart; shippingCost?: number; tax?: number }
   | {
-      type: 'ShippingPriced';
+      type: 'ShippingSet';
       shippingAddress: ShippingAddress;
-      shippingCost: number;
+      shipping: number;
       tax: number;
       clientSecret?: string;
-      error?: string;
     }
-  | { type: 'PaymentMethodSet'; paymentMethod: PaymentMethod }
-  | { type: 'OrderCompleted'; order: Order }
-  | { type: 'SubmitFailed'; error: string }
-  | { type: 'CheckoutCancelled' }
+  | {
+      type: 'ShippingFailed';
+      shippingAddress: ShippingAddress;
+      shipping: number;
+      tax: number;
+      error: string;
+    }
+  | { type: 'PaymentSet'; paymentMethod: PaymentMethod }
   | { type: 'CartChangeAcknowledged'; cartVersion: number }
-  | { type: 'ParentRetargeted'; newParentCartWorkflowId: string };
+  | { type: 'ParentRetargeted'; parentCartWorkflowId: string }
+  | { type: 'Cancelled' }
+  | { type: 'OrderSubmitted'; newState: CheckoutState }
+  | { type: 'SubmitRejected'; error: string }
+  | { type: 'Recomputed'; cart: QueriedCart; shipping: number; tax: number };
 
 // ── decide ──────────────────────────────────────────────────────────────────
 
-export function decide(command: CheckoutCommand, _state: CheckoutContext): CheckoutFact[] {
+/** decide(command, state) → facts. Pure. */
+export function decide(command: CheckoutCommand, state: CheckoutContext): CheckoutFact[] {
   switch (command.type) {
-    case 'validated':
-      return command.prepared.success
-        ? [
-            {
-              type: 'ValidationSucceeded',
-              reservations: command.prepared.reservations,
-              cart: command.prepared.cart,
-            },
-          ]
-        : [
-            {
-              type: 'ValidationFailed',
-              error: command.prepared.error || 'Some items are no longer available',
-            },
-          ];
+    case 'validated': {
+      const p = command.prepared;
+      return p.success
+        ? [{ type: 'CartLoaded', cart: p.cart, reservations: p.reservations }]
+        : [{ type: 'ValidationFailed', error: p.error || 'Some items are no longer available' }];
+    }
 
-    case 'setShipping':
+    case 'setShipping': {
+      const p = command.prepared;
+      if (p.paymentIntentError) {
+        return [
+          {
+            type: 'ShippingFailed',
+            shippingAddress: command.shippingAddress,
+            shipping: p.calculatedShipping,
+            tax: p.calculatedTax,
+            error: p.paymentIntentError,
+          },
+        ];
+      }
       return [
         {
-          type: 'ShippingPriced',
+          type: 'ShippingSet',
           shippingAddress: command.shippingAddress,
-          shippingCost: command.prepared.calculatedShipping,
-          tax: command.prepared.calculatedTax,
-          clientSecret: command.prepared.clientSecret,
-          error: command.prepared.paymentIntentError,
+          shipping: p.calculatedShipping,
+          tax: p.calculatedTax,
+          clientSecret: p.clientSecret ?? state.state.clientSecret,
         },
       ];
+    }
 
     case 'setPayment':
-      return [{ type: 'PaymentMethodSet', paymentMethod: command.paymentMethod }];
-
-    case 'submitOrder':
-      return command.prepared.success
-        ? [{ type: 'OrderCompleted', order: command.prepared.order }]
-        : [{ type: 'SubmitFailed', error: command.prepared.error }];
-
-    case 'cancelCheckout':
-      return [{ type: 'CheckoutCancelled' }];
+      return [{ type: 'PaymentSet', paymentMethod: command.paymentMethod }];
 
     case 'acknowledgeCartChange':
       return [{ type: 'CartChangeAcknowledged', cartVersion: command.cartVersion }];
 
     case 'retargetParent':
-      return [
-        { type: 'ParentRetargeted', newParentCartWorkflowId: command.newParentCartWorkflowId },
-      ];
+      return [{ type: 'ParentRetargeted', parentCartWorkflowId: command.newParentCartWorkflowId }];
 
-    case 'recompute':
+    case 'cancelCheckout':
+      return [{ type: 'Cancelled' }];
+
+    case 'submitOrder':
+      return command.prepared.success
+        ? [{ type: 'OrderSubmitted', newState: command.prepared.newState }]
+        : [{ type: 'SubmitRejected', error: command.prepared.error }];
+
+    case 'recompute': {
+      const p = command.prepared;
       return [
         {
-          type: 'CartRecomputed',
-          cart: command.prepared.cart,
-          shippingCost: command.prepared.shippingCost,
-          tax: command.prepared.tax,
+          type: 'Recomputed',
+          cart: p.cart,
+          shipping: p.shippingCost ?? state.shippingCost,
+          tax: p.tax ?? state.totalTax,
         },
       ];
+    }
 
     default:
       return [];
@@ -154,105 +170,105 @@ export function decide(command: CheckoutCommand, _state: CheckoutContext): Check
 
 // ── evolve ──────────────────────────────────────────────────────────────────
 
-function withState(ctx: CheckoutContext, state: CheckoutState): CheckoutContext {
-  return { ...ctx, state };
-}
-
+/** evolve(state, fact) → state. Pure fold; the ONLY writer of context / CheckoutState. */
 export function evolve(ctx: CheckoutContext, fact: CheckoutFact): CheckoutContext {
   switch (fact.type) {
-    case 'ValidationSucceeded':
+    case 'CartLoaded': {
+      const { cart } = fact;
       return {
-        ...withState(ctx, { ...ctx.state, step: 'shipping' }),
+        ...ctx,
+        items: cart.items,
+        subtotalPrice: cart.subtotalPrice,
+        totalDiscounts: cart.totalDiscounts,
+        appliedCoupons: cart.appliedCoupons,
+        cartVersion: cart.cartVersion,
+        totalPrice: cart.subtotalPrice - cart.totalDiscounts,
         reservations: fact.reservations,
-        items: fact.cart.items,
-        subtotalPrice: fact.cart.subtotalPrice,
-        totalDiscounts: fact.cart.totalDiscounts,
-        appliedCoupons: fact.cart.appliedCoupons,
-        cartVersion: fact.cart.cartVersion,
-        totalPrice: fact.cart.subtotalPrice - fact.cart.totalDiscounts,
-      };
-
-    case 'CartRecomputed': {
-      // Cart changed mid-checkout: fold the fresh contents, re-price when the shipping
-      // address was already set, and un-check the payment method so the shopper
-      // re-confirms against the new total.
-      const shippingCost = fact.shippingCost ?? ctx.shippingCost;
-      const tax = fact.tax ?? ctx.totalTax;
-      const priced = fact.shippingCost !== undefined;
-      return {
-        ...withState(ctx, {
-          ...ctx.state,
-          paymentMethod: undefined,
-          shippingCost: priced ? shippingCost : ctx.state.shippingCost,
-          tax: priced ? tax : ctx.state.tax,
-          error: undefined,
-        }),
-        items: fact.cart.items,
-        subtotalPrice: fact.cart.subtotalPrice,
-        totalDiscounts: fact.cart.totalDiscounts,
-        appliedCoupons: fact.cart.appliedCoupons,
-        cartVersion: fact.cart.cartVersion,
-        shippingCost,
-        totalTax: tax,
-        totalPrice: fact.cart.subtotalPrice - fact.cart.totalDiscounts + shippingCost + tax,
       };
     }
 
     case 'ValidationFailed':
-      return withState(ctx, { ...ctx.state, step: 'failed', error: fact.error });
+      return { ...ctx, state: { ...ctx.state, error: fact.error } };
 
-    case 'ShippingPriced': {
-      const totalPrice = ctx.subtotalPrice - ctx.totalDiscounts + fact.shippingCost + fact.tax;
-      const state: CheckoutState = fact.error
-        ? {
-            ...ctx.state,
-            shippingAddress: fact.shippingAddress,
-            shippingCost: fact.shippingCost,
-            tax: fact.tax,
-            error: fact.error,
-          }
-        : {
-            ...ctx.state,
-            step: 'payment',
-            shippingAddress: fact.shippingAddress,
-            shippingCost: fact.shippingCost,
-            tax: fact.tax,
-            clientSecret: fact.clientSecret,
-            error: undefined,
-          };
+    case 'ShippingSet': {
+      const state: CheckoutState = {
+        ...ctx.state,
+        shippingAddress: fact.shippingAddress,
+        shippingCost: fact.shipping,
+        tax: fact.tax,
+        clientSecret: fact.clientSecret,
+        error: undefined,
+      };
       return {
-        ...withState(ctx, state),
-        shippingCost: fact.shippingCost,
+        ...ctx,
+        state,
+        shippingCost: fact.shipping,
         totalTax: fact.tax,
-        totalPrice,
+        totalPrice: ctx.subtotalPrice - ctx.totalDiscounts + fact.shipping + fact.tax,
       };
     }
 
-    case 'PaymentMethodSet':
-      return withState(ctx, {
+    case 'ShippingFailed': {
+      const state: CheckoutState = {
         ...ctx.state,
-        step: 'review',
-        paymentMethod: fact.paymentMethod,
-        error: undefined,
-      });
-
-    case 'OrderCompleted':
-      return withState(ctx, { ...ctx.state, step: 'complete', order: fact.order });
-
-    case 'SubmitFailed':
-      return withState(ctx, { ...ctx.state, step: 'payment', error: fact.error });
-
-    case 'CheckoutCancelled':
+        shippingAddress: fact.shippingAddress,
+        shippingCost: fact.shipping,
+        tax: fact.tax,
+        error: fact.error,
+      };
       return {
-        ...withState(ctx, { ...ctx.state, step: 'cancelled', error: undefined }),
-        reservations: [],
+        ...ctx,
+        state,
+        shippingCost: fact.shipping,
+        totalTax: fact.tax,
+        totalPrice: ctx.subtotalPrice - ctx.totalDiscounts + fact.shipping + fact.tax,
+      };
+    }
+
+    case 'PaymentSet':
+      return {
+        ...ctx,
+        state: { ...ctx.state, paymentMethod: fact.paymentMethod, error: undefined },
       };
 
     case 'CartChangeAcknowledged':
-      return withState(ctx, { ...ctx.state, cartVersionAcknowledged: fact.cartVersion });
+      return { ...ctx, state: { ...ctx.state, cartVersionAcknowledged: fact.cartVersion } };
 
     case 'ParentRetargeted':
-      return { ...ctx, parentCartWorkflowId: fact.newParentCartWorkflowId };
+      return { ...ctx, parentCartWorkflowId: fact.parentCartWorkflowId };
+
+    case 'Cancelled':
+      return { ...ctx, state: { ...ctx.state, error: undefined }, reservations: [] };
+
+    case 'OrderSubmitted':
+      return { ...ctx, state: fact.newState };
+
+    case 'SubmitRejected':
+      return { ...ctx, state: { ...ctx.state, error: fact.error } };
+
+    case 'Recomputed': {
+      const { cart } = fact;
+      // Un-check payment on the amount-affecting cart change so the shopper re-confirms.
+      const state: CheckoutState = {
+        ...ctx.state,
+        paymentMethod: undefined,
+        shippingCost: fact.shipping,
+        tax: fact.tax,
+        error: undefined,
+      };
+      return {
+        ...ctx,
+        items: cart.items,
+        subtotalPrice: cart.subtotalPrice,
+        totalDiscounts: cart.totalDiscounts,
+        appliedCoupons: cart.appliedCoupons,
+        cartVersion: cart.cartVersion,
+        shippingCost: fact.shipping,
+        totalTax: fact.tax,
+        totalPrice: cart.subtotalPrice - cart.totalDiscounts + fact.shipping + fact.tax,
+        state,
+      };
+    }
 
     default:
       return ctx;

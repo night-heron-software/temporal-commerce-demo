@@ -174,7 +174,7 @@ await startChild('checkoutWorkflow', {
 
 ### Pattern 5: Declarative State Machine with Update Event Mapping
 
-> The checkout workflow is a state machine: `shipping → payment → review → processing → complete`. States and transitions are managed declaratively using a custom state machine driver.
+> The checkout workflow is a state machine: `validating → collecting → complete`. The UI steps (shipping → payment → review) are derived from which prerequisites are satisfied. States and transitions are managed declaratively using a custom state machine driver.
 
 ```typescript
 // The state function for the shipping step

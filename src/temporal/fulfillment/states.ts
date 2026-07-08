@@ -62,7 +62,7 @@ const inProduction = fulfillment.transitions(
       childStatus: {
         decide(ctx, signal, meta) {
           const context = apply(ctx, {
-            type: 'childStatusReported',
+            type: 'childStatus',
             update: signal.update,
             at: meta.timestamp,
           });

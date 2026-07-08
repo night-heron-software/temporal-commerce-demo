@@ -11,11 +11,11 @@ import type { FulfillmentWorkflowState, FulfillmentFulfillerOrderState } from '.
 
 export type FulfillmentCommand =
   | { type: 'cancel'; at: string }
-  | { type: 'childStatusReported'; update: FulfillmentFulfillerOrderState; at: string };
+  | { type: 'childStatus'; update: FulfillmentFulfillerOrderState; at: string };
 
 export type FulfillmentFact =
-  | { type: 'FulfillmentCancelled'; at: string }
-  | { type: 'FulfillerOrderReported'; update: FulfillmentFulfillerOrderState; at: string };
+  | { type: 'OrderCancelled'; at: string }
+  | { type: 'ChildStatusApplied'; update: FulfillmentFulfillerOrderState; at: string };
 
 /** Aggregate the parent status from the fulfiller orders' statuses. */
 export function aggregateStatus(
@@ -47,9 +47,9 @@ export function decide(
 ): FulfillmentFact[] {
   switch (command.type) {
     case 'cancel':
-      return [{ type: 'FulfillmentCancelled', at: command.at }];
-    case 'childStatusReported':
-      return [{ type: 'FulfillerOrderReported', update: command.update, at: command.at }];
+      return [{ type: 'OrderCancelled', at: command.at }];
+    case 'childStatus':
+      return [{ type: 'ChildStatusApplied', update: command.update, at: command.at }];
     default:
       return [];
   }
@@ -61,7 +61,7 @@ export function evolve(
 ): FulfillmentWorkflowState {
   const draft = copyState(state);
   switch (fact.type) {
-    case 'FulfillmentCancelled':
+    case 'OrderCancelled':
       draft.status = 'cancelled';
       draft.updatedAt = fact.at;
       for (const so of draft.fulfillerOrders) {
@@ -70,7 +70,7 @@ export function evolve(
       }
       return draft;
 
-    case 'FulfillerOrderReported':
+    case 'ChildStatusApplied':
       draft.fulfillerOrders = draft.fulfillerOrders.map((so) =>
         so.fulfillerOrderId === fact.update.fulfillerOrderId ? fact.update : so,
       );

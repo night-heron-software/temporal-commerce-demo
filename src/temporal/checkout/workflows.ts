@@ -11,6 +11,7 @@ import type {
   RecomputeSignal,
   SetShippingSignal,
   SetPaymentSignal,
+  SubmitOrderSignal,
   RetargetParentSignal,
 } from './types';
 
@@ -49,6 +50,16 @@ export {
   retargetParentUpdate,
   getCheckoutStateQuery,
 };
+
+/**
+ * Derive the UI step from prerequisites (the single `collecting` state has no
+ * per-step machine state). shipping → payment → review.
+ */
+function deriveStep(state: CheckoutState): CheckoutStep {
+  if (!state.shippingAddress) return 'shipping';
+  if (!state.paymentMethod) return 'payment';
+  return 'review';
+}
 
 export async function checkoutWorkflow(
   input: CheckoutWorkflowInput,
@@ -102,7 +113,10 @@ export async function checkoutWorkflow(
       state: CheckoutStateName | `__terminal:${string}`,
     ) => {
       ctx = newCtx;
-      currentStep = deriveDisplayStatus<CheckoutStep>(state);
+      // Single `collecting` state → derive the UI step from prerequisites; terminal
+      // states (complete/failed/cancelled) and `validating` map straight through.
+      const display = deriveDisplayStatus<CheckoutStep | 'collecting'>(state);
+      currentStep = display === 'collecting' ? deriveStep(ctx.state) : display;
     },
     onCancellation: async (
       cancelCtx: CheckoutContext,
@@ -121,7 +135,7 @@ export async function checkoutWorkflow(
   };
 
   // Shared response shaping for every update: errors echo the current state with the
-  // message attached; responses always carry the driver-derived step.
+  // message attached; responses always carry the derived step (evolve never writes it).
   const stateFormatters = {
     formatError: (err: string, currentCtx: CheckoutContext): CheckoutState => ({
       ...currentCtx.state,
@@ -129,7 +143,7 @@ export async function checkoutWorkflow(
       step: currentStep,
     }),
     formatResponse: (res: CheckoutState | void): CheckoutState | undefined =>
-      res ? { ...res, step: res.step || currentStep } : undefined,
+      res ? { ...res, step: currentStep } : undefined,
   };
 
   const updateHandlers: MappedUpdateRegistration<
@@ -152,7 +166,10 @@ export async function checkoutWorkflow(
     },
     {
       definition: submitOrderUpdate,
-      toEvent: () => ({ type: 'submitOrder' }),
+      toEvent: (s: SubmitOrderSignal) => ({
+        type: 'submitOrder',
+        reviewedCartVersion: s?.reviewedCartVersion,
+      }),
       ...stateFormatters,
     },
     {

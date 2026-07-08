@@ -295,7 +295,7 @@
             {
               "on": "(auto)",
               "kind": "auto",
-              "to": "shipping"
+              "to": "collecting"
             },
             {
               "on": "(auto)",
@@ -305,7 +305,7 @@
           ]
         },
         {
-          "name": "shipping",
+          "name": "collecting",
           "timeout": "1 hour",
           "transitional": false,
           "hasPrepare": true,
@@ -314,18 +314,15 @@
             {
               "on": "setShipping",
               "kind": "update",
-              "to": "shipping",
+              "to": "collecting",
               "conditions": [
                 "prepared.paymentIntentError"
               ]
             },
             {
-              "on": "setShipping",
+              "on": "setPayment",
               "kind": "update",
-              "to": "payment",
-              "conditions": [
-                "prepared.paymentIntentError"
-              ]
+              "to": "collecting"
             },
             {
               "on": "cancelCheckout",
@@ -338,162 +335,18 @@
             {
               "on": "acknowledgeCartChange",
               "kind": "update",
-              "to": "shipping"
+              "to": "collecting"
             },
             {
               "on": "retargetParent",
               "kind": "update",
-              "to": "shipping"
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "payment",
-              "prepareActivities": [
-                "queryCart",
-                "calculateShipping",
-                "calculateTax"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipping",
-              "prepareActivities": [
-                "queryCart",
-                "calculateShipping",
-                "calculateTax"
-              ]
-            }
-          ]
-        },
-        {
-          "name": "payment",
-          "timeout": "1 hour",
-          "transitional": false,
-          "hasPrepare": true,
-          "hasFinalize": true,
-          "transitions": [
-            {
-              "on": "setShipping",
-              "kind": "update",
-              "to": "shipping",
-              "conditions": [
-                "prepared.paymentIntentError"
-              ]
-            },
-            {
-              "on": "setShipping",
-              "kind": "update",
-              "to": "payment",
-              "conditions": [
-                "prepared.paymentIntentError"
-              ]
-            },
-            {
-              "on": "setPayment",
-              "kind": "update",
-              "to": "payment",
-              "conditions": [
-                "!ctx.state.shippingAddress"
-              ]
-            },
-            {
-              "on": "setPayment",
-              "kind": "update",
-              "to": "review",
-              "conditions": [
-                "!ctx.state.shippingAddress"
-              ]
-            },
-            {
-              "on": "cancelCheckout",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "releaseReservations"
-              ]
-            },
-            {
-              "on": "acknowledgeCartChange",
-              "kind": "update",
-              "to": "payment"
-            },
-            {
-              "on": "retargetParent",
-              "kind": "update",
-              "to": "payment"
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "payment",
-              "prepareActivities": [
-                "queryCart",
-                "calculateShipping",
-                "calculateTax"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipping",
-              "prepareActivities": [
-                "queryCart",
-                "calculateShipping",
-                "calculateTax"
-              ]
-            }
-          ]
-        },
-        {
-          "name": "review",
-          "timeout": "1 hour",
-          "transitional": false,
-          "hasPrepare": true,
-          "hasFinalize": true,
-          "transitions": [
-            {
-              "on": "setShipping",
-              "kind": "update",
-              "to": "shipping",
-              "conditions": [
-                "prepared.paymentIntentError"
-              ]
-            },
-            {
-              "on": "setShipping",
-              "kind": "update",
-              "to": "payment",
-              "conditions": [
-                "prepared.paymentIntentError"
-              ]
-            },
-            {
-              "on": "setPayment",
-              "kind": "update",
-              "to": "review"
+              "to": "collecting"
             },
             {
               "on": "submitOrder",
               "kind": "update",
-              "to": "review",
+              "to": "collecting",
               "conditions": [
-                "!prepared.success && prepared.error === 'Shipping and payment required'",
-                "!prepared.success"
-              ],
-              "prepareActivities": [
-                "freeze",
-                "queryCart",
-                "prepareSubmitOrder"
-              ]
-            },
-            {
-              "on": "submitOrder",
-              "kind": "update",
-              "to": "payment",
-              "conditions": [
-                "!prepared.success && prepared.error === 'Shipping and payment required'",
                 "!prepared.success"
               ],
               "prepareActivities": [
@@ -507,7 +360,6 @@
               "kind": "update",
               "to": "__terminal:complete",
               "conditions": [
-                "!prepared.success && prepared.error === 'Shipping and payment required'",
                 "!prepared.success"
               ],
               "prepareActivities": [
@@ -517,37 +369,17 @@
               ]
             },
             {
-              "on": "cancelCheckout",
-              "kind": "update",
+              "on": "timeout",
+              "kind": "timeout",
               "to": "__terminal:cancelled",
               "finalizeActivities": [
                 "releaseReservations"
               ]
             },
             {
-              "on": "acknowledgeCartChange",
-              "kind": "update",
-              "to": "review"
-            },
-            {
-              "on": "retargetParent",
-              "kind": "update",
-              "to": "review"
-            },
-            {
               "on": "signal",
               "kind": "signal",
-              "to": "payment",
-              "prepareActivities": [
-                "queryCart",
-                "calculateShipping",
-                "calculateTax"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipping",
+              "to": "collecting",
               "prepareActivities": [
                 "queryCart",
                 "calculateShipping",

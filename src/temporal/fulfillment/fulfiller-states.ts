@@ -174,7 +174,7 @@ const inProduction = fulfiller.transitions(
           return { context: ctx as FulfillerOrderWorkflowContext, next: SELF };
         }
         const trackingNumber = `SIM${wf.workflowInfo().workflowId.slice(0, 8).toUpperCase()}`;
-        const context = apply(ctx, { type: 'autoShipped', trackingNumber, at: meta.timestamp });
+        const context = apply(ctx, { type: 'simulatedShip', trackingNumber, at: meta.timestamp });
         return { context, next: 'shipped' as const };
       },
     },
@@ -195,7 +195,7 @@ const shipped = fulfiller.transitions(
         if (ctx.manualMode) {
           return { context: ctx as FulfillerOrderWorkflowContext, next: SELF };
         }
-        const context = apply(ctx, { type: 'autoDelivered', at: meta.timestamp });
+        const context = apply(ctx, { type: 'simulatedDeliver', at: meta.timestamp });
         return { context, next: terminal('delivered') };
       },
     },

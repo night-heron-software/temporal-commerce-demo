@@ -282,7 +282,7 @@ The checkout workflow orchestrates the multi-step checkout process as a child of
 
 **Key Patterns:**
 
-- **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → shipping → payment → review → complete`). Order processing runs inline within the `review` state.
+- **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → collecting → complete`). The UI steps (shipping → payment → review) are *derived* from which prerequisites are satisfied, not tracked as machine states; order processing runs inline within the `collecting` state's `submitOrder` handler.
 - **Inventory Reservation Renewal** — At checkout start, existing cart reservations are renewed with a fresh TTL.
 - **Update Handlers as Events** — Custom update handlers map incoming signals/arguments (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events which trigger deterministic transitions.
 - **Back Navigation** — Users can go back: setting shipping from the payment/review step is allowed, which recalculates costs.

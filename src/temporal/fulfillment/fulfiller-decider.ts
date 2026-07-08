@@ -13,17 +13,17 @@ import type { FulfillerOrderWorkflowContext } from './fulfiller-workflows';
 
 export type FulfillerOrderCommand =
   | { type: 'submitted'; fulfillerExternalId: string; at: string }
-  | { type: 'autoShipped'; trackingNumber: string; at: string }
-  | { type: 'autoDelivered'; at: string }
+  | { type: 'simulatedShip'; trackingNumber: string; at: string }
+  | { type: 'simulatedDeliver'; at: string }
   | { type: 'fulfillerStatus'; update: Fulfillers.FulfillerStatusUpdate }
   | { type: 'cancel' };
 
 export type FulfillerOrderFact =
   | { type: 'OrderSubmitted'; fulfillerExternalId: string; at: string }
-  | { type: 'AutoShipped'; trackingNumber: string; at: string }
-  | { type: 'AutoDelivered'; at: string }
+  | { type: 'SimulatedShipped'; trackingNumber: string; at: string }
+  | { type: 'SimulatedDelivered'; at: string }
   | { type: 'FulfillerStatusApplied'; update: Fulfillers.FulfillerStatusUpdate }
-  | { type: 'OrderCancelled' };
+  | { type: 'Cancelled' };
 
 function copyCtx(ctx: Readonly<FulfillerOrderWorkflowContext>): FulfillerOrderWorkflowContext {
   return {
@@ -49,14 +49,14 @@ export function decide(
           at: command.at,
         },
       ];
-    case 'autoShipped':
-      return [{ type: 'AutoShipped', trackingNumber: command.trackingNumber, at: command.at }];
-    case 'autoDelivered':
-      return [{ type: 'AutoDelivered', at: command.at }];
+    case 'simulatedShip':
+      return [{ type: 'SimulatedShipped', trackingNumber: command.trackingNumber, at: command.at }];
+    case 'simulatedDeliver':
+      return [{ type: 'SimulatedDelivered', at: command.at }];
     case 'fulfillerStatus':
       return [{ type: 'FulfillerStatusApplied', update: command.update }];
     case 'cancel':
-      return [{ type: 'OrderCancelled' }];
+      return [{ type: 'Cancelled' }];
     default:
       return [];
   }
@@ -158,7 +158,7 @@ export function evolve(
       so.items.forEach((i) => (i.status = 'in_production'));
       return draft;
 
-    case 'AutoShipped':
+    case 'SimulatedShipped':
       so.status = 'shipped';
       so.shippedAt = fact.at;
       so.carrier = 'Simulated Carrier';
@@ -175,7 +175,7 @@ export function evolve(
       so.items.forEach((i) => (i.status = 'shipped'));
       return draft;
 
-    case 'AutoDelivered':
+    case 'SimulatedDelivered':
       so.status = 'delivered';
       so.completedAt = fact.at;
       so.items.forEach((i) => (i.status = 'delivered'));
@@ -185,7 +185,7 @@ export function evolve(
       applyFulfillerUpdate(draft, fact.update);
       return draft;
 
-    case 'OrderCancelled':
+    case 'Cancelled':
       so.status = 'cancelled';
       so.items.forEach((i) => (i.status = 'cancelled'));
       return draft;

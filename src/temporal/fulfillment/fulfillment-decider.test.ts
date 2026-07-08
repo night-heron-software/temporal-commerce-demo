@@ -74,10 +74,10 @@ describe('fulfillment decide/evolve', () => {
     expect(state.fulfillerOrders[0].items[0].status).toBe('cancelled');
   });
 
-  it('childStatusReported replaces the matching fulfiller order and re-aggregates', () => {
+  it('childStatus replaces the matching fulfiller order and re-aggregates', () => {
     const update = makeFulfillerOrder({ status: 'delivered' });
     const state = apply(makeState(), {
-      type: 'childStatusReported',
+      type: 'childStatus',
       update,
       at: '2026-02-01T00:00:00Z',
     });

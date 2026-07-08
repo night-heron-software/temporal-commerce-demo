@@ -6,9 +6,22 @@ export type Order = Cart.Order;
 export type PaymentMethod = Cart.PaymentMethod;
 export type ShippingAddress = Cart.ShippingAddress;
 
-export type CheckoutStateName = 'validating' | 'shipping' | 'payment' | 'review';
+export type CheckoutStateName = 'validating' | 'collecting';
 
-export type CheckoutStep = CheckoutStateName | 'complete' | 'failed' | 'cancelled';
+/**
+ * UI-facing checkout step. Decoupled from the machine state: the workflow has a single
+ * `collecting` state and the step is *derived* from which prerequisites are satisfied
+ * (shipping → payment → review). Kept as the stable external contract the storefront
+ * reads, independent of internal state names.
+ */
+export type CheckoutStep =
+  | 'validating'
+  | 'shipping'
+  | 'payment'
+  | 'review'
+  | 'complete'
+  | 'failed'
+  | 'cancelled';
 
 /**
  * The contracts definition is the single source of truth (its `step` union is a superset —
@@ -65,7 +78,10 @@ export interface SetPaymentSignal {
   paymentMethod: PaymentMethod;
 }
 
-export type SubmitOrderSignal = object;
+export interface SubmitOrderSignal {
+  /** The cartVersion the buyer reviewed; submit is rejected if the cart changed since. */
+  reviewedCartVersion?: number;
+}
 
 export type CancelCheckoutSignal = object;
 
@@ -78,7 +94,7 @@ export interface RetargetParentSignal {
 export type CheckoutInput =
   | { type: 'setShipping'; shippingAddress: ShippingAddress }
   | { type: 'setPayment'; paymentMethod: PaymentMethod }
-  | { type: 'submitOrder' }
+  | { type: 'submitOrder'; reviewedCartVersion?: number }
   | { type: 'cancelCheckout' }
   | { type: 'acknowledgeCartChange'; cartVersion: number }
   | { type: 'retargetParent'; newParentCartWorkflowId: string };
