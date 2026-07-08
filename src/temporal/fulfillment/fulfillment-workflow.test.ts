@@ -16,6 +16,7 @@ import {
   DEMO_STORE_ID,
 } from '../contracts/constants';
 import { fulfillmentWorkflow } from './workflows';
+import { cancelSignal } from './definitions';
 import type { FulfillmentOrderRequest } from './types';
 
 const WORKFLOWS_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'workflows.ts');
@@ -97,6 +98,46 @@ describe('fulfillmentWorkflow (Temporal test env)', () => {
         expect(activities.sendShippedEmail).toHaveBeenCalled();
         expect(activities.sendDeliveredEmail).toHaveBeenCalled();
         expect(activities.fulfillInventoryReservations).toHaveBeenCalled();
+      },
+    );
+  }, 120_000);
+
+  it('cancel awaits the still-running fulfiller child and releases inventory', async () => {
+    const activities = makeActivities();
+    // Manual mode parks the child on signals (no timer auto-progress), so it is
+    // still running when the cancel arrives — the regression this guards is the parent
+    // closing (and Temporal terminating the child) before cancelChildrenAndAwait resolves.
+    activities.getFeatureFlag = vi.fn(async () => true);
+    await withWorkflowEnv(
+      [{ taskQueue: FULFILLMENT_TASK_QUEUE, workflowsPath: WORKFLOWS_PATH, activities }],
+      async (env) => {
+        const handle = await env.client.workflow.start(fulfillmentWorkflow, {
+          taskQueue: FULFILLMENT_TASK_QUEUE,
+          ...buildWorkflowStartOptions({
+            storeId: DEMO_STORE_ID,
+            domain: 'fulfillment',
+            entityId: orderId,
+            orderId,
+            cartId: request.cartId,
+          }),
+          args: [request],
+        });
+
+        // Wait until the child has been spawned and the parent is running its machine.
+        await vi.waitFor(async () => {
+          expect(activities.submitFulfillerOrder).toHaveBeenCalled();
+        });
+
+        await handle.signal(cancelSignal);
+
+        // The parent must resolve (not hang) — cancelChildrenAndAwait waits on the child's
+        // own termination before the parent closes.
+        const result = await handle.result();
+        expect(result.status).toBe('cancelled');
+        expect(result.fulfillerOrders[0].status).toBe('cancelled');
+        expect(activities.releaseInventoryReservations).toHaveBeenCalled();
+        // Cancelled mid-flight → never delivered.
+        expect(activities.sendDeliveredEmail).not.toHaveBeenCalled();
       },
     );
   }, 120_000);

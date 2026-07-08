@@ -147,6 +147,12 @@ async function omsFinalize(_ctx: Readonly<OrderState>, decision: OmsDecision): P
       });
       await startChild('fulfillmentWorkflow', {
         ...fulfillmentStart,
+        // Without an explicit policy, Temporal defaults to TERMINATE — if OMS closes (complete,
+        // fail, cancel, or workflowExecutionTimeout expiry) before fulfillment naturally
+        // finishes, it would be killed mid-flight. ABANDON lets it keep running independently;
+        // it tracks its own cancellation via the fulfillment cancel signal and completes on its
+        // own once its (now-fixed) fulfiller-order children do.
+        parentClosePolicy: 'ABANDON',
         args: [
           {
             orderId: order.orderId,

@@ -112,6 +112,31 @@ async function syncProjections(state: FulfillmentWorkflowState) {
   await indexFulfillment(buildFulfillmentDocument(state));
 }
 
+/**
+ * Signal every tracked fulfiller-order child to cancel and wait for it to actually reach a
+ * terminal state before returning. Without this, the parent can close (per Temporal's default
+ * `parentClosePolicy: TERMINATE`) before a child processes the cancel signal, causing Temporal
+ * to forcibly terminate the still-running child.
+ */
+async function cancelChildrenAndAwait(
+  childHandles: Map<string, wf.ChildWorkflowHandle<typeof fulfillerOrderWorkflow>>,
+): Promise<void> {
+  await Promise.allSettled(
+    [...childHandles.values()].map(async (handle) => {
+      try {
+        await handle.signal(childCancelSignal);
+      } catch {
+        // Child may already be complete/gone — fall through to await its result anyway.
+      }
+      try {
+        await handle.result();
+      } catch {
+        // Child failed/was already terminated independently — nothing more to do here.
+      }
+    }),
+  );
+}
+
 // ============================================================================
 // Main Workflow
 // ============================================================================
@@ -227,6 +252,10 @@ export async function fulfillmentWorkflow(
               orderId: startCtx.orderId,
               cartId: startCtx.cartId,
             }),
+            // Defense in depth: the cancel paths below now await child completion before this
+            // workflow closes, but ABANDON also protects against a parent exit that bypasses
+            // those hooks entirely (unhandled exception, workflowExecutionTimeout expiry).
+            parentClosePolicy: 'ABANDON',
             args: [
               {
                 orderId: startCtx.orderId,
@@ -270,14 +299,9 @@ export async function fulfillmentWorkflow(
         so.items.forEach((i) => (i.status = 'cancelled'));
       }
 
-      // Signal cancel to all child workflows
-      for (const [, childHandle] of childHandles) {
-        try {
-          await childHandle.signal(childCancelSignal);
-        } catch {
-          // Ignore errors as child might already be complete
-        }
-      }
+      // Signal cancel to all child workflows and wait for them to finish, so this parent never
+      // closes while a child is still running (Temporal would otherwise terminate it).
+      await cancelChildrenAndAwait(childHandles);
 
       const allItems = cancelCtx.fulfillerOrders.flatMap((so: FulfillmentFulfillerOrderState) =>
         so.items.map((i: FulfillmentLineItemState) => ({ variantId: i.variantId })),
@@ -293,13 +317,7 @@ export async function fulfillmentWorkflow(
     },
     onTerminal: async (finalCtx: FulfillmentWorkflowState, finalState: string) => {
       if (isTerminal(finalState, 'cancelled') || isTerminal(finalState, 'failed')) {
-        for (const [, childHandle] of childHandles) {
-          try {
-            await childHandle.signal(childCancelSignal);
-          } catch {
-            // Ignore
-          }
-        }
+        await cancelChildrenAndAwait(childHandles);
       }
 
       // Inventory fulfillment on delivery happens in the fulfiller-order child (which
