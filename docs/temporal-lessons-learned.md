@@ -2,7 +2,7 @@
 
 Hard-won lessons from building a full e-commerce application on Temporal durable execution. These aren't theoretical best practices — they're patterns that emerged from debugging real workflow failures, performance bottlenecks, and architectural dead ends during the development of the Temporal Commerce Demo.
 
-> *This document was generated with the assistance of AI and may not have been thoroughly reviewed.*
+> *This document was drafted with AI assistance.*
 
 ---
 

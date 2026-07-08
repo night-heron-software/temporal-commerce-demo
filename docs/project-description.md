@@ -9,7 +9,7 @@ A full-stack e-commerce application built entirely on [Temporal](https://tempora
 
 This project is derived from a much more comprehensive e-commerce platform currently under active development. It is a standalone extraction designed to showcase Temporal durable execution patterns without the full platform's multi-tenant, multi-supplier, and plugin architecture.
 
-AI tooling was used extensively for code generation and documentation throughout this project. Not all output has been thoroughly reviewed yet — some comments, type definitions, and documentation may contain inaccuracies or artifacts from the generation process.
+AI tooling was used extensively for code generation and documentation throughout this project. Correctness is enforced by the project's verification gates rather than line-by-line review: a three-level test suite (pure decider unit tests, workflow tests against Temporal's time-skipping test server, and a cross-domain e2e), CI checks for lint / types / formatting / diagram freshness, and custom ESLint rules that enforce the architecture's invariants. Prose in comments and docs may still carry generation artifacts.
 
 The product catalog — including images, descriptions, and metadata — was generated using AI and [Printify](https://printify.com/). All 266 products were first created as real products in a Printify store; the data and mockup images were then exported and adapted to fit this demo.
 

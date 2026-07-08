@@ -5,7 +5,7 @@ A walkthrough script for demonstrating how Temporal durable execution powers a f
 **Estimated total duration:** 30–40 minutes (with live demo)
 **Audience:** Developers evaluating Temporal, conference attendees, or technical stakeholders
 
-> *This document was generated with the assistance of AI and may not have been thoroughly reviewed.*
+> *This document was drafted with AI assistance.*
 
 ---
 
