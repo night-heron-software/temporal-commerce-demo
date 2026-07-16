@@ -283,7 +283,22 @@ export async function runStateMachine<
         }
       }
 
-      // 7b. Record the transition (ADR-0010) — on a real state change, or any command
+      // 7b. Compute the update result before recording, so it can be persisted
+      // in the transition record (ADR-0010) rather than requiring fragile
+      // Temporal history cross-referencing.
+      let updateResult: unknown;
+      if (activeExchange) {
+        if (output.error) {
+          activeExchange.error = output.error;
+        } else if (output.response !== undefined) {
+          activeExchange.result = output.response;
+          updateResult = output.response;
+        } else {
+          activeExchange.result = undefined as unknown as TResponse;
+        }
+      }
+
+      // 7c. Record the transition (ADR-0010) — on a real state change, or any command
       // (update/signal) so context mutations within a state are captured too. Idle timeout
       // ticks that change nothing are skipped.
       if (recorder && (output.next !== previousStateName || input.kind !== 'timeout')) {
@@ -296,18 +311,12 @@ export async function runStateMachine<
           at: input.timestamp,
           prepareActivities: output.activities?.prepare,
           finalizeActivities: output.activities?.finalize,
+          updateResult,
         });
       }
 
-      // 8. Respond to update handler if active
+      // 8. Release the update handler to return its response to the caller.
       if (activeExchange) {
-        if (output.error) {
-          activeExchange.error = output.error;
-        } else if (output.response !== undefined) {
-          activeExchange.result = output.response;
-        } else {
-          activeExchange.result = undefined as unknown as TResponse;
-        }
         activeExchange.processed = true;
       }
 
