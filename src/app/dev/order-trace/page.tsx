@@ -358,8 +358,10 @@ const TRANSITION_STYLE: Record<TransitionKind, { dot: string; tag: string; label
 
 function TransitionRow({ step }: { step: TransitionStep }) {
   const [showPayload, setShowPayload] = useState(false);
+  const [showResult, setShowResult] = useState(false);
   const style = TRANSITION_STYLE[step.kind];
   const hasPayload = step.payload !== undefined && step.payload !== null;
+  const hasResult = step.result !== undefined && step.result !== null;
 
   return (
     <li className="relative pl-4">
@@ -390,12 +392,28 @@ function TransitionRow({ step }: { step: TransitionStep }) {
             {showPayload ? '▾ payload' : '▸ payload'}
           </button>
         )}
+        {hasResult && (
+          <button
+            onClick={() => setShowResult((v) => !v)}
+            className="text-[10px] text-emerald-400 hover:underline"
+          >
+            {showResult ? '▾ result' : '▸ result'}
+          </button>
+        )}
       </div>
       {hasPayload && showPayload && (
         <div className="mt-1 mb-1">
           <CodeBlock
             text={JSON.stringify(step.payload, null, 2)}
             className="text-[11px] text-gray-300 max-h-64"
+          />
+        </div>
+      )}
+      {hasResult && showResult && (
+        <div className="mt-1 mb-1">
+          <CodeBlock
+            text={JSON.stringify(step.result, null, 2)}
+            className="text-[11px] text-emerald-300 max-h-64"
           />
         </div>
       )}
@@ -664,6 +682,7 @@ function PersistedTransitionRow({
 }) {
   const style = TRIGGER_STYLE[txn.triggerKind] ?? TRIGGER_STYLE.timeout;
   const hasPayload = txn.triggerPayload !== undefined && txn.triggerPayload !== null;
+  const hasResult = txn.updateResult !== undefined && txn.updateResult !== null;
   const initial = prev?.contextSnapshot; // context entering this state = previous step's final
   const changes = useMemo(
     () => diffSnapshots(initial, txn.contextSnapshot),
@@ -741,6 +760,15 @@ function PersistedTransitionRow({
               </>
             )}
           </div>
+
+          {hasResult && (
+            <div>
+              <SectionLabel>
+                Result — <span className="text-emerald-400">{txn.triggerName}</span>
+              </SectionLabel>
+              <JsonBlock value={txn.updateResult} />
+            </div>
+          )}
 
           {/* Full detail: the complete before/after context snapshots. */}
           {full && (

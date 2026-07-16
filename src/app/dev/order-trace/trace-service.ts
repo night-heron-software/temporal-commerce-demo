@@ -51,6 +51,8 @@ export interface TraceTransition {
   prepareActivities: TraceActivityCall[];
   /** Activities called in the state's finalize phase (end), with args + results. */
   finalizeActivities: TraceActivityCall[];
+  /** Decoded return value of the Update handler (enriched from Temporal history). */
+  updateResult?: unknown;
 }
 
 /** A captured activity call: its name, arguments, and result (or error). */
@@ -150,7 +152,8 @@ function decodePayloads(payloads: unknown): unknown {
   }
 }
 
-/** Extract the input payload of a signal / accepted-update history event (the transition driver). */
+/** Extract the input payload of a signal / accepted-update history event (the transition driver),
+ * or the result payload of an update-completed event (the Update handler's return value). */
 const decodeEventPayload: PayloadDecoder = (attrsKey, attrs) => {
   if (attrsKey === 'workflowExecutionSignaledEventAttributes') {
     return decodePayloads(attrs.input);
@@ -158,6 +161,11 @@ const decodeEventPayload: PayloadDecoder = (attrsKey, attrs) => {
   if (attrsKey === 'workflowExecutionUpdateAcceptedEventAttributes') {
     const acceptedRequest = attrs.acceptedRequest as { input?: { args?: unknown } } | undefined;
     return decodePayloads(acceptedRequest?.input?.args);
+  }
+  if (attrsKey === 'workflowExecutionUpdateCompletedEventAttributes') {
+    const outcome = attrs.outcome as { success?: unknown; failure?: unknown } | undefined;
+    if (outcome?.failure) return { _error: outcome.failure };
+    return decodePayloads(outcome?.success);
   }
   return undefined;
 };
@@ -215,6 +223,7 @@ async function fetchNode(
       contextSnapshot: r.contextSnapshot,
       prepareActivities: r.prepareActivities,
       finalizeActivities: r.finalizeActivities,
+      updateResult: r.updateResult,
     }));
   } catch {
     transitions = [];
