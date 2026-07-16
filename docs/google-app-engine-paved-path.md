@@ -5,7 +5,7 @@ How Google App Engine's design philosophy creates a "Paved Path" that makes it d
 > *This document was drafted with AI assistance.*
 
 > **Provenance.** This analysis is informed by first-hand production experience, not just the
-> literature: the author operated a print-on-demand commerce platform on GAE Standard (Java) —
+> literature: the author operated GearLaunch's print-on-demand commerce platform on GAE Standard (Java) —
 > `appengine-web.xml` scaling configuration, `queues.xml` task queues, `dispatch.yaml` service
 > routing, and the frontend/backend instance split with its deadline tiers (60&nbsp;s for
 > user-facing requests, 10&nbsp;minutes for task-queue requests, unbounded on backend instances).
