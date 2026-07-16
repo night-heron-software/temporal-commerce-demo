@@ -80,7 +80,7 @@ graph TB
 
 ### Prerequisites
 
-- **Node.js** ≥ 20
+- **Node.js** ≥ 22
 - **Docker Desktop** (for Cassandra, Elasticsearch, Temporal)
 - **npm** (included with Node.js)
 

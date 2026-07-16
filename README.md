@@ -28,7 +28,7 @@ Every e-commerce system is a distributed state machine. The traditional approach
 - **No saga orchestrator** — the checkout workflow *is* the saga.
 - **No distributed transaction coordinator** — `updateWithStart` gives atomic create-or-update.
 
-**Scale:** ~19,000 LOC · 6 Temporal workflow domains · 260+ products · 10,600 variants
+**Scale:** ~19,000 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
 
 ## What This Demonstrates
 
@@ -159,6 +159,10 @@ See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 | [State Machine Reference](docs/reference/state-machine-diagrams.md) | Auto-generated Mermaid diagrams + trigger tables for every workflow |
 | [Demo Instructions](docs/demo-instructions.md) | Script for a 4–5 minute live demonstration |
 | [Cloud Deployment](docs/cloud-deployment.md) | Deploying to Temporal Cloud + Google Cloud Run |
+| [Testing Without Mocking](docs/testing-guide.md) | The three-level, zero-mock test pyramid *(stub)* |
+| [Data Architecture for Scale](docs/data-architecture.md) | CQRS, Cassandra write side, Elasticsearch as the app's query API *(stub)* |
+| [Worker Topology](docs/worker-scaling.md) | From one dev process to per-domain production scaling *(stub)* |
+| [AI-First Development](docs/ai-development-guide.md) | The agent operating layer, runnable workflows, and gates *(stub)* |
 
 ## Project Structure
 
