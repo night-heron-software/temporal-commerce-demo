@@ -10,7 +10,7 @@ Get the Temporal Commerce Demo running on your Mac from a fresh clone.
 
 Install these before cloning the repository:
 
-### 1. Node.js (v20+)
+### 1. Node.js (v22+)
 
 ```bash
 # Using Homebrew
@@ -21,7 +21,7 @@ nvm install 20
 nvm use 20
 ```
 
-Verify: `node --version` should show v20 or higher.
+Verify: `node --version` should show v22 or higher.
 
 ### 2. Docker Desktop
 
