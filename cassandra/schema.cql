@@ -399,6 +399,7 @@ CREATE TABLE IF NOT EXISTS workflow_state_transitions (
     context_snapshot TEXT,
     prepare_activities TEXT,
     finalize_activities TEXT,
+    update_result TEXT,
     PRIMARY KEY ((store_id, workflow_id), at, run_id, seq)
 ) WITH CLUSTERING ORDER BY (at ASC, run_id ASC, seq ASC)
   AND default_time_to_live = 7776000;

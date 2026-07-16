@@ -28,4 +28,6 @@ export interface WorkflowTransitionRow {
   contextSnapshot: unknown;
   prepareActivities: ActivityCall[];
   finalizeActivities: ActivityCall[];
+  /** The Update handler's return value (decoded from JSON). */
+  updateResult?: unknown;
 }

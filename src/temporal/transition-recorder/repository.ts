@@ -12,8 +12,8 @@ import type { TransitionPersistRecord, WorkflowTransitionRow } from './types';
 const INSERT_TRANSITION = `INSERT INTO workflow_state_transitions (
   store_id, workflow_id, at, run_id, seq, workflow_type, domain, correlation_id, order_id,
   from_state, to_state, trigger_kind, trigger_name, trigger_payload, context_snapshot,
-  prepare_activities, finalize_activities
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+  prepare_activities, finalize_activities, update_result
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 /**
  * Batch-write a run of transitions for a single workflow. All records in a flush batch share
@@ -44,6 +44,7 @@ export async function persistWorkflowTransitions(
       r.contextSnapshot ?? null,
       r.prepareActivities ?? null,
       r.finalizeActivities ?? null,
+      r.updateResult ?? null,
     ],
   }));
   await executeBatch(queries, { logged: false });
@@ -66,6 +67,7 @@ interface TransitionCqlRow {
   context_snapshot: string | null;
   prepare_activities: string | null;
   finalize_activities: string | null;
+  update_result: string | null;
 }
 
 function parseJson(s: string | null): unknown {
@@ -92,7 +94,7 @@ export async function getWorkflowTransitions(
   const rows = await executeCql<TransitionCqlRow>(
     `SELECT workflow_id, at, run_id, seq, workflow_type, domain, correlation_id, order_id,
             from_state, to_state, trigger_kind, trigger_name, trigger_payload, context_snapshot,
-            prepare_activities, finalize_activities
+            prepare_activities, finalize_activities, update_result
      FROM workflow_state_transitions WHERE store_id = ? AND workflow_id = ?`,
     [storeId, workflowId],
   );
@@ -113,5 +115,6 @@ export async function getWorkflowTransitions(
     contextSnapshot: parseJson(r.context_snapshot),
     prepareActivities: parseActivityCalls(r.prepare_activities),
     finalizeActivities: parseActivityCalls(r.finalize_activities),
+    updateResult: parseJson(r.update_result),
   }));
 }
