@@ -3,7 +3,7 @@
 > **Status:** stub — outline in place, sections to be expanded. The topics below are partially
 > covered today in the [Developer Guide](developer-guide.md) (see links per section).
 
-This project's test suite runs **229 tests across 29 files in about six seconds, with zero
+This project's test suite runs **230 tests across 29 files in about six seconds, with zero
 containers and zero mocks**. Nothing in the pyramid stubs the system under test: pure decision
 functions are tested directly, workflow tests execute the real workflow code on Temporal's
 time-skipping test server, and end-to-end tests drive the real local stack. This guide explains how
