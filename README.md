@@ -164,6 +164,7 @@ See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 | [Worker Topology](docs/worker-scaling.md) | From one dev process to per-domain production scaling *(stub)* |
 | [AI-First Development](docs/ai-development-guide.md) | The agent operating layer, runnable workflows, and gates *(stub)* |
 | [Google App Engine: Scalability by Constraint](docs/google-app-engine-paved-path.md) | Research note: how GAE's paved path to scaling shaped this architecture |
+| [Autoscaling by Push and by Pull](docs/push-vs-pull-autoscaling.md) | Research note: GAE/Cloud Run push scaling vs Temporal's pull model — stickiness, scale-to-zero, Serverless Workers |
 
 ## Project Structure
 

@@ -3,7 +3,9 @@
 > **Status:** stub — outline in place, sections to be expanded. The production deployment mechanics
 > are covered today in [Cloud Deployment](cloud-deployment.md); the unified worker is described in
 > [Project Description § Unified Worker Architecture](project-description.md#unified-worker-architecture)
-> and [Developer Guide § Unified Worker](developer-guide.md#unified-worker).
+> and [Developer Guide § Unified Worker](developer-guide.md#unified-worker). The autoscaling
+> landscape behind items 4–6 (backlog signals, worker pools, Temporal Serverless Workers) is
+> analyzed in [Autoscaling by Push and by Pull](push-vs-pull-autoscaling.md).
 
 In development, all six domain workers run in a single Node.js process over one gRPC connection,
 each polling its own task queue (`src/temporal/worker.ts`) — one thing to start, restart, and read
