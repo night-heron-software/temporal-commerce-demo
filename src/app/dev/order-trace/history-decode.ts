@@ -14,11 +14,15 @@ export interface TraceEvent {
   detail?: string;
   /** Decoded input payload for signal / update-accepted events (the driver of a transition). */
   payload?: unknown;
+  /** Decoded return value for update-completed events (the result of an Update handler). */
+  result?: unknown;
+  /** Protocol instance id for correlating update-accepted → update-completed pairs. */
+  protocolInstanceId?: string;
 }
 
 /**
- * Extracts and decodes the input payload for a raw history event, when it is a signal or
- * accepted update (the events that drive a state transition). Injected from the server so this
+ * Extracts and decodes the input/result payload for a raw history event, when it is a signal,
+ * accepted update (input), or completed update (result). Injected from the server so this
  * module stays free of the Temporal payload converter (and client bundles stay clean).
  */
 export type PayloadDecoder = (attrsKey: string, attrs: Record<string, unknown>) => unknown;
@@ -65,6 +69,8 @@ function extractDetail(attrsKey: string, attrs: Record<string, unknown>): string
       return `signal: ${str(get('signalName')) ?? 'unknown'}`;
     case 'workflowExecutionUpdateAcceptedEventAttributes':
       return `update: ${str(get('acceptedRequest.input.name')) ?? str(get('protocolInstanceId')) ?? ''}`;
+    case 'workflowExecutionUpdateCompletedEventAttributes':
+      return `update completed: ${str(get('meta.updateId')) ?? ''}`;
     case 'startChildWorkflowExecutionInitiatedEventAttributes':
       return `child: ${str(get('workflowId')) ?? ''}`;
     case 'childWorkflowExecutionStartedEventAttributes':
@@ -97,6 +103,18 @@ export function decodeHistoryEvents(
     const wantsPayload =
       attrsKey === 'workflowExecutionSignaledEventAttributes' ||
       attrsKey === 'workflowExecutionUpdateAcceptedEventAttributes';
+    const wantsResult = attrsKey === 'workflowExecutionUpdateCompletedEventAttributes';
+
+    // Extract protocolInstanceId for correlating accepted → completed pairs.
+    let protocolInstanceId: string | undefined;
+    if (attrsKey === 'workflowExecutionUpdateAcceptedEventAttributes' && attrs) {
+      protocolInstanceId = (attrs.protocolInstanceId as string) ?? undefined;
+    }
+    if (attrsKey === 'workflowExecutionUpdateCompletedEventAttributes' && attrs) {
+      const meta = attrs.meta as { updateId?: string } | undefined;
+      protocolInstanceId = meta?.updateId ?? undefined;
+    }
+
     events.push({
       eventId: ev.eventId != null ? String(ev.eventId) : '',
       eventType: attrsKey ? deriveEventType(attrsKey) : String(ev.eventType ?? 'Unknown'),
@@ -106,6 +124,11 @@ export function decodeHistoryEvents(
         wantsPayload && attrsKey && attrs && decodePayload
           ? decodePayload(attrsKey, attrs)
           : undefined,
+      result:
+        wantsResult && attrsKey && attrs && decodePayload
+          ? decodePayload(attrsKey, attrs)
+          : undefined,
+      protocolInstanceId,
     });
   }
   return events;
@@ -132,6 +155,8 @@ export interface TransitionStep {
   cause?: string;
   /** Decoded input payload — the update/signal args, or (for `state`) the triggering event's args. */
   payload?: unknown;
+  /** Decoded return value — for `update` steps, the Update handler's return value. */
+  result?: unknown;
   /** Human summary of what changed, e.g. `pending_assignment → shipped`. */
   delta?: string;
 }
@@ -164,14 +189,24 @@ export function deriveTransitions(
       case 'WorkflowExecutionStarted':
         steps.push({ at: ev.timestamp, kind: 'start', label: 'Started' });
         break;
-      case 'WorkflowExecutionUpdateAccepted':
+      case 'WorkflowExecutionUpdateAccepted': {
+        // Pair the accepted event with its completed counterpart to show the return value.
+        const pId = ev.protocolInstanceId;
+        const completedEv = pId
+          ? events.find(
+              (e) =>
+                e.eventType === 'WorkflowExecutionUpdateCompleted' && e.protocolInstanceId === pId,
+            )
+          : undefined;
         steps.push({
           at: ev.timestamp,
           kind: 'update',
           label: stripPrefix(ev.detail, 'update:') || 'update',
           payload: ev.payload,
+          result: completedEv?.result,
         });
         break;
+      }
       case 'WorkflowExecutionSignaled':
         steps.push({
           at: ev.timestamp,

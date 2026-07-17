@@ -168,6 +168,8 @@ export interface TransitionRecordInput<TContext> {
   prepareActivities?: ActivityCall[];
   /** Activities called in the state's finalize phase (end), with args + results. */
   finalizeActivities?: ActivityCall[];
+  /** The Update handler's return value, when the transition was driven by an update. */
+  updateResult?: unknown;
 }
 
 export interface TransitionRecordingConfig<TContext> {
@@ -232,6 +234,8 @@ export interface TransitionPersistRecord {
   contextSnapshot?: string;
   prepareActivities?: string;
   finalizeActivities?: string;
+  /** The Update handler's return value, pre-serialized and size-capped. */
+  updateResult?: string;
   /** Correlation tags from the workflow's {@link TransitionIdentity} (e.g. Domain, OrderId). */
   tags?: Record<string, string>;
 }

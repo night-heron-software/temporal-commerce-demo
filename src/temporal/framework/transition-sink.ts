@@ -101,6 +101,7 @@ export function createTransitionRecorder<TContext>(
         finalizeActivities: input.finalizeActivities?.length
           ? capJson(input.finalizeActivities)
           : undefined,
+        updateResult: input.updateResult !== undefined ? capJson(input.updateResult) : undefined,
       });
       if (pending.length > MAX_BUFFER) {
         pending.shift();

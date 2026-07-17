@@ -204,4 +204,39 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
     await runStateMachine(config, { count: 0 }, [], []);
     expect(persistedBatches).toEqual([]);
   });
+
+  it('persists the Update handler return value on update-driven transitions only', async () => {
+    type Resp = { ok: boolean; total: number };
+    const updDef = { name: 'setThing' };
+    const config: StateMachineConfig<RState, never, Ctx, Resp> = {
+      states: {
+        a: {
+          fn: async (ctx: Ctx, input: { kind: string }) =>
+            // Updates are delivered to the state fn as kind 'event'.
+            input.kind === 'event'
+              ? { context: ctx, next: '__terminal:done', response: { ok: true, total: 42 } }
+              : { context: ctx, next: 'a' },
+        },
+      } as Any,
+      initialState: 'a',
+    };
+    const updates = [{ definition: updDef as Any, toEvent: () => ({ kind: 'setThing' }) }];
+
+    const run = runStateMachine(config, { count: 0 }, updates as Any, []);
+    const setThing = handlers.get(updDef)! as () => Promise<Resp>;
+    const [response] = await Promise.all([setThing(), run]);
+
+    // The caller still receives the response as before.
+    expect(response).toEqual({ ok: true, total: 42 });
+
+    const records = persistedBatches.flat();
+    const updateRecord = records.find((r) => r.triggerKind === 'update');
+    expect(updateRecord).toBeDefined();
+    // The Update return value is persisted, serialized and size-capped, on the record.
+    expect(JSON.parse(updateRecord!.updateResult as string)).toEqual({ ok: true, total: 42 });
+    // Non-update-driven records (the ∅ → initial start record) carry no result.
+    for (const r of records.filter((r) => r.triggerKind !== 'update')) {
+      expect(r.updateResult).toBeUndefined();
+    }
+  });
 });
