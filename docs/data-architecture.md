@@ -1,10 +1,11 @@
 # Data Architecture for Scale
 
 There is no relational database in this application's data path, and that is a scalability
-decision, not a stylistic one. Entity state lives in Temporal workflows; durable writes go to
-Cassandra, partitioned per entity; read traffic is served by Elasticsearch projections that the
-Next.js app queries directly. This guide explains the write side, the read side, and the seam
-between them.
+decision, not a stylistic one. Authoritative entity state lives in Temporal workflows; **both
+data stores are projections of it**, written only by workflow activities — Cassandra for durable
+records, Elasticsearch for display-shaped views — and the Next.js app's access to both is
+read-only. This guide explains the two projections, the single-writer rule, and the seam between
+them.
 
 ## Why not a relational database
 
@@ -15,9 +16,12 @@ tuning:
 
 - **In-flight entity state lives in workflows** — isolated per entity, coordinated by Temporal,
   never fought over by concurrent requests.
-- **Durable records go to Cassandra, partitioned per entity** — no cross-entity locks, and a
-  write path that scales horizontally by adding nodes.
-- **Reads never touch the write side** — display traffic lands on Elasticsearch.
+- **Durable records go to Cassandra, partitioned per entity, with no relational joins** — and
+  since each entity is owned by exactly one workflow, a partition effectively has a single
+  writer. No shared table every request funnels through, no row two writers contend for.
+- **The application only reads** — display traffic lands on Elasticsearch; where the app reads
+  Cassandra directly (order history, the Order Trace tool), that access is read-only, so it can
+  never contend with a business-logic write.
 
 The trade is explicit: no ad-hoc joins, no cross-entity transactions. Both are routed through
 workflows instead — a saga is a workflow, not a distributed transaction.
@@ -35,7 +39,7 @@ facts are transient — folded into state in the same call. Temporal's history i
 log ([ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md)), and it comes with replay,
 retention, and tooling already built.
 
-## Cassandra: the write side
+## Cassandra: the durable-record projection
 
 [schema.cql](../cassandra/schema.cql) partitions per entity: `orders` by `order_id`, lookups by
 `customer_email` or `confirmation_number` as their own denormalized tables, product variants
@@ -55,18 +59,21 @@ locks, and losers of the race get a clean `applied = false` rather than a deadlo
 [Developer Guide § Domain Workflows](developer-guide.md#domain-workflows) walks the lifecycle end
 to end.
 
-## CQRS: the read side is Elasticsearch
+## CQRS: two projections, one writer
 
-Elasticsearch holds the read projections — catalog search, order lookups, inventory views, 11
-domain indices in all — kept in sync by workflow activities. Only the workflow crosses the seam:
-nothing reads Cassandra to render a page, and no page-render load reaches the write side.
+Elasticsearch holds the display projections — catalog search, order lookups, inventory views, 11
+domain indices in all — kept in sync by workflow activities. Cassandra's records are a projection
+too, written the same way. **Only workflows write either store; the application only reads** —
+mostly Elasticsearch, plus direct read-only Cassandra access where the records themselves are the
+product (order status history, the Order Trace tool's transition audit).
 
 ```mermaid
 flowchart LR
   action[Server action] -->|update, gRPC| wf[Domain workflow]
-  wf -->|durable write| cass[(Cassandra: write side)]
-  wf -->|projection activity| es[(Elasticsearch: read side)]
+  wf -->|record projection| cass[(Cassandra: durable records)]
+  wf -->|display projection| es[(Elasticsearch: search & views)]
   pages[Server-rendered pages] -->|es-client query| es
+  pages -.->|read-only: order history, trace tooling| cass
 ```
 
 Projection writes are **workflow-mediated and non-blocking**: the

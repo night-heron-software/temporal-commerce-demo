@@ -67,8 +67,10 @@ Two vocabularies coexist by design ([ADR-0009](adr/0009-chassaing-decider-split.
 
 ## Data vocabulary
 
-- **Write side / read side** — Cassandra (durable records, per-entity partitions) vs.
-  Elasticsearch (projections the app queries directly). Only workflows cross the seam
+- **Record projection / display projection** — Cassandra (durable records, per-entity partitions,
+  no relational joins) vs. Elasticsearch (search- and display-shaped views). Both are projections
+  of workflow state: **only workflows write either store; the application only reads** — mostly
+  Elasticsearch, plus read-only Cassandra access where the records themselves are the product
   ([Data Architecture](data-architecture.md)).
 - **Projection** — a read-optimized document derived from workflow state, written by an activity;
   the app's query API, and the only cache there is.
