@@ -159,12 +159,14 @@ See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 | [State Machine Reference](docs/reference/state-machine-diagrams.md) | Auto-generated Mermaid diagrams + trigger tables for every workflow |
 | [Demo Instructions](docs/demo-instructions.md) | Script for a 4–5 minute live demonstration |
 | [Deployment Options](docs/cloud-deployment.md) | Survey of hosted options, with a stated bias toward serverless push and away from Kubernetes *(exploratory)* |
-| [Testing Without Containers](docs/testing-guide.md) | The three-level test pyramid — full suite, no Docker *(stub)* |
-| [Data Architecture for Scale](docs/data-architecture.md) | CQRS, Cassandra write side, Elasticsearch as the app's query API *(stub)* |
-| [Worker Topology](docs/worker-scaling.md) | From one dev process to per-domain production scaling *(stub)* |
-| [AI-First Development](docs/ai-development-guide.md) | The agent operating layer, runnable workflows, and gates *(stub)* |
+| [Testing Without Containers](docs/testing-guide.md) | The three-level test pyramid — full suite, no Docker |
+| [Data Architecture for Scale](docs/data-architecture.md) | CQRS, Cassandra write side, Elasticsearch as the app's query API |
+| [Worker Topology](docs/worker-scaling.md) | From one dev process to per-domain production scaling |
+| [AI-First Development](docs/ai-development-guide.md) | The agent operating layer, runnable workflows, and gates |
 | [Google App Engine: Scalability by Constraint](docs/google-app-engine-paved-path.md) | Research note: how GAE's paved path to scaling shaped this architecture |
 | [Autoscaling by Push and by Pull](docs/push-vs-pull-autoscaling.md) | Research note: GAE/Cloud Run push scaling vs Temporal's pull model — stickiness, scale-to-zero, Serverless Workers |
+| [Glossary](docs/glossary.md) | Terms of art — fulfiller vs fulfillment, command vs fact, reservation lifecycle |
+| [ADR index](docs/adr/README.md) | Architecture decision records the source code cites by number |
 
 ## Project Structure
 
@@ -239,25 +241,11 @@ Deliberate simplifications that keep the focus on the Temporal patterns:
 
 ## AI Agent Tooling & Configuration
 
-This repository includes metadata, configuration, and workflow automation guides optimized for AI coding assistants (such as Antigravity, Claude, and Gemini). These files help AI agents understand the codebase architecture, follow developer preferences, and automate repository tasks:
-
-### Configuration Files
-- **[AGENTS.md](AGENTS.md) / [CLAUDE.md](CLAUDE.md)**: Workspace-level agent rules and framework-specific guidelines (e.g. Next.js App Router rules).
-- **[.antigravityignore](.antigravityignore)**: Instructs AI agents to ignore build output (`.next/`, `dist/`), dependencies (`node_modules/`), and temporary OS/IDE files to maintain a clean context window.
-- **[.agent/rules.md](.agent/rules.md)**: Project-specific design standards, architecture constraints (e.g. Temporal determinism rules), and gotchas.
-
-### Skills & Workflows
-- **[.agent/skills/](.agent/skills/)**: Custom domain-specific knowledge folders (e.g. [nextjs.md](.agent/skills/nextjs.md), [typescript-temporal.md](.agent/skills/typescript-temporal.md)) containing guidelines to assist agents in writing correct, idiomatic code.
-- **[.agent/workflows/](.agent/workflows/)**: Executable/runnable step-by-step guides that AI agents use to automate repository maintenance, testing, and debugging workflows:
-  - **[demo-start-local-dev.md](.agent/workflows/demo-start-local-dev.md)**: Start database containers, storefront, and workers.
-  - **[demo-initialize.md](.agent/workflows/demo-initialize.md)**: Wipe, re-initialize database container schemas, and seed data.
-  - **[demo-status.md](.agent/workflows/demo-status.md)**: Check platform and infrastructure health.
-  - **[demo-verify.md](.agent/workflows/demo-verify.md)** / **[demo-e2e-test.md](.agent/workflows/demo-e2e-test.md)**: Automated end-to-end checks, Cassandra schema consistency validation, and checkout flows.
-  - **[demo-temporal-worker-changes.md](.agent/workflows/demo-temporal-worker-changes.md)**: Safe deployment guidelines for worker and workflow changes.
-  - **[demo-project-hygiene.md](.agent/workflows/demo-project-hygiene.md)**: Check for git hygiene, secrets protection, and metadata cleanup.
-  - **[demo-verify-cassandra-schema.md](.agent/workflows/demo-verify-cassandra-schema.md)**: Verify Cassandra schema consistency with TypeScript types and workflow usage.
-  - **[demo-open-browser-tabs.md](.agent/workflows/demo-open-browser-tabs.md)**: Open all app and infrastructure URLs in the browser.
-  - **[demo-shutdown.md](.agent/workflows/demo-shutdown.md)**: Gracefully stop all background services.
+This repository treats AI coding agents as first-class contributors: [AGENTS.md](AGENTS.md) routes
+an agent to the invariants and detail ([.agent/rules.md](.agent/rules.md), skills, ten runnable
+workflow runbooks), and mechanical gates — determinism lint rules, CI-checked generated diagrams,
+structural tests — enforce correctness without line-by-line review. The full tour of every surface
+and the reasoning behind it: [AI-First Development](docs/ai-development-guide.md).
 
 ## License
 

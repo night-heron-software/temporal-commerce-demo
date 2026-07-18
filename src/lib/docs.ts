@@ -88,7 +88,7 @@ export const DOC_ENTRIES: DocEntry[] = [
     slug: 'testing-guide',
     title: 'Testing Without Containers',
     description:
-      'The three-level test pyramid — pure deciders, time-skipping workflow tests, cross-domain e2e — with no Docker required. (Stub.)',
+      'The three-level test pyramid — pure deciders, time-skipping workflow tests, cross-domain e2e — with no Docker required.',
     file: 'docs/testing-guide.md',
     category: 'Guides',
   },
@@ -96,7 +96,7 @@ export const DOC_ENTRIES: DocEntry[] = [
     slug: 'data-architecture',
     title: 'Data Architecture for Scale',
     description:
-      'CQRS with Cassandra as the write side and Elasticsearch as the app-facing query API. (Stub.)',
+      'CQRS with Cassandra as the write side and Elasticsearch as the app-facing query API.',
     file: 'docs/data-architecture.md',
     category: 'Guides',
   },
@@ -104,7 +104,7 @@ export const DOC_ENTRIES: DocEntry[] = [
     slug: 'worker-scaling',
     title: 'Worker Topology',
     description:
-      'From one dev process to per-domain production scaling — task queues as the seam. (Stub.)',
+      'From one dev process to per-domain production scaling — task queues as the seam.',
     file: 'docs/worker-scaling.md',
     category: 'Guides',
   },
@@ -112,7 +112,7 @@ export const DOC_ENTRIES: DocEntry[] = [
     slug: 'ai-development-guide',
     title: 'AI-First Development',
     description:
-      'The agent operating layer: rules, skills, runnable workflows, and the gates that make agent contributions safe. (Stub.)',
+      'The agent operating layer: rules, skills, runnable workflows, and the gates that make agent contributions safe.',
     file: 'docs/ai-development-guide.md',
     category: 'Guides',
   },
@@ -130,6 +130,14 @@ export const DOC_ENTRIES: DocEntry[] = [
     description:
       'Research note — GAE/Cloud Run push scaling vs Temporal’s pull model: stickiness, scale-to-zero, Serverless Workers.',
     file: 'docs/push-vs-pull-autoscaling.md',
+    category: 'Reference',
+  },
+  {
+    slug: 'glossary',
+    title: 'Glossary',
+    description:
+      'Terms of art — fulfiller vs fulfillment, command vs fact, the reservation lifecycle, update vs signal.',
+    file: 'docs/glossary.md',
     category: 'Reference',
   },
   {

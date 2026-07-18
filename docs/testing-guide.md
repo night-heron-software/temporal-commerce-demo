@@ -1,9 +1,5 @@
 # Testing Without Containers
 
-> **Status:** stub — outline in place, sections to be expanded. There is no testing section in the
-> [Developer Guide](developer-guide.md) yet, so this outline is currently the only testing-specific
-> documentation; the test files themselves are the working reference.
-
 This project's test suite runs **230 tests across 29 files in about seven seconds, with zero
 containers** — it passes with the Docker daemon not running at all. That is the claim worth making,
 and it is the one that changes how the project is developed: every contributor and every CI run
@@ -17,26 +13,132 @@ are where this architecture puts its I/O, so replacing them in a workflow test s
 boundary rather than faking the thing under test. The trade being made is purity at the core, not
 the absence of test doubles everywhere.
 
-## Outline
+## The three-level pyramid
 
-1. **The three-level pyramid** — what each level covers, what it costs, when to add a test where.
-2. **Level 1: pure decider tests** — `expect(decide(command, state)).toEqual(facts)` with no
-   harness; why the prepare → decide → finalize split makes decisions testable without I/O. These
-   need no test doubles at all.
-   *(Today: [Developer Guide § Declarative State Machine Pattern](developer-guide.md#declarative-state-machine-pattern-runstatemachine).)*
-3. **Level 2: workflow tests on the time-skipping test server** — running the real
-   `runStateMachine` driver against `@temporalio/testing`; fast-forwarding a 30-day cart timeout in
-   milliseconds; asserting on state transitions rather than implementation details. Activities are
-   stubbed here — document which, and why that is the right seam.
-4. **Level 3: the cross-domain order journey** — `src/temporal/order-journey.e2e.test.ts` drives
-   cart → checkout → OMS → fulfillment on the same time-skipping test server (**not** against live
-   containers). Worth documenting its `queryCart` activity, which is a real bridge: it queries the
-   live cart workflow through the test environment's client, exactly as the production activity
-   does through its own.
-5. **Structural tests over the state graph** — `src/temporal/state-graph.test.ts`: no orphan
-   states, no dangling `next` targets, every terminal reachable.
-6. **Where the seams are** — which layers need doubles and which don't, and why the answer falls
-   out of the architecture rather than from testing discipline.
-7. **Running and extending the suite** — `npm test`, `npm run test:watch`, `npm run coverage`;
-   conventions for co-locating `*.test.ts` files. Note that changes to decider / states files
-   **require** co-located tests (`.agent/rules.md`, Temporal Patterns rule 7).
+| Level | What runs | What's doubled | Speed |
+|---|---|---|---|
+| 1. Decider tests | `decide` / `evolve` as plain functions | Nothing | µs per case |
+| 2. Workflow tests | Real driver + states on the time-skipping test server | I/O activities | ~100s of ms |
+| 3. Cross-domain journey | Four domains orchestrating each other, same test server | I/O activities (with one live bridge) | seconds |
+
+Plus a structural level that isn't on the pyramid: generated-artifact tests over the state graph.
+
+The policy (see [AGENTS.md](../AGENTS.md), invariant 4): **changes to decider / states files
+require co-located `*.test.ts` tests.** Most of what matters about the system is testable at
+level 1, which is why most of the suite needs nothing installed.
+
+## Level 1 — pure decider tests
+
+Every domain's decision logic is a pure Chassaing decider
+([ADR-0009](adr/0009-chassaing-decider-split.md)): `decide(command, state) → facts`,
+`evolve(state, fact) → state`, no clock, no randomness, no I/O. Testing it needs no harness at
+all — [cart-decider.test.ts](../src/temporal/cart/cart-decider.test.ts) is the pattern:
+
+```ts
+// build states with plain object builders, fold commands with the real functions
+const apply = (ctx: CartWorkflowContext, cmd: CartCommand): CartWorkflowContext =>
+  decide(cmd, ctx).reduce(evolve, ctx);
+
+expect(decide(command, state)).toEqual(expectedFacts);
+```
+
+Two conventions worth copying:
+
+- **Builders over fixtures.** `makeCart(overrides)` / `makeCtx(overrides)` construct valid states
+  with targeted deviations — each test names only what it cares about.
+- **Fold, then assert.** For multi-step scenarios, `decide(...).reduce(evolve, ctx)` replays a
+  command sequence exactly the way the shell does, so the test exercises the same path production
+  takes.
+
+Time is data here: commands carry `meta.timestamp`, so "what happens after the timeout" is a test
+input, not a `vi.useFakeTimers()` dance.
+
+## Level 2 — workflow tests on the time-skipping test server
+
+The real workflow code — the actual `runStateMachine` driver, the actual states registry — runs
+against Temporal's `TestWorkflowEnvironment`, which fast-forwards timers: a 30-day cart timeout
+executes in milliseconds. The shared harness is
+[test-support/workflow-env.ts](../src/test-support/workflow-env.ts) (`withWorkflowEnv`), and
+[cart-workflow.test.ts](../src/temporal/cart/cart-workflow.test.ts) is the pattern:
+
+```ts
+const cartWorker = { taskQueue: CART_TASK_QUEUE, workflowsPath: WORKFLOWS_PATH, activities };
+
+await withWorkflowEnv([cartWorker], async (env) => {
+  const handle = await env.client.workflow.start(cartWorkflow, startOpts('cart-1'));
+  const res = await handle.executeUpdate(cartUpdate, {
+    args: [{ type: 'addItem', variantId: 'v1', quantity: 2, price: 22.99 }],
+  });
+  expect((await handle.query(getCartQuery)).items).toHaveLength(1);
+});
+```
+
+**Activities are stubbed here, deliberately.** The activity map passed to the worker replaces I/O
+(`validateInventory: async () => true`, `indexCart: async () => undefined`, …) so these tests
+assert *orchestration* — update handlers, queries, state transitions, terminal behavior, activity
+wiring — not persistence. The decider level already proved the decisions; this level proves the
+machine around them.
+
+What belongs at this level: update/signal/query handler behavior, timeout paths (the test server
+makes them cheap), `continueAsNew` behavior, cross-state routing. What doesn't: decision logic
+(level 1 owns it) and real database writes (nothing owns them in this suite — that's the honest
+boundary of a container-free suite; `npm run test:e2e`-style live verification happens against a
+running stack via the scripts in [`.agent/workflows/`](../.agent/workflows/)).
+
+## Level 3 — the cross-domain journey
+
+[order-journey.e2e.test.ts](../src/temporal/order-journey.e2e.test.ts) drives
+**cart → checkout → OMS → fulfillment** on the same time-skipping server: four domains, real
+`startChild`/signal orchestration, one test.
+
+Its most instructive detail is the `queryCart` activity, which is barely a stub — it queries the
+*live* cart workflow through the test environment's client, exactly as the production activity
+does through its own Temporal client:
+
+```ts
+queryCart: vi.fn(async (parentCartWorkflowId: string) => {
+  const cart = await envRef.env!.client.workflow
+    .getHandle(parentCartWorkflowId)
+    .query(getCartQuery);
+  return { items: cart.items, /* … */ };
+}),
+```
+
+So the cross-workflow seam — checkout reading the live cart — is exercised for real; only the
+Cassandra/Elasticsearch edges are canned.
+
+## Structural tests over the state graph
+
+[state-graph.test.ts](../src/temporal/state-graph.test.ts) asserts properties of the **generated**
+`state-graph.json` for every machine: every non-transitional state has an outgoing transition (no
+dead ends), every state is reachable from the initial state, every machine's initial state exists.
+Combined with the CI freshness gate (`npm run docs:diagrams:check`), this means an agent or human
+who adds an orphan state gets a failing build, not a quiet inconsistency — see
+[ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md) for why the graph is generated at
+all.
+
+## Where the seams are
+
+The layering falls out of the architecture rather than testing discipline:
+
+- **Decider** — no seam needed; it's pure by construction (lint-enforced).
+- **Workflow ↔ activity** — the one true seam. Activities are the I/O membrane, so a stubbed
+  activity map is the honest double.
+- **Workflow ↔ workflow** — *not* stubbed. Child workflows and signals run for real on the test
+  server at levels 2–3.
+- **Route handlers** (`src/app/api/**/*.test.ts`) — standard vitest with `vi.mock` for the ES/
+  Cassandra clients; conventional Next.js testing, not part of the Temporal pyramid.
+
+## Running and extending the suite
+
+```bash
+npm test              # full suite, ~7s, no Docker
+npm run test:watch    # vitest watch mode
+npm run coverage      # v8 coverage
+```
+
+- Tests are **co-located**: `foo.ts` → `foo.test.ts` in the same directory.
+- Changing a decider or states file? The co-located test is **required** — and run
+  `npm run docs:diagrams` afterward; CI fails stale diagrams.
+- Adding a domain? The [Extending the Demo](developer-guide.md#extending-the-demo) recipe names
+  which tests each step owes.
