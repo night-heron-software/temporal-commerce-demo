@@ -34,6 +34,26 @@ These rules are mandatory for all workflow and activity code in `src/temporal/`:
 
 ---
 
+## Cassandra Conventions
+
+Cassandra here plays the role Datastore played on Google App Engine: a store whose query model
+disallows queries that won't scale. Preserve that property:
+
+1. **Partition-key access only.** Every query supplies the full partition key. No `ALLOW FILTERING`,
+   no secondary indexes, no scans in application paths — a query's cost must track its result set,
+   not the table. If an access pattern needs a different key, add a denormalized table (see
+   `orders_by_customer`, `orders_by_confirmation` in `cassandra/schema.cql`). *Known exceptions:*
+   three `ALLOW FILTERING` queries in `inventory-command-repository.ts` — part of the inventory
+   service's demo-scoped design; do not copy the pattern, and do not add new ones.
+2. **Lightweight transactions (LWT / `IF` clauses) are reserved** for irreducible cross-entity
+   contention — today, only the per-SKU inventory stock counters. Like Datastore's entity-group
+   transactions, each LWT is a small serialized hot spot: never use one as a general-purpose
+   transaction, and never introduce a new LWT without noting the contention it accepts.
+3. **Workflows write, the app reads.** All Cassandra writes go through workflow activities; Next.js
+   code may read (order history, trace tooling) but never write.
+
+---
+
 ## React & Next.js Patterns
 
 1. Default to Server Components (`page.tsx`, `layout.tsx`) and restrict `'use client'` strictly to interactive leaf nodes. Place Server Actions in dedicated `*-actions.ts` files, not inlined.

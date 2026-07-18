@@ -59,6 +59,14 @@ locks, and losers of the race get a clean `applied = false` rather than a deadlo
 [Developer Guide § Domain Workflows](developer-guide.md#domain-workflows) walks the lifecycle end
 to end.
 
+**The lineage, named:** Cassandra plays the role Datastore played on Google App Engine — a store
+whose query model *disallows queries that won't scale* (partition-key access only; cost tracks the
+result set, not the table). And as with Datastore's entity-group transactions, the simple
+transactional capability (LWT) reintroduces a small serialized hot spot exactly where it's used —
+residual contention that is handled by convention rather than machinery. Those conventions are
+encoded where this repo's contributors actually read them:
+[`.agent/rules.md` § Cassandra Conventions](../.agent/rules.md).
+
 ## CQRS: two projections, one writer
 
 Elasticsearch holds the display projections — catalog search, order lookups, inventory views, 11
