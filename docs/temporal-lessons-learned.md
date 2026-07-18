@@ -470,19 +470,19 @@ try {
 
 The singleton inventory service workflow handles all SKUs. Write-side activities signal it with changed SKUs, and it batches projections. One workflow to monitor instead of thousands.
 
-### 23. Decouple fulfillment from OMS via activity-driven spawning
+### 23. Decouple fulfillment from OMS with `ABANDON`, not activity-spawning
 
-**The architectural evolution:** The OMS initially started fulfillment as a child workflow. This created a lifecycle coupling — if the OMS needed `continueAsNew`, the child relationship complicated things.
+**The architectural evolution:** the OMS starts fulfillment as a child workflow, and the naive version was lifecycle-coupled: without an explicit policy, Temporal's parent close policy defaults to **TERMINATE**, so an OMS that closed (complete, fail, cancel, or execution-timeout expiry) would kill an in-flight fulfillment. We considered spawning via an activity (a Temporal client `workflow.start` inside an activity) to break the coupling entirely.
 
-**The final pattern:** OMS starts fulfillment via an activity (just a Temporal client `workflow.start` call inside an activity). Fulfillment is a fully standalone workflow that signals back to the OMS via `getExternalWorkflowHandle`. Each runs on its own task queue and has its own lifecycle.
+**The final pattern:** keep `startChild` — but with `parentClosePolicy: 'ABANDON'` ([oms/states.ts](https://github.com/night-heron-software/temporal-commerce-demo/blob/main/src/temporal/oms/states.ts)). ABANDON delivers the decoupling that activity-spawning was after (fulfillment keeps running independently, tracks its own cancellation via the fulfillment cancel signal, and completes on its own), while keeping what the child relationship is good for: the parent link in the Temporal UI and one less client round trip. Fulfillment signals status back to the OMS via `getExternalWorkflowHandle`, and each runs on its own task queue.
 
 ```
-OMS Workflow ─── activity ──→ Fulfillment Workflow (standalone)
-                              │
-                              └── signal ──→ OMS Workflow
+OMS Workflow ─── startChild (ABANDON) ──→ Fulfillment Workflow (independent lifecycle)
+                                          │
+                                          └── signal ──→ OMS Workflow
 ```
 
-This pattern means fulfillment can outlive any single OMS execution. It's the right choice when the child workflow may run longer than the parent's `continueAsNew` cycle.
+Activity-spawning is still the right tool when there should be **no parent relationship at all** — checkout → OMS uses exactly that (`workflow.start` inside an activity), because the order must not be a child of a checkout that completes seconds later. The rule of thumb: *ABANDON when you want an independent child; activity-spawn when you don't want a child at all.*
 
 ---
 

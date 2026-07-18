@@ -16,6 +16,7 @@ A comprehensive guide for developers working on the Temporal Commerce Demo — a
 - [Next.js Application Layer](#nextjs-application-layer)
 - [Temporal Patterns & Conventions](#temporal-patterns--conventions)
 - [Code Organization Patterns](#code-organization-patterns)
+- [Extending the Demo](#extending-the-demo)
 - [Feature Flags](#feature-flags)
 - [Seeding & Data Pipeline](#seeding--data-pipeline)
 - [Diagnostics & Debugging](#diagnostics--debugging)
@@ -300,7 +301,7 @@ The OMS workflow manages the complete order lifecycle from placement through del
 **Key Patterns:**
 
 - **Auto-Assignment** — Resolves fulfiller assignments via a plugin registry (`resolveFulfillerAssignments`). Currently all items are assigned to the `simulated` fulfiller.
-- **Activity-Driven Fulfillment** — Starts fulfillment as a standalone workflow via an activity (`startFulfillmentWorkflow`), rather than as a child workflow. This decouples the OMS from fulfillment execution.
+- **Decoupled Fulfillment** — Starts fulfillment with `startChild` under `parentClosePolicy: 'ABANDON'`: the child runs on its own lifecycle and survives OMS closure, while the parent link stays visible in the Temporal UI. (Contrast checkout → OMS, which spawns via an activity because the order must not be a child at all.)
 - **Signal-Driven Status Updates** — The fulfillment workflow signals the OMS with `fulfillmentStatusSignal` as fulfiller orders progress through shipped → delivered.
 - **Status Aggregation** — Order-level status is derived from the aggregate of all fulfiller order statuses.
 - **Non-blocking ES Projections** — Uses the same dirty-flag pattern as the cart workflow to batch projection flushes.
@@ -735,6 +736,57 @@ import { Cart, Checkout, OMS, Constants } from '@/temporal/contracts';
 ```
 
 The contracts directory is safe to import in **both** Next.js server code and Temporal workflow code, with one exception: the `defineQuery`/`defineSignal`/`defineUpdate` calls import from `@temporalio/workflow`, so they must be bundled by the Temporal worker, not Next.js.
+
+---
+
+## Extending the Demo
+
+The three recipes a contributor actually needs, end to end. Model everything on
+`src/temporal/cart/` — the fullest example of every file the pattern expects.
+
+### Adding a new domain
+
+1. **Contracts first** — add the domain to `WORKFLOW_DOMAINS` in
+   `src/temporal/contracts/constants.ts`, plus a task-queue constant and any cross-domain payload
+   types.
+2. **Pure core** — `src/temporal/<domain>/<domain>-decider.ts`: `decide(command, state) → facts`,
+   `evolve(state, fact) → state` ([ADR-0009](adr/0009-chassaing-decider-split.md)). No clock, no
+   randomness, no I/O — time arrives via `meta.timestamp` (lint-enforced). **Co-located
+   `*.test.ts` is required, not optional.**
+3. **State registry** — `states.ts`: each state declares exactly the commands it handles (an
+   undeclared command is rejected — that's the point); handlers are prepare → decide → finalize
+   ([ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md)); timeouts live in the same
+   declaration.
+4. **Workflow shell + activities** — `workflows.ts` runs `runStateMachine`; activities use the
+   two-file pattern (`activities.ts` contract / `activities-impl.ts` implementation);
+   `definitions.ts` re-exports queries/signals/updates from the contracts file. Every workflow
+   start spreads `buildWorkflowStartOptions()`
+   ([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md)). Spread
+   `transitionRecorderActivities` into the worker so every transition is recorded
+   ([ADR-0010](adr/0010-async-transition-recording-projection.md)).
+5. **Worker registration** — add `<domain>/worker.ts` and register it in the unified launcher
+   (`src/temporal/worker.ts`) alongside the other domains.
+6. **Regenerate + verify** — `npm run docs:diagrams` (CI fails stale diagrams;
+   `state-graph.test.ts` asserts reachability and no dead ends), then
+   `npm run typecheck && npm run lint && npm test`.
+
+### Adding a state or command to an existing machine
+
+1. Add the command to the state's entry in `states.ts`, or add the new state to the registry with
+   its timeout.
+2. Add the fact to the decider: a `decide` branch that emits it, an `evolve` case that folds it.
+3. Extend the co-located decider test (required) and, if routing changed, the states test.
+4. `npm run docs:diagrams` — commit the regenerated diagrams with the change.
+5. Workers don't hot-reload workflow code — restart them before manual verification
+   (`.agent/workflows/demo-temporal-worker-changes.md`).
+
+### Adding an activity
+
+1. Declare the signature in the domain's `activities.ts` (contract half); implement in
+   `activities-impl.ts` — I/O belongs here, never in the decider.
+2. Register it in the domain worker's activity map; call it from `prepare`/`finalize`/hooks.
+3. If it writes a projection, follow the non-blocking projection pattern
+   ([Temporal Patterns & Conventions](#temporal-patterns--conventions)).
 
 ---
 

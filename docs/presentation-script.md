@@ -250,13 +250,18 @@ await condition(
 
 ### Order and Fulfillment Talking Points
 
-### Pattern 8: Activity-Driven Workflow Spawning
+### Pattern 8: Two Ways to Decouple a Spawned Workflow
 
-> When the order workflow needs to start fulfillment, it does so via an activity — not `startChild`. This fully decouples the OMS from fulfillment. The fulfillment workflow is a standalone workflow that signals back to the OMS.
+> Checkout starts the order workflow via an **activity** — a Temporal client `workflow.start` inside an activity — because the order must not be a child of a checkout that completes seconds later. The OMS starts fulfillment differently: `startChild` with **`parentClosePolicy: 'ABANDON'`**. Without an explicit policy Temporal defaults to TERMINATE, which would kill an in-flight fulfillment when the OMS closes; ABANDON gives fulfillment an independent lifecycle while keeping the parent link visible in the Temporal UI. Fulfillment signals status back to the OMS.
 
 ```typescript
-// OMS workflow triggers fulfillment via activity
-await startFulfillmentWorkflow(fulfillmentInput);
+// OMS workflow — oms/states.ts, condensed
+await startChild('fulfillmentWorkflow', {
+  ...buildWorkflowStartOptions({ storeId: DEMO_STORE_ID, domain: 'fulfillment',
+    entityId: order.orderId, orderId: order.orderId, cartId: order.cartId }),
+  parentClosePolicy: 'ABANDON',   // survives OMS closure; tracks its own cancellation
+  args: [fulfillmentInput],
+});
 
 // Later, fulfillment signals OMS with status updates
 setHandler(fulfillmentStatusSignal, async (update) => {

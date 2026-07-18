@@ -8,7 +8,7 @@
 
 ## Development Preferences
 
-1. Do not recommend adding unit tests unless explicitly requested.
+1. Do not recommend adding unit tests unless explicitly requested — **except** in `src/temporal/`, where Temporal Patterns rule 7 below *requires* co-located tests for decider/states changes.
 2. Do not add confirmation dialogs to any actions unless explicitly requested.
 3. Make sure that input fields are cleared before filling in new values.
 4. Do not recommend or implement caching unless explicitly requested.

@@ -98,7 +98,7 @@ The OMS workflow manages an order from placement through delivery. It coordinate
 | Pattern | Implementation |
 | --- | --- |
 | **Fulfiller routing** | `resolveFulfillerAssignments` activity decides which fulfiller handles each line item |
-| **Decoupled fulfillment** | Fulfillment is started via an activity (not `startChild`), making it a standalone workflow with its own lifecycle |
+| **Decoupled fulfillment** | Fulfillment is started with `startChild` under `ABANDON` parent close policy — an independent lifecycle that survives OMS closure, with the parent link kept |
 | **Signal-driven updates** | Fulfillment status flows upward via signals — the OMS aggregates across all fulfiller orders to derive order-level status |
 | **Status projections** | Every status change is indexed to Elasticsearch for real-time admin panel updates |
 | **Audit trail** | Every status transition is recorded in the `order_status_history` Cassandra table |
@@ -238,7 +238,8 @@ Task queue isolation means a slow fulfillment activity cannot block cart operati
 | 5 | Declarative state machine (`runStateMachine`) | Cart, Checkout, Fulfillment |
 | 6 | `condition()` with timeout — reservation TTL | Checkout, Inventory |
 | 7 | Cross-workflow signaling via `getExternalWorkflowHandle` | Checkout → Cart, Fulfillment → OMS |
-| 8 | Activity-driven workflow spawning (not `startChild`) | OMS → Fulfillment, Checkout → OMS |
+| 8 | Activity-driven workflow spawning (no parent link) | Checkout → OMS |
+| 8b | `startChild` + `ABANDON` — independent child lifecycle | OMS → Fulfillment |
 | 9 | Multi-fulfiller strategy routing | Fulfillment |
 | 10 | Signal-driven status propagation | Fulfillment → OMS → Elasticsearch |
 | 11 | Workflow as CQRS event processor | Inventory Service |
