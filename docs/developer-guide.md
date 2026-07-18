@@ -392,6 +392,16 @@ If `[applied]` comes back false, the reserve returns `{ success: false }` and th
 
 **Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller *before* the single-row LWT, so only the `reserved_stock` bump is atomic — there is no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries and firmer per-SKU routing. Two artifacts hint at an earlier design and should not be taken as the live path: `renewReservation()` exists but is unused (checkout renews by release-then-reserve), and `reserveInventoryUpdate` — a Temporal Update definition in `contracts/inventory.ts` — is declared but never handled. Reserves do **not** flow through a workflow update.
 
+### Inventory Service — Limitations & Production Gaps
+
+The inventory service is the least production-ready domain in the demo — by design, since it exists to demonstrate the CQRS and reservation patterns, not to be a real inventory system. The gaps below are substantial and would each be real work to close:
+
+- **Single-worker projection.** Projection and TTL expiry run in one singleton workflow (`demo.inventory.service`) on a single worker. Production needs the projector sharded across workers — e.g. partition SKUs across multiple projection workflows — so it scales horizontally like the other domains. (The reserve path already fans out across workers via the Cassandra LWT; the singleton projector is the bottleneck.)
+- **One inventory style, seeded once.** Stock supports a single inventory-management style and is seeded at startup (`npm run dev:init`). A real system needs configurable inventory models and live stock ingestion, not a one-time seed.
+- **No multi-fulfiller/supplier ingestion.** There is no path to take ongoing stock updates from different fulfillers or suppliers, nor to model different inventory behavior per kind of product. The schema keys stock by `(blank_sku, fulfiller_id)`, but nothing feeds or updates those rows after the initial seed.
+- **No sense of time.** Availability is a point-in-time `total − reserved`. The service cannot represent inbound stock, lead times, replenishment schedules, or anticipated future availability — inventory has no temporal dimension at all.
+- **No sourcing logic.** When the same product is available from multiple sources or locations, `reserve()` simply picks a fulfiller row. There is no sourcing/allocation strategy — cost, proximity, split shipments, per-source capacity — and building one is a significant piece of future work.
+
 ### Identity Workflows
 
 **Task Queue:** `identity-queue`
