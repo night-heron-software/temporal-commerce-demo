@@ -11,15 +11,15 @@ evaluates where Temporal's new **Serverless Workers** feature lands between the 
 
 > **The hypothesis under examination.** Push-style autoscaling is easier to manage and has the
 > advantage of scaling to zero, whereas implementing stickiness is more straightforward with
-> pull-style. Verdict up front: the stickiness half is **supported**; the scale-to-zero half is
-> **supported for request-shaped work but qualified for background work** — and Temporal Serverless
-> Workers is the deliberate hybrid that trades the pull model's stickiness advantage for the push
-> model's scale-from-zero ergonomics (§6).
+> pull-style. Verdict up front: the stickiness half is **supported for what ships today, though the
+> gap looks closable** (§3.4); the scale-to-zero half is **supported for request-shaped work but
+> qualified for background work** — and Temporal Serverless Workers is the deliberate hybrid that
+> trades the pull model's stickiness advantage for the push model's scale-from-zero ergonomics (§6).
 
 This note is a companion to the [GAE paved-path analysis](google-app-engine-paved-path.md) — it
 resolves that note's "the worker needs somewhere durable to run" thread (§6.5 there) — and to the
-[Worker Topology guide](worker-scaling.md) and [Cloud Deployment](cloud-deployment.md), which cover
-this project's concrete worker shapes.
+[Worker Topology guide](worker-scaling.md) and [Deployment Options](cloud-deployment.md), which
+cover this project's concrete worker shapes and the hosting choices they imply.
 
 ---
 
@@ -145,6 +145,67 @@ affinity fights the architecture — the whole point of push scaling is that any
 any request — so it is offered only as a best-effort hint. GAE went further and made the lesson
 explicit: statelessness was the constraint, and in-memory affinity was simply unsupported.
 
+Supported *as an observation about what ships today* — but not as a claim about what is
+architecturally possible. §3.4 examines what push-model stickiness would actually require, because
+the gap is smaller than this verdict implies.
+
+### 3.4. Could push-model stickiness be built? (speculative)
+
+Nothing above establishes that push *cannot* be sticky — only that no platform currently offers it
+in a form useful to a Temporal worker. The shape it would take: **the invoker supplies a routing
+key (the Workflow ID, or a hash bucket of it), and the platform routes that invocation to the
+instance that already holds that workflow's cache.**
+
+**Most of the mechanism already exists one layer down.** Google Cloud load balancers support
+[consistent-hash session affinity keyed on a custom HTTP header](https://docs.cloud.google.com/load-balancing/docs/backend-service#session_affinity),
+not just cookies or client IP, and the underlying Envoy layer implements
+[ring hash and Maglev](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers)
+with a configurable hash key. Cloud Run's own
+[session affinity](https://docs.cloud.google.com/run/docs/configuring/session-affinity) simply
+doesn't expose it that way — it is cookie-based, client-keyed, and best-effort. So the vendor ask
+is narrower than "implement stickiness": it is *let the caller supply the key that the routing
+layer already knows how to hash.*
+
+**And the strong form has shipped elsewhere.**
+[Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/) routes a
+deterministic object ID to exactly one instance globally, with the platform owning the location
+directory. That is precisely this design, in production, from a serverless vendor.
+
+**The argument that makes best-effort good enough here.** §3.2 dismissed Cloud Run's affinity
+because it is a hint with no defined fallback, leaving the application to tolerate arbitrary
+re-routing anyway. That objection loses its force in front of Temporal, because **Temporal already
+supplies the fallback**: a missed sticky task times out to the shared queue and any worker picks it
+up, paying one replay (§3.1). Affinity would only need a decent hit rate, not a guarantee. What
+makes best-effort affinity useless for general stateful routing does not apply to a system whose
+correctness never rested on the affinity.
+
+**Where it is genuinely hard — and it is not the routing.** A hash is a *guess* about where the
+cache lives; Temporal's sticky queue is *ground truth*, because the worker holding the cache is the
+one advertising for the work. The difference surfaces on rebalancing: scaling 4 → 5 instances
+remaps roughly 1/N of keys under ring hash (Maglev is faster to build and query but moves about
+twice as many keys on host removal), and every remapped workflow replays. Under active autoscaling
+churn — exactly the condition serverless invocation creates — that could mean paying replay
+continuously, defeating the cache the scheme exists to preserve. Closing that gap means a real
+placement directory rather than a hash, which is a much larger lift.
+
+**A refinement that shrinks the vendor ask.** The cloud provider may not need to implement
+stickiness at all. Temporal's Worker Controller Instance already decides when to invoke, and
+**Temporal — not the provider — is the party that knows which instance holds which workflow's
+cache.** If the provider exposed only *instance addressability* ("invoke this instance," or "invoke
+with affinity key K"), Temporal could own the directory itself. That places the directory with the
+party holding the information, and reduces the provider's contribution to a routing primitive it
+mostly has already.
+
+**Provider asymmetry.** This is another axis on which the Cloud Run provider is the more
+interesting one. Cloud Run already sits behind a hashing load balancer. AWS Lambda's
+`InvokeFunction` has no routing-key concept at all — execution environments are deliberately
+fungible and the platform selects — so the same idea would require substantially more new surface
+there.
+
+None of this is announced, promised, or hinted at by any vendor. It is recorded here as a design
+direction, and as a check on §3.3's verdict: push-model stickiness is **absent**, not
+**impossible**.
+
 ---
 
 ## 4. Scale-to-Zero: Where Push Wins — With an Asterisk
@@ -162,8 +223,8 @@ watch the queue and reanimate it:
 
 - On a Cloud Run **service**, a Temporal worker must be kept alive artificially —
   instance-based billing (always-allocated CPU) plus `min-instances ≥ 1` — and then it *cannot*
-  scale to zero. This project's documented worker deployment is exactly this shape:
-  `--min-instances 1 --no-cpu-throttling` ([Cloud Deployment](cloud-deployment.md), Step 4).
+  scale to zero. This project's current worker shape is exactly this:
+  `--min-instances 1 --no-cpu-throttling` ([Deployment Options](cloud-deployment.md), Option B).
 - Cloud Run **worker pools** scale manually unless paired with CREMA/KEDA — and the scaler itself
   is always-on, so "scale to zero" applies to the workers, never the whole control plane.
 - The KEDA route works but is fiddly at the zero boundary: the scaler's own docs warn that
@@ -273,9 +334,9 @@ doesn't depend on worker locality either.
    [Worker Topology guide](worker-scaling.md)) let latency-sensitive domains (cart, checkout —
    where the update round trip makes cold starts user-visible) hold a min-1 floor while spiky
    domains (fulfillment, OMS fan-out) scale to zero. The push/pull choice can differ per domain.
-2. **Current state is deliberately boring.** The documented Cloud Run worker is an always-on
-   Service (`--min-instances 1 --no-cpu-throttling`, [Cloud Deployment](cloud-deployment.md)) that
-   does not scale to zero — prove the boring shape first, then evolve.
+2. **Current state is deliberately boring.** The worker shape in use is an always-on container
+   (`--min-instances 1 --no-cpu-throttling`, [Deployment Options](cloud-deployment.md) Option B)
+   that does not scale to zero — prove the boring shape first, then evolve.
 3. **The pull route on GCP is real today** (worker pools + CREMA on backlog metrics); **the push
    route is worth waiting to evaluate** — Serverless Workers is pre-release, Lambda-first, with the
    Cloud Run provider "coming soon," and its pricing and sticky-cache behavior are still
@@ -308,6 +369,14 @@ doesn't depend on worker locality either.
 | [KEDA Temporal scaler docs](https://keda.sh/docs/2.20/scalers/temporal/) | Configuration; the activation-near-zero reliability warning. |
 | [kedacore/keda#7368](https://github.com/kedacore/keda/issues/7368) | Documented scale-to-zero blind spot: workers scaled down with tasks in flight. |
 
+### Key-based routing (§3.4, speculative)
+
+| Source | Description |
+|:---|:---|
+| [Envoy supported load balancers](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers) | Ring hash and Maglev consistent hashing; the 1/N remap property and Maglev's build/lookup vs. stability trade. |
+| [GCLB session affinity](https://docs.cloud.google.com/load-balancing/docs/backend-service#session_affinity) | Header-based consistent-hash affinity — the routing primitive that already exists below Cloud Run. |
+| [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/) | The strong form in production: deterministic ID → exactly one instance globally, platform-owned location directory. |
+
 ### Cloud Run
 
 | Source | Description |
@@ -332,5 +401,5 @@ doesn't depend on worker locality either.
 | Source | Description |
 |:---|:---|
 | [Worker Topology guide](worker-scaling.md) | Per-domain task queues; topology as a deployment choice. |
-| [Cloud Deployment](cloud-deployment.md) | The current always-on Cloud Run Service worker configuration. |
+| [Deployment Options](cloud-deployment.md) | The hosting options this analysis feeds: serverless push as the target, always-on container as the current shape, Kubernetes rejected. |
 | [Temporal Lessons Learned](temporal-lessons-learned.md) | The updateWithStart interaction model that makes cold starts user-visible for cart/checkout. |

@@ -44,8 +44,8 @@ Every e-commerce system is a distributed state machine. The traditional approach
 | ---------- | --------- | -------------- |
 | **Cart** | Manages shopping cart state as a long-running workflow | `updateWithStart`, Query/Update handlers, entity lifecycle |
 | **Checkout** | Orchestrates shipping → payment → order submission | State machine, step validation, `continueAsNew` |
-| **Order** | Processes order from placement through fulfillment | Supplier routing, assignment tracking, status projections |
-| **Fulfillment** | Simulates supplier order submission and shipping | Timer-based simulation, shipment tracking |
+| **Order** | Processes order from placement through fulfillment | Fulfiller routing, assignment tracking, status projections |
+| **Fulfillment** | Simulates fulfiller order submission and shipping | Timer-based simulation, shipment tracking |
 | **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
 | **Identity** | Email-based shopper auth and address persistence | Cookie sessions, auto-create accounts, address pre-fill |
 
@@ -158,8 +158,8 @@ See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 | [Temporal Lessons Learned](docs/temporal-lessons-learned.md) | 25 practical lessons from building on the Temporal TypeScript SDK |
 | [State Machine Reference](docs/reference/state-machine-diagrams.md) | Auto-generated Mermaid diagrams + trigger tables for every workflow |
 | [Demo Instructions](docs/demo-instructions.md) | Script for a 4–5 minute live demonstration |
-| [Cloud Deployment](docs/cloud-deployment.md) | Deploying to Temporal Cloud + Google Cloud Run |
-| [Testing Without Mocking](docs/testing-guide.md) | The three-level, zero-mock test pyramid *(stub)* |
+| [Deployment Options](docs/cloud-deployment.md) | Survey of hosted options, with a stated bias toward serverless push and away from Kubernetes *(exploratory)* |
+| [Testing Without Containers](docs/testing-guide.md) | The three-level test pyramid — full suite, no Docker *(stub)* |
 | [Data Architecture for Scale](docs/data-architecture.md) | CQRS, Cassandra write side, Elasticsearch as the app's query API *(stub)* |
 | [Worker Topology](docs/worker-scaling.md) | From one dev process to per-domain production scaling *(stub)* |
 | [AI-First Development](docs/ai-development-guide.md) | The agent operating layer, runnable workflows, and gates *(stub)* |
@@ -235,7 +235,7 @@ Deliberate simplifications that keep the focus on the Temporal patterns:
 - **Payments are mocked** — the payment step exercises the state machine, not a real gateway.
 - **Emails are stubbed** — order confirmation / shipping notifications are activities that log instead of send (`src/lib/email-service.ts`).
 - **The `/admin` area is intentionally unauthenticated** — shopper auth is real (bcrypt, cookie sessions, tested); admin auth is out of scope for the demo.
-- **Fulfillment is simulated** — supplier processing and shipping are timer-driven workflow simulations.
+- **Fulfillment is simulated** — fulfiller processing and shipping are timer-driven workflow simulations.
 
 ## AI Agent Tooling & Configuration
 

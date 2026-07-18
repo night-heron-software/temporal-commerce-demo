@@ -93,19 +93,19 @@ Checkout orchestrates the shipping → payment → review → complete steps as 
 
 ### Order Management (OMS) — Lifecycle Orchestration
 
-The OMS workflow manages an order from placement through delivery. It coordinates supplier assignments, tracks fulfillment status, and maintains audit history.
+The OMS workflow manages an order from placement through delivery. It coordinates fulfiller assignments, tracks fulfillment status, and maintains audit history.
 
 | Pattern | Implementation |
 | --- | --- |
-| **Supplier routing** | `resolveSupplierAssignments` activity decides which supplier handles each line item |
+| **Fulfiller routing** | `resolveFulfillerAssignments` activity decides which fulfiller handles each line item |
 | **Decoupled fulfillment** | Fulfillment is started via an activity (not `startChild`), making it a standalone workflow with its own lifecycle |
-| **Signal-driven updates** | Fulfillment status flows upward via signals — the OMS aggregates across all supplier orders to derive order-level status |
+| **Signal-driven updates** | Fulfillment status flows upward via signals — the OMS aggregates across all fulfiller orders to derive order-level status |
 | **Status projections** | Every status change is indexed to Elasticsearch for real-time admin panel updates |
 | **Audit trail** | Every status transition is recorded in the `order_status_history` Cassandra table |
 
 ### Fulfillment — Strategy-Based State Machine
 
-The fulfillment workflow receives pre-decided supplier orders and executes the appropriate fulfillment strategy for each, powered by the declarative `runStateMachine` driver.
+The fulfillment workflow receives pre-decided fulfiller orders and executes the appropriate fulfillment strategy for each, powered by the declarative `runStateMachine` driver.
 
 | Pattern | Implementation |
 | --- | --- |
@@ -113,7 +113,7 @@ The fulfillment workflow receives pre-decided supplier orders and executes the a
 | **Automatic mode** | `wf.sleep()` timers simulate processing (15s) → shipping (15s) → delivery (15s) |
 | **Manual mode** | Feature flag `MANUAL_FULFILLMENT=true` pauses at each stage, waiting for Temporal signals to advance |
 | **Simulated strategy** | Simulated fulfillment strategy (multi-supplier routing available in the full platform) |
-| **Inventory lifecycle** | Reservations are transferred to supplier on start, fulfilled on delivery, released on rejection |
+| **Inventory lifecycle** | Reservations are transferred to fulfiller on start, fulfilled on delivery, released on rejection |
 | **Email notifications** | Shipped and delivered emails are sent via activity stubs |
 
 ### Inventory — CQRS Event Processor
@@ -167,9 +167,9 @@ Elasticsearch serves as the read projection layer with full-text search and face
 | `collections` | Reindex API (bulk) | Collection navigation |
 | `orders` | OMS workflow activities | Admin order list, search |
 | `customers` | OMS workflow activities | Admin search |
-| `suppliers` | Reindex API (bulk) | Admin search |
+| `fulfillers` | Reindex API (bulk) | Admin search |
 | `inventory` | Inventory service workflow | Admin inventory, search |
-| `supplier_orders` | OMS workflow activities | Admin order detail, search |
+| `fulfiller_orders` | OMS workflow activities | Admin order detail, search |
 | `carts` | Cart workflow activities | Admin carts, search |
 | `reservations` | Cart + checkout activities | Admin search |
 | `fulfillments` | Fulfillment workflow activities | Admin search |
@@ -239,7 +239,7 @@ Task queue isolation means a slow fulfillment activity cannot block cart operati
 | 6 | `condition()` with timeout — reservation TTL | Checkout, Inventory |
 | 7 | Cross-workflow signaling via `getExternalWorkflowHandle` | Checkout → Cart, Fulfillment → OMS |
 | 8 | Activity-driven workflow spawning (not `startChild`) | OMS → Fulfillment, Checkout → OMS |
-| 9 | Multi-supplier strategy routing | Fulfillment |
+| 9 | Multi-fulfiller strategy routing | Fulfillment |
 | 10 | Signal-driven status propagation | Fulfillment → OMS → Elasticsearch |
 | 11 | Workflow as CQRS event processor | Inventory Service |
 | 12 | Shared connection, isolated task queues | Unified Worker |
@@ -270,7 +270,7 @@ temporal-commerce-demo/
 │   ├── presentation-script.md  # 30-40 min talk script with code excerpts
 │   ├── demo-instructions.md    # 4-5 min live demo walkthrough
 │   ├── developer-guide.md      # Local development setup
-│   └── cloud-deployment.md     # Production deployment guide
+│   └── cloud-deployment.md     # Hosted deployment options (exploratory)
 ├── src/
 │   ├── app/
 │   │   ├── api/                # REST endpoints (search, product, seed, reindex)
@@ -332,5 +332,5 @@ npm run dev:up       # Start storefront app (Next.js) + Temporal workers concurr
 - [Presentation Script](presentation-script.md) — 30–40 minute talk with code excerpts and live demo instructions
 - [Demo Instructions](demo-instructions.md) — Streamlined 4–5 minute live demo walkthrough
 - [Developer Guide](developer-guide.md) — Local development setup and debugging
-- [Cloud Deployment](cloud-deployment.md) — Production deployment guide
+- [Deployment Options](cloud-deployment.md) — Survey of hosted options, biased toward serverless push *(exploratory)*
 - [Temporal Lessons Learned](temporal-lessons-learned.md) — 25 hard-won lessons from building on Temporal durable execution

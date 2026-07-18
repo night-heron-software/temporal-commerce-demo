@@ -1063,7 +1063,7 @@ function collectMachines() {
 // ============================================================================
 
 // '<segment>' in buildWorkflowId() → owning domain. Segment usually equals the
-// domain directory name; OMS workflow IDs use the 'order' segment, and the supplier
+// domain directory name; OMS workflow IDs use the 'order' segment, and the fulfiller
 // child workflows use 'fulfiller-order' but live in the fulfillment domain.
 const SEGMENT_TO_DOMAIN = { order: 'oms', 'fulfiller-order': 'fulfillment' };
 const segmentDomain = (seg) => SEGMENT_TO_DOMAIN[seg] || seg;
@@ -1340,7 +1340,7 @@ flowchart LR
 | **Cart** | ES \`carts\` | Every transition — \`indexCart\` from the \`onTransition\` hook |
 | **Checkout** | Cassandra \`orders\` + ES \`orders\` | \`submitOrder\` pipeline — \`createOrder\`, then OMS startup indexes |
 | **OMS** | Cassandra \`orders\`, \`order_status_history\` | Startup pipeline + every status change (\`updateOrderInDatabase\`, \`insertStatusHistoryEntry\`) |
-| **OMS** | ES \`orders\`, \`supplier_orders\`, \`customers\` | \`onStart\` + every transition (\`indexOrder\`, \`indexSupplierOrder\`, \`indexCustomer\`) |
+| **OMS** | ES \`orders\`, \`fulfiller_orders\`, \`customers\` | \`onStart\` + every transition (\`indexOrder\`, \`indexFulfillerOrder\`, \`indexCustomer\`) |
 | **Fulfillment** | ES \`fulfillments\`, \`shipments\` | \`onTransition\`/finalize — \`indexFulfillment\`, \`indexShipment\` |
 | **Inventory** | Cassandra read tables + ES \`inventory\` | Signal-driven targeted projections in \`inventoryServiceWorkflow\` (CQRS) |
 

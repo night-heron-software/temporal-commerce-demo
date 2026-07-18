@@ -78,8 +78,9 @@ export const DOC_ENTRIES: DocEntry[] = [
   },
   {
     slug: 'cloud-deployment',
-    title: 'Cloud Deployment',
-    description: 'Deploying the demo to Temporal Cloud + Google Cloud for live presentation.',
+    title: 'Deployment Options',
+    description:
+      'Survey of hosted deployment options, with a stated bias toward serverless push workers and away from Kubernetes.',
     file: 'docs/cloud-deployment.md',
     category: 'Guides',
   },

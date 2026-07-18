@@ -19,7 +19,7 @@ A comprehensive guide for developers working on the Temporal Commerce Demo — a
 - [Feature Flags](#feature-flags)
 - [Seeding & Data Pipeline](#seeding--data-pipeline)
 - [Diagnostics & Debugging](#diagnostics--debugging)
-- [Cloud Deployment](#cloud-deployment)
+- [Deployment Options](#deployment-options)
 - [Environment Variables Reference](#environment-variables-reference)
 
 ---
@@ -213,7 +213,7 @@ temporal-commerce-demo/
 │       │   ├── inventory.ts
 │       │   ├── identity.ts
 │       │   ├── catalog.ts
-│       │   ├── suppliers.ts
+│       │   ├── fulfillers.ts
 │       │   ├── elasticsearch.ts  # All ES document types
 │       │   ├── constants.ts      # Task queues, workflow types, ID builders
 │       │   ├── product-type.ts
@@ -299,10 +299,10 @@ The OMS workflow manages the complete order lifecycle from placement through del
 
 **Key Patterns:**
 
-- **Auto-Assignment** — Resolves supplier assignments via a plugin registry (`resolveSupplierAssignments`). Currently all items are assigned to the `simulated` supplier.
+- **Auto-Assignment** — Resolves fulfiller assignments via a plugin registry (`resolveFulfillerAssignments`). Currently all items are assigned to the `simulated` fulfiller.
 - **Activity-Driven Fulfillment** — Starts fulfillment as a standalone workflow via an activity (`startFulfillmentWorkflow`), rather than as a child workflow. This decouples the OMS from fulfillment execution.
-- **Signal-Driven Status Updates** — The fulfillment workflow signals the OMS with `fulfillmentStatusSignal` as supplier orders progress through shipped → delivered.
-- **Status Aggregation** — Order-level status is derived from the aggregate of all supplier order statuses.
+- **Signal-Driven Status Updates** — The fulfillment workflow signals the OMS with `fulfillmentStatusSignal` as fulfiller orders progress through shipped → delivered.
+- **Status Aggregation** — Order-level status is derived from the aggregate of all fulfiller order statuses.
 - **Non-blocking ES Projections** — Uses the same dirty-flag pattern as the cart workflow to batch projection flushes.
 
 **Status Flow:**
@@ -312,8 +312,8 @@ stateDiagram-v2
     [*] --> pending_assignment
     pending_assignment --> ready_to_fulfill : auto-assign
     ready_to_fulfill --> processing : fulfillment started
-    processing --> shipped : all supplier orders shipped
-    shipped --> delivered : all supplier orders delivered
+    processing --> shipped : all fulfiller orders shipped
+    shipped --> delivered : all fulfiller orders delivered
     delivered --> complete : feedback or auto-complete
     processing --> cancelled : admin cancel
     processing --> refunded : admin refund
@@ -326,17 +326,17 @@ stateDiagram-v2
 
 **Task Queue:** `fulfillment-queue`
 **Workflow ID:** `demo.fulfillment.{orderId}`
-**Lifetime:** Until all supplier orders reach terminal state
+**Lifetime:** Until all fulfiller orders reach terminal state
 
-Manages the fulfillment lifecycle for all supplier orders in a single order using the declarative `runStateMachine` framework.
+Manages the fulfillment lifecycle for all fulfiller orders in a single order using the declarative `runStateMachine` framework.
 
 **Key Patterns:**
 
 - **State Machine Orchestration** — Managed using the `runStateMachine` driver to transition orders through fulfillment stages (`processing`, `shipped`, `delivered`, etc.).
-- **Simulated Strategy** — Executes the simulated fulfillment strategy for each supplier order using the state machine driver.
+- **Simulated Strategy** — Executes the simulated fulfillment strategy for each fulfiller order using the state machine driver.
 - **Simulated Fulfillment** — Timer-based simulation with configurable delays via workflow memo (`processingDelayMs`, `shippingDelayMs`, `deliveryDelayMs`). Defaults to 60 seconds per phase.
 - **Manual Fulfillment Mode** — When `MANUAL_FULFILLMENT` feature flag is enabled, the simulated strategy waits for explicit signals to advance through shipped → delivered.
-- **Inventory Lifecycle** — Transfers reservations to suppliers at start. Fulfills inventory on delivery, releases on rejection/cancellation.
+- **Inventory Lifecycle** — Transfers reservations to fulfillers at start. Fulfills inventory on delivery, releases on rejection/cancellation.
 - **OMS Signaling** — Signals the parent OMS workflow with `FulfillmentStatusUpdate` on each status transition.
 
 ### Inventory Service Workflow
@@ -351,7 +351,7 @@ A CQRS inventory management system with separate write-side and read-side projec
 
 - **Signal-Driven Targeted Projections** — Write-side code signals `inventoryChanged` with affected `blankSkus`. The workflow batches dirty SKUs and runs targeted projections.
 - **Periodic Consistency Sweep** — Every 5 minutes, if no signals arrive, runs a full CQRS projection sweep including reservation TTL expiration.
-- **Write/Read Table Separation** — Write tables (`inventory_stock_w`, `inventory_reservations_w`) are source-of-truth. Read tables (`inventory_stock_summary`, `inventory_stock_by_supplier`) are projections.
+- **Write/Read Table Separation** — Write tables (`inventory_stock_w`, `inventory_reservations_w`) are source-of-truth. Read tables (`inventory_stock_summary`, `inventory_stock_by_fulfiller`) are projections.
 - **`continueAsNew`** — After 100 signals, preserves pending dirty SKUs and resets the signal counter.
 
 ### Inventory Reservations
@@ -398,7 +398,7 @@ The inventory service is the least production-ready domain in the demo — by de
 
 - **Single-worker projection.** Projection and TTL expiry run in one singleton workflow (`demo.inventory.service`) on a single worker. Production needs the projector sharded across workers — e.g. partition SKUs across multiple projection workflows — so it scales horizontally like the other domains. (The reserve path already fans out across workers via the Cassandra LWT; the singleton projector is the bottleneck.)
 - **One inventory style, seeded once.** Stock supports a single inventory-management style and is seeded at startup (`npm run dev:init`). A real system needs configurable inventory models and live stock ingestion, not a one-time seed.
-- **No multi-fulfiller/supplier ingestion.** There is no path to take ongoing stock updates from different fulfillers or suppliers, nor to model different inventory behavior per kind of product. The schema keys stock by `(blank_sku, fulfiller_id)`, but nothing feeds or updates those rows after the initial seed.
+- **No multi-fulfiller ingestion.** There is no path to take ongoing stock updates from different fulfillers, nor to model different inventory behavior per kind of product. The schema keys stock by `(blank_sku, fulfiller_id)`, but nothing feeds or updates those rows after the initial seed.
 - **No sense of time.** Availability is a point-in-time `total − reserved`. The service cannot represent inbound stock, lead times, replenishment schedules, or anticipated future availability — inventory has no temporal dimension at all.
 - **No sourcing logic.** When the same product is available from multiple sources or locations, `reserve()` simply picks a fulfiller row. There is no sourcing/allocation strategy — cost, proximity, split shipments, per-source capacity — and building one is a significant piece of future work.
 
@@ -449,7 +449,7 @@ The Cassandra schema is defined in `cassandra/schema.cql` and uses the `catalog`
 
 - **Single-store demo** — No `store_id` partition keys (unlike the multi-tenant `nightheron-platform`).
 - **Denormalized query tables** — `products_by_collection`, `variants_by_product`, `orders_by_customer`, `orders_by_confirmation` duplicate data for efficient partition-key lookups.
-- **User Defined Types (UDTs)** — `option_selection`, `shipping_address`, `payment_method`, `order_item`, `order_assignment`, `supplier_order`, etc. provide structured data within rows.
+- **User Defined Types (UDTs)** — `option_selection`, `shipping_address`, `payment_method`, `order_item`, `order_assignment`, `fulfiller_order`, etc. provide structured data within rows.
 - **CQRS Write Tables** — Inventory uses `_w` suffix for write-side tables (`inventory_stock_w`, `inventory_reservations_w`).
 
 **Key Tables:**
@@ -479,9 +479,9 @@ Elasticsearch serves as the read-side projection store and powers product search
 | `collections` | `CollectionDocument` | Collection browsing |
 | `orders` | `OrderDocument` | Order search and admin views |
 | `customers` | `CustomerDocument` | Customer search |
-| `suppliers` | `SupplierDocument` | Supplier search |
+| `fulfillers` | `FulfillerDocument` | Fulfiller search |
 | `inventory` | `InventoryDocument` | Inventory read-side views |
-| `supplier_orders` | `SupplierOrderDocument` | Supplier order tracking |
+| `fulfiller_orders` | `FulfillerOrderDocument` | Fulfiller order tracking |
 | `carts` | `CartDocument` | Active cart visibility |
 | `reservations` | `ReservationDocument` | Reservation tracking |
 | `fulfillments` | `FulfillmentDocument` | Fulfillment workflow state |
@@ -720,7 +720,7 @@ Domains that project to Elasticsearch have a `document-builder.ts` file that tra
 ```typescript
 // src/temporal/oms/document-builder.ts
 export function buildOrderDocument(order, state, customerEmail): OrderDocument { ... }
-export function buildSupplierOrderDocument(supplierOrder): SupplierOrderDocument { ... }
+export function buildFulfillerOrderDocument(fulfillerOrder): FulfillerOrderDocument { ... }
 ```
 
 ### Contracts Directory
@@ -840,18 +840,24 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f
 
 ---
 
-## Cloud Deployment
+## Deployment Options
 
-For deploying to Temporal Cloud + Google Cloud, see [cloud-deployment.md](cloud-deployment.md).
+The supported, tested environment is local Docker Compose. Hosted deployment is exploratory — see
+[cloud-deployment.md](cloud-deployment.md) for the option survey, which states a bias toward
+serverless push workers and against Kubernetes.
 
-Key deployment targets:
+The four independently-hostable pieces:
 
-- **Next.js App** → Google Cloud Run (serverless, scales to zero)
-- **Temporal Workers** → Google Cloud Run (always-on, `--min-instances 1`)
-- **Cassandra** → DataStax Astra DB
-- **Elasticsearch** → Elastic Cloud
+- **Next.js App** → any container host or serverless platform; request-shaped, scales to zero
+- **Temporal Workers** → the contested piece. Long-poll consumers can't scale to zero, so today
+  this means an always-on container; [Temporal Serverless Workers](https://docs.temporal.io/serverless-workers)
+  is the preferred direction but is pre-release and AWS Lambda-only
+- **Cassandra** → managed (e.g. DataStax Astra DB)
+- **Elasticsearch** → managed (e.g. Elastic Cloud)
 
-The unified worker process runs all six domain workers in a single container, sharing one mTLS connection to Temporal Cloud.
+The unified worker process runs all six domain workers in a single container, sharing one connection
+to the Temporal service. Because task queues are per-domain, splitting or relocating workers is a
+deployment change, not a code change.
 
 ---
 

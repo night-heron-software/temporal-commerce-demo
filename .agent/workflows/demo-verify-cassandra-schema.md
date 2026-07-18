@@ -12,7 +12,7 @@ The demo uses a single consolidated schema file:
 
 | File | Contents |
 | --- | --- |
-| `cassandra/schema.cql` | All tables: catalog, orders, inventory, suppliers, carts |
+| `cassandra/schema.cql` | All tables: catalog, orders, inventory, fulfillers, carts |
 
 ## Prerequisites
 

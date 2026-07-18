@@ -30,7 +30,7 @@ These rules are mandatory for all workflow and activity code in `src/temporal/`:
 6. **Workflow IDs & Correlation (ported from nightheron-mono ADR-0011)**: Build workflow IDs with `buildWorkflowId(DEMO_STORE_ID, domain, entityId)` from `src/temporal/contracts/constants.ts` — never inline `{storeId}.{domain}.{entityId}` strings (lint-enforced). At workflow **starts**, spread `buildWorkflowStartOptions()` so the correlation Search Attributes (`CorrelationId`, `StoreId`, `Domain`, `OrderId`, `CartId`) and memo are set.
 7. **Prepare → Decide → Finalize (ADR-0003/0009/0010)**: Domain state machines are authored with `defineDomain()/transitions()` from `src/temporal/framework`; each domain has a pure `*-decider.ts` (decide → facts, evolve as the sole state writer). `decide` is pure and synchronous — no activities, no clock (`meta.timestamp` / the `at` hook argument carry deterministic time; lint-enforced), no id generation (inject via the command from `prepare`). I/O belongs in `prepare`/`finalize`/hooks. Changes to decider/states files **require** co-located `*.test.ts` unit tests.
 8. **Transition recording (ADR-0010)**: the framework records every transition to Cassandra `workflow_state_transitions` via the `persistWorkflowTransitions` activity — spread `transitionRecorderActivities` into any new domain worker. The order-trace dev tool (`/dev/order-trace`) reads these.
-9. **State diagrams are generated, never hand-edited**: after changing any `states.ts` / `*-decider.ts` / `supplier-states.ts`, run `npm run docs:diagrams` and commit the regenerated `docs/reference/state-machine-diagrams.md` + `state-graph.json`. CI fails stale diagrams via `npm run docs:diagrams:check`; `src/temporal/state-graph.test.ts` asserts structural properties (reachability, no dead-end states) against the JSON.
+9. **State diagrams are generated, never hand-edited**: after changing any `states.ts` / `*-decider.ts` / `fulfiller-states.ts`, run `npm run docs:diagrams` and commit the regenerated `docs/reference/state-machine-diagrams.md` + `state-graph.json`. CI fails stale diagrams via `npm run docs:diagrams:check`; `src/temporal/state-graph.test.ts` asserts structural properties (reachability, no dead-end states) against the JSON.
 
 ---
 
@@ -166,7 +166,7 @@ This demo differs from the full platform in several intentional ways:
 2. **Temporal UI Port**: The demo uses port `8233` (not `8080` like the full platform) to avoid conflicts.
 3. **Docker Desktop Required**: `npm run infra:up` requires Docker Desktop running. It will auto-start Docker Desktop if not running.
 4. **Seeding Order**: `npm run dev:seed` requires the Next.js app + workers to be running. Always start `npm run dev:up` first.
-5. **Inventory Seeding**: The seed pipeline uses `InventoryCommandRepository.setSupplierStock()` which flows through the inventory-service workflow (CQRS projections + ES sync). Workers must be running for this to work.
+5. **Inventory Seeding**: The seed pipeline uses `InventoryCommandRepository.setFulfillerStock()` which flows through the inventory-service workflow (CQRS projections + ES sync). Workers must be running for this to work.
 
 ---
 

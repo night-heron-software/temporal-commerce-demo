@@ -88,7 +88,7 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
    - `demo.inventory.service` — **Running** (singleton, started lazily on the first inventory reservation)
 3. Click into the `demo.order.{orderId}` workflow — show auto-assignment and the fulfillment trigger activity
 
-> "One click triggered a cascade: checkout persisted the order, signaled the parent cart, and the OMS workflow started. It auto-assigned items to suppliers and kicked off a fully decoupled fulfillment workflow on a separate task queue."
+> "One click triggered a cascade: checkout persisted the order, signaled the parent cart, and the OMS workflow started. It auto-assigned items to fulfillers and kicked off a fully decoupled fulfillment workflow on a separate task queue."
 
 ### 3:00 — Fulfillment and Admin (~1 minute)
 
@@ -96,10 +96,10 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 2. Open the **Admin Panel** at `http://localhost:3000/admin/orders`
 3. Show the order in the list with its current status
 4. Open the **Elasticsearch Explorer** at `http://localhost:3000/admin/search`
-5. Search for the order ID — show results across orders, supplier_orders, fulfillments, and inventory indices
+5. Search for the order ID — show results across orders, fulfiller_orders, fulfillments, and inventory indices
 6. Point out the Temporal UI link in the admin panel
 
-> "The fulfillment workflow is simulating supplier processing with `wf.sleep()` timers. Status updates signal the OMS, which projects to Elasticsearch. The admin panel reads from ES — it's a CQRS projection kept in sync by the workflow. The search page lets us query across all 11 domain indices to verify every entity is being tracked."
+> "The fulfillment workflow is simulating fulfiller processing with `wf.sleep()` timers. Status updates signal the OMS, which projects to Elasticsearch. The admin panel reads from ES — it's a CQRS projection kept in sync by the workflow. The search page lets us query across all 11 domain indices to verify every entity is being tracked."
 
 ### 4:00 — Wrap-Up (~30 seconds)
 
@@ -144,11 +144,11 @@ For longer demos where you want to control the pace, switch to **Manual** fulfil
 
 ### Advance to Shipped
 
-Signal name: `supplierStatusUpdate`
+Signal name: `fulfillerStatusUpdate`
 
 ```json
 {
-  "supplierOrderId": "<supplierOrderId from getStatus query>",
+  "fulfillerOrderId": "<fulfillerOrderId from getStatus query>",
   "status": "shipped",
   "carrier": "Demo Carrier",
   "trackingNumber": "DEMO-TRACK-001"
@@ -157,11 +157,11 @@ Signal name: `supplierStatusUpdate`
 
 ### Advance to Delivered
 
-Signal name: `supplierStatusUpdate`
+Signal name: `fulfillerStatusUpdate`
 
 ```json
 {
-  "supplierOrderId": "<supplierOrderId from getStatus query>",
+  "fulfillerOrderId": "<fulfillerOrderId from getStatus query>",
   "status": "delivered"
 }
 ```
@@ -170,10 +170,10 @@ Signal name: `supplierStatusUpdate`
 
 Signal name: `cancel` — no payload required.
 
-### Finding the Supplier Order ID
+### Finding the Fulfiller Order ID
 
 1. Open the fulfillment workflow in Temporal UI
 2. Go to the **Queries** tab
 3. Run the `getStatus` query
-4. In the result JSON, find `supplierOrders[0].supplierOrderId`
+4. In the result JSON, find `fulfillerOrders[0].fulfillerOrderId`
 5. Copy this value into the signal payload

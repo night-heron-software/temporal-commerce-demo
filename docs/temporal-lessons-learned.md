@@ -383,20 +383,20 @@ This gives both event-driven behavior (wake up when signaled) and time-driven be
 
 ### 19. Every domain entity that changes must trigger its own ES projection
 
-**The problem:** We initially only indexed products, collections, orders, and supplier orders. But the admin dashboard needed visibility into carts, fulfillment status, inventory levels, and customer records — and those entities were invisible to search.
+**The problem:** We initially only indexed products, collections, orders, and fulfiller orders. But the admin dashboard needed visibility into carts, fulfillment status, inventory levels, and customer records — and those entities were invisible to search.
 
 **The lesson:** If a domain entity's state changes via a workflow, it should project to Elasticsearch. We ended up with 11 indices:
 
 | Index | Trigger |
 | --- | --- |
-| `products`, `collections`, `suppliers` | Reindex API (bulk, from Cassandra) |
-| `orders`, `customers`, `supplier_orders` | OMS workflow activities (on every status change) |
+| `products`, `collections`, `fulfillers` | Reindex API (bulk, from Cassandra) |
+| `orders`, `customers`, `fulfiller_orders` | OMS workflow activities (on every status change) |
 | `carts` | Cart workflow activities (on every mutation) |
 | `reservations` | Cart + checkout activities |
 | `inventory` | Inventory service workflow |
 | `fulfillments`, `shipments` | Fulfillment workflow activities |
 
-**The Elasticsearch search page** (`/admin/search`) became the single pane of glass for debugging. Searching for an order ID returns results across orders, supplier_orders, fulfillments, customers, and inventory — showing the complete system state for that transaction.
+**The Elasticsearch search page** (`/admin/search`) became the single pane of glass for debugging. Searching for an order ID returns results across orders, fulfiller_orders, fulfillments, customers, and inventory — showing the complete system state for that transaction.
 
 ### 20. UUID search requires keyword-only matching
 

@@ -254,30 +254,30 @@ await startFulfillmentWorkflow(fulfillmentInput);
 
 // Later, fulfillment signals OMS with status updates
 setHandler(fulfillmentStatusSignal, async (update) => {
-  const supplierOrder = state.supplierOrders.find(
-    so => so.supplierOrderId === update.supplierOrderId
+  const fulfillerOrder = state.fulfillerOrders.find(
+    so => so.fulfillerOrderId === update.fulfillerOrderId
   );
-  supplierOrder.status = update.status;
+  fulfillerOrder.status = update.status;
   // ... propagate to order-level status
 });
 ```
 
 > Why not use a child workflow? Because the fulfillment workflow may outlive the current OMS execution if the OMS needs to `continueAsNew`. With activity-based spawning, the fulfillment workflow is truly independent — it runs on its own task queue, has its own lifecycle, and communicates only via signals.
 
-### Pattern 9: Supplier Strategy Routing
+### Pattern 9: Fulfiller Strategy Routing
 
-> The fulfillment workflow receives pre-decided supplier orders and routes each one to the appropriate strategy based on `supplierType`.
+> The fulfillment workflow receives pre-decided fulfiller orders and routes each one to the appropriate strategy based on `fulfillerType`.
 
 ```typescript
-for (const supplierOrder of state.supplierOrders) {
-  if (supplierOrder.supplierType === 'simulated') {
-    await runSimulatedFulfillment(state, supplierOrder, request, syncProjections);
+for (const fulfillerOrder of state.fulfillerOrders) {
+  if (fulfillerOrder.fulfillerType === 'simulated') {
+    await runSimulatedFulfillment(state, fulfillerOrder, request, syncProjections);
   }
-  // Additional supplier types can be added here
+  // Additional fulfiller types can be added here
 }
 ```
 
-> The simulated strategy uses `wf.sleep()` timers to simulate processing, shipping, and delivery delays. The architecture supports adding real supplier integrations — same workflow, different execution strategies.
+> The simulated strategy uses `wf.sleep()` timers to simulate processing, shipping, and delivery delays. The architecture supports adding real fulfiller integrations — same workflow, different execution strategies.
 
 ### Pattern 10: Signal-Driven Status Propagation
 
@@ -289,14 +289,14 @@ sequenceDiagram
     participant O as OMS WF
     participant ES as Elasticsearch
 
-    F->>F: Supplier order ships
+    F->>F: Fulfiller order ships
     F->>O: signal(fulfillmentStatus, {status: 'shipped'})
-    O->>O: Update supplier order state
+    O->>O: Update fulfiller order state
     O->>O: Aggregate order status
     O->>ES: Index updated order (projection)
 ```
 
-> Each fulfillment status change signals the OMS, which aggregates across all supplier orders to derive the order-level status. When all supplier orders are shipped, the order is shipped. When all are delivered, the order is delivered. This aggregation happens deterministically inside the workflow.
+> Each fulfillment status change signals the OMS, which aggregates across all fulfiller orders to derive the order-level status. When all fulfiller orders are shipped, the order is shipped. When all are delivered, the order is delivered. This aggregation happens deterministically inside the workflow.
 
 ### Live Demo: Order Processing
 
@@ -505,7 +505,7 @@ npm run dev:up                       # Start Next.js + Temporal workers
    - Cart workflow completes
 8. **Watch fulfillment** → show simulated timers advancing through `in_production → shipped → delivered`
 9. **Show admin panel** → order status updating in real-time via ES projections
-10. **Show Elasticsearch Explorer** (`/admin/search`) → search for the order ID to show cross-index projections (orders, supplier_orders, fulfillments, customers, inventory)
+10. **Show Elasticsearch Explorer** (`/admin/search`) → search for the order ID to show cross-index projections (orders, fulfiller_orders, fulfillments, customers, inventory)
 11. **Show Temporal UI** → full event history, queryable state, signal flow
 
 ### Feature Flag Demo Options

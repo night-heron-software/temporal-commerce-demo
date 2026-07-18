@@ -148,7 +148,7 @@ cd /Users/jeffromine/src/portfolio/temporal-commerce-demo && npm run db:verify
 curl -sf 'http://localhost:9200/_cat/indices?h=index&format=json' | python3 -c "
 import sys, json
 indices = {i['index'] for i in json.load(sys.stdin) if not i['index'].startswith('.')}
-required = {'products','collections','inventory','carts','orders','supplier_orders','fulfillments','shipments','reservations','customers'}
+required = {'products','collections','inventory','carts','orders','fulfiller_orders','fulfillments','shipments','reservations','customers'}
 missing = required - indices
 if missing: print(f'FAIL: Missing indices: {missing}'); sys.exit(1)
 print(f'PASS: {len(indices)} indices present, all required found')
@@ -306,7 +306,7 @@ Terminate any running cart, checkout, or fulfillment workflows from previous ses
 // turbo
 
 ```bash
-for wtype in cartWorkflow checkoutWorkflow fulfillmentWorkflow omsOrderWorkflow supplierOrderWorkflow; do
+for wtype in cartWorkflow checkoutWorkflow fulfillmentWorkflow omsOrderWorkflow fulfillerOrderWorkflow; do
   ids=$(curl -s "http://localhost:8233/api/v1/namespaces/default/workflows?query=WorkflowType%3D%22${wtype}%22+AND+ExecutionStatus%3D%22Running%22" | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
@@ -606,7 +606,7 @@ docker exec demo-cassandra cqlsh -e "SELECT blank_sku, reserved_stock FROM catal
 - **Fail**: Stale CONFIRMED reservation remaining (indicates `fulfillInventoryReservations` failed — check `variantId` vs `sku` mapping).
 
 > [!NOTE]
-> The demo simulates delivery automatically via timed state transitions in the supplier order workflow (~30–45 seconds). Wait for the fulfillment workflow to reach `__terminal:delivered` before checking this.
+> The demo simulates delivery automatically via timed state transitions in the fulfiller order workflow (~30–45 seconds). Wait for the fulfillment workflow to reach `__terminal:delivered` before checking this.
 
 ### 9.5 Order in Both Cassandra and ES
 

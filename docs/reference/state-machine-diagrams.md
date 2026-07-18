@@ -514,7 +514,7 @@ flowchart LR
 | **Cart** | ES `carts` | Every transition — `indexCart` from the `onTransition` hook |
 | **Checkout** | Cassandra `orders` + ES `orders` | `submitOrder` pipeline — `createOrder`, then OMS startup indexes |
 | **OMS** | Cassandra `orders`, `order_status_history` | Startup pipeline + every status change (`updateOrderInDatabase`, `insertStatusHistoryEntry`) |
-| **OMS** | ES `orders`, `supplier_orders`, `customers` | `onStart` + every transition (`indexOrder`, `indexSupplierOrder`, `indexCustomer`) |
+| **OMS** | ES `orders`, `fulfiller_orders`, `customers` | `onStart` + every transition (`indexOrder`, `indexFulfillerOrder`, `indexCustomer`) |
 | **Fulfillment** | ES `fulfillments`, `shipments` | `onTransition`/finalize — `indexFulfillment`, `indexShipment` |
 | **Inventory** | Cassandra read tables + ES `inventory` | Signal-driven targeted projections in `inventoryServiceWorkflow` (CQRS) |
 

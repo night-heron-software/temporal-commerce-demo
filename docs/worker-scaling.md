@@ -1,7 +1,7 @@
 # Worker Topology: From One Process to Many
 
-> **Status:** stub — outline in place, sections to be expanded. The production deployment mechanics
-> are covered today in [Cloud Deployment](cloud-deployment.md); the unified worker is described in
+> **Status:** stub — outline in place, sections to be expanded. Hosted deployment options are
+> surveyed in [Deployment Options](cloud-deployment.md); the unified worker is described in
 > [Project Description § Unified Worker Architecture](project-description.md#unified-worker-architecture)
 > and [Developer Guide § Unified Worker](developer-guide.md#unified-worker). The autoscaling
 > landscape behind items 4–6 (backlog signals, worker pools, Temporal Serverless Workers) is
@@ -24,8 +24,8 @@ a refactor. This guide covers both shapes and the path between them.
    container image layout (`deploy/worker.Dockerfile`).
 4. **Sizing and tuning** — poller counts, max concurrent activities/workflow tasks, when to scale
    out vs. up; reading task-queue backlog as the scaling signal.
-5. **Cloud Run specifics** — `--min-instances 1` (a poller cannot scale to zero) and
-   `--no-cpu-throttling` (a throttled poller stops polling); pointers into
-   [Cloud Deployment](cloud-deployment.md).
+5. **Hosting the workers** — the two constraints that follow a poller anywhere (it cannot scale to
+   zero; a throttled CPU stops it polling), and why serverless push is the preferred escape from
+   both; option-by-option treatment in [Deployment Options](cloud-deployment.md).
 6. **What changes on Temporal Cloud** — mTLS, namespaces, search-attribute registration; what stays
    identical between local Temporal and Temporal Cloud.
