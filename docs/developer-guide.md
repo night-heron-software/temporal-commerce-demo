@@ -257,7 +257,7 @@ The cart workflow manages shopping shopping cart state as a durable entity using
 - **Parent-Child Checkout** — `beginCheckoutUpdate` starts a checkout child workflow with `ABANDON` parent close policy, so the checkout survives even if the cart is destroyed.
 - **`continueAsNew`** — After 100 updates, the cart workflow calls `continueAsNew` to prevent unbounded history growth, preserving full cart state across executions.
 - **Non-blocking Projection Sync** — A `projectionDirty` flag is set by mutation handlers. The main loop flushes projections to Elasticsearch between iterations.
-- **Inventory Reservation** — Each add/update/remove triggers inventory reserve/release via activities.
+- **Inventory Reservation** — Each add/update/remove triggers inventory reserve/release via activities (see [Inventory Reservations](#inventory-reservations)).
 
 **State Machine:**
 
@@ -354,6 +354,44 @@ A CQRS inventory management system with separate write-side and read-side projec
 - **Write/Read Table Separation** — Write tables (`inventory_stock_w`, `inventory_reservations_w`) are source-of-truth. Read tables (`inventory_stock_summary`, `inventory_stock_by_supplier`) are projections.
 - **`continueAsNew`** — After 100 signals, preserves pending dirty SKUs and resets the signal counter.
 
+### Inventory Reservations
+
+Stock reservations are the write-side mechanism that prevents oversell. They are the one part of inventory that is **not** a Temporal workflow: the `demo.inventory.service` workflow above only projects and expires. The reserve / confirm / release mutations live in a plain repository, `InventoryCommandRepository` (`src/temporal/inventory/db/inventory-command-repository.ts`), and other domains call it **directly from their own activities**. This is the one sanctioned cross-domain data call in the codebase — `src/temporal/cart/activities-impl.ts` and `src/temporal/checkout/activities-impl.ts` both `import { InventoryCommandRepository }` rather than starting an inventory workflow.
+
+**Source of truth is Cassandra, not workflow state:**
+
+- `inventory_stock_w` — PK `(blank_sku, fulfiller_id)`; holds `total_stock`, `reserved_stock`, `ordered_stock`.
+- `inventory_reservations_w` — PK `reservation_id`; holds `cart_id`, `blank_sku`, `quantity`, `status`, `expires_at`.
+- `inventory_reservations_by_cart_w` — PK `(cart_id, reservation_id)`; the by-cart lookup used to release or confirm a whole cart's holds.
+
+**Available stock is computed, never stored:** `available = Σ(total_stock − reserved_stock)` across a SKU's fulfiller rows, with `UNLIMITED_STOCK = -1` treated as infinite. The materialized `available_stock` on the read side is a projection of that formula.
+
+**Lifecycle.** A reservation moves `TEMPORARY → CONFIRMED → FULFILLED`, or exits early via `RELEASED` / `CANCELLED`:
+
+| Operation | Repo method | Effect | Triggered by |
+| --- | --- | --- | --- |
+| Reserve | `reserve` / `reserveAll` | LWT-bump `reserved_stock`; insert `TEMPORARY` rows | cart add/update item (`reserveCartItem`); checkout start |
+| Confirm | `confirm` | `status = CONFIRMED`, `expires_at = null` (no longer expirable) | checkout after payment succeeds (`confirmReservations`) |
+| Release | `release` / `releaseAllForCart` | decrement `reserved_stock`; `status = RELEASED` | cart remove/cancel; checkout cancel/timeout; TTL sweep |
+| Cancel | `cancel` | decrement from the assigned fulfiller; `status = CANCELLED` | order cancelled post-confirm (fulfillment) |
+| Fulfill | `fulfill` | decrement **both** `total_stock` and `reserved_stock`; `status = FULFILLED` | fulfillment on delivery |
+| Transfer | `transferToFulfiller` | assign `fulfiller_id` for routing | fulfillment start |
+| Expire | `expireReservations` | release `TEMPORARY` rows past `expires_at` | inventory singleton's 5-minute sweep |
+
+**Oversell safety is a Cassandra lightweight transaction (LWT)**, not workflow serialization. `reserve()` reads current availability, then commits the new `reserved_stock` with a compare-and-set guard:
+
+```cql
+UPDATE inventory_stock_w SET reserved_stock = ?
+WHERE blank_sku = ? AND fulfiller_id = ?
+IF reserved_stock = ?          -- fails if another writer moved it first
+```
+
+If `[applied]` comes back false, the reserve returns `{ success: false }` and the caller treats the item as unavailable. When availability is tight, `reserve()` first **preempts** stale `TEMPORARY` reservations held longer than `MIN_HOLD_MS` (15 minutes), oldest-first, never preempting the requesting cart's own holds.
+
+**Expiry runs on two independent clocks.** A reservation carries a 15-minute TTL in `expires_at`, swept by the inventory singleton every 5 minutes (`CONSISTENCY_SWEEP_INTERVAL`). That is separate from the cart workflow's 30-day and the checkout's 1-hour timeouts — so a long-idle cart's holds are reclaimed by the sweep (or by preemption) well before the cart itself is abandoned. `confirm()` sets `expires_at = null`, so a paid reservation never expires.
+
+**Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller *before* the single-row LWT, so only the `reserved_stock` bump is atomic — there is no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries and firmer per-SKU routing. Two artifacts hint at an earlier design and should not be taken as the live path: `renewReservation()` exists but is unused (checkout renews by release-then-reserve), and `reserveInventoryUpdate` — a Temporal Update definition in `contracts/inventory.ts` — is declared but never handled. Reserves do **not** flow through a workflow update.
+
 ### Identity Workflows
 
 **Task Queue:** `identity-queue`
@@ -416,7 +454,7 @@ The Cassandra schema is defined in `cassandra/schema.cql` and uses the `catalog`
 | `orders_by_customer` | `customer_email` | Customer order history |
 | `shoppers` | `email` | Shopper accounts (email-only auth) |
 | `shopper_shipping_addresses` | `user_id` | Saved shipping addresses |
-| `inventory_stock_w` | `blank_sku, supplier_id` | Write-side stock levels |
+| `inventory_stock_w` | `blank_sku, fulfiller_id` | Write-side stock levels |
 | `inventory_reservations_w` | `reservation_id` | Active inventory reservations |
 
 ### Elasticsearch (Read Side)
