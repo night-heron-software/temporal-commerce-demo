@@ -16,7 +16,7 @@ Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasti
 
 > **Note:** This demo is derived from a much more comprehensive e-commerce platform currently under active development. It is a standalone extraction designed to showcase Temporal patterns without the full platform's multi-tenant, multi-supplier, and plugin architecture.
 
-> **AI Disclosure:** AI tooling was used extensively for code generation and documentation. Correctness is enforced by the project's verification gates rather than line-by-line review: a three-level test suite (pure decider unit tests, workflow tests against Temporal's time-skipping test server, and a cross-domain e2e), CI checks for lint / types / formatting / diagram freshness, and custom ESLint rules that enforce the architecture's invariants. The product catalog — including images, descriptions, and metadata — was created using [Printify](https://printify.com/). All products were first created as real products in a Printify store; the data and mockup images were then exported and adapted for this demo.
+> **AI Disclosure:** AI tooling was used extensively for code generation and documentation. Correctness is enforced by the project's verification gates rather than line-by-line review: a three-level test suite (pure decider unit tests, workflow tests against Temporal's time-skipping test server, and a cross-domain e2e), CI checks for lint / types / formatting / diagram freshness, and custom ESLint rules that enforce the architecture's invariants. The product catalog — including images, descriptions, and metadata — was generated using AI and [Printify](https://printify.com/). All products were first created as real products in a Printify store; the data and mockup images were then exported and adapted for this demo.
 
 ## Why This Exists
 
@@ -28,7 +28,7 @@ Every e-commerce system is a distributed state machine. The traditional approach
 - **No saga orchestrator** — the checkout workflow *is* the saga.
 - **No distributed transaction coordinator** — `updateWithStart` gives atomic create-or-update.
 
-**Scale:** ~19,000 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
+**Scale:** ~25,700 LOC · 6 Temporal workflow domains · 260 products · 10,411 variants
 
 ## What This Demonstrates
 
@@ -155,7 +155,7 @@ See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 | [Getting Started](GETTING_STARTED.md) | Clone-to-running setup, including Apple Silicon troubleshooting |
 | [Project Description](docs/project-description.md) | The full architecture narrative: why Temporal, domain walkthroughs, diagrams |
 | [Developer Guide](docs/developer-guide.md) | Day-to-day development: conventions, testing, debugging |
-| [Temporal Lessons Learned](docs/temporal-lessons-learned.md) | 25 practical lessons from building on the Temporal TypeScript SDK |
+| [Temporal Lessons Learned](docs/temporal-lessons-learned.md) | 26 practical lessons from building on the Temporal TypeScript SDK |
 | [State Machine Reference](docs/reference/state-machine-diagrams.md) | Auto-generated Mermaid diagrams + trigger tables for every workflow |
 | [Demo Instructions](docs/demo-instructions.md) | Script for a 4–5 minute live demonstration |
 | [Deployment Options](docs/cloud-deployment.md) | Survey of hosted options, with a stated bias toward serverless push and away from Kubernetes *(exploratory)* |
@@ -183,7 +183,7 @@ temporal-commerce-demo/
 │   │   └── shop/            # Storefront pages + Server Actions
 │   │       ├── checkout/    # Multi-step checkout flow
 │   │       └── orders/      # Order lookup by email
-│   ├── components/         # UI components (NavBar, CartDrawer, AccountDropdown)
+│   ├── components/         # UI components (ShopNavBar, CartDrawer, AccountDropdown)
 │   ├── context/            # React context (CartProvider, ShopperProvider)
 │   ├── lib/                # Shared: Cassandra, ES, Temporal clients
 │   └── temporal/
@@ -255,6 +255,8 @@ This repository includes metadata, configuration, and workflow automation guides
   - **[demo-verify.md](.agent/workflows/demo-verify.md)** / **[demo-e2e-test.md](.agent/workflows/demo-e2e-test.md)**: Automated end-to-end checks, Cassandra schema consistency validation, and checkout flows.
   - **[demo-temporal-worker-changes.md](.agent/workflows/demo-temporal-worker-changes.md)**: Safe deployment guidelines for worker and workflow changes.
   - **[demo-project-hygiene.md](.agent/workflows/demo-project-hygiene.md)**: Check for git hygiene, secrets protection, and metadata cleanup.
+  - **[demo-verify-cassandra-schema.md](.agent/workflows/demo-verify-cassandra-schema.md)**: Verify Cassandra schema consistency with TypeScript types and workflow usage.
+  - **[demo-open-browser-tabs.md](.agent/workflows/demo-open-browser-tabs.md)**: Open all app and infrastructure URLs in the browser.
   - **[demo-shutdown.md](.agent/workflows/demo-shutdown.md)**: Gracefully stop all background services.
 
 ## License

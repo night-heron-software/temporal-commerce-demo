@@ -252,9 +252,9 @@ The cart workflow manages shopping shopping cart state as a durable entity using
 **Key Patterns:**
 
 - **Declarative State Machine** — Managed via `runStateMachine` to process events like adding/removing items or updating quantities, maintaining strict consistency.
-- **`updateWithStart`** — Lazy cart creation. The first `addItemToCart` update creates the workflow if it doesn't exist, using `workflowIdConflictPolicy: 'USE_EXISTING'`.
+- **`updateWithStart`** — Lazy cart creation. The first `cartUpdate` (an `addItem` event) creates the workflow if it doesn't exist, using `workflowIdConflictPolicy: 'USE_EXISTING'`.
 - **FIFO Update Queue** — Handled by the state machine driver to process cart updates sequentially, avoiding write race conditions.
-- **Parent-Child Checkout** — `beginCheckoutUpdate` starts a checkout child workflow with `ABANDON` parent close policy, so the checkout survives even if the cart is destroyed.
+- **Parent-Child Checkout** — a `beginCheckout` event through `cartUpdate` starts a checkout child workflow with `REQUEST_CANCEL` parent close policy — if the cart workflow closes, the in-flight checkout receives a cancellation request and releases its inventory reservations instead of holding them as an orphan.
 - **`continueAsNew`** — After 100 updates, the cart workflow calls `continueAsNew` to prevent unbounded history growth, preserving full cart state across executions.
 - **Non-blocking Projection Sync** — A `projectionDirty` flag is set by mutation handlers. The main loop flushes projections to Elasticsearch between iterations.
 - **Inventory Reservation** — Each add/update/remove triggers inventory reserve/release via activities (see [Inventory Reservations](#inventory-reservations)).
@@ -307,20 +307,23 @@ The OMS workflow manages the complete order lifecycle from placement through del
 
 **Status Flow:**
 
+The happy path, condensed (cancel/refund/return branches omitted — `cancelled`, `refunded`, `returned`, and `complete` are terminal outcomes, not named states):
+
 ```mermaid
 stateDiagram-v2
     [*] --> pending_assignment
-    pending_assignment --> ready_to_fulfill : auto-assign
-    ready_to_fulfill --> processing : fulfillment started
+    pending_assignment --> assigning_fulfillers
+    assigning_fulfillers --> requesting_fulfillment : fulfillment requested
+    requesting_fulfillment --> processing
+    processing --> partially_shipped : some fulfiller orders shipped
+    partially_shipped --> shipped : all fulfiller orders shipped
     processing --> shipped : all fulfiller orders shipped
     shipped --> delivered : all fulfiller orders delivered
-    delivered --> complete : feedback or auto-complete
-    processing --> cancelled : admin cancel
-    processing --> refunded : admin refund
-    complete --> [*]
-    cancelled --> [*]
-    refunded --> [*]
+    delivered --> [*]
+    delivered --> return_requested : return initiated
 ```
+
+The full machine — every state, trigger, and terminal outcome — is auto-generated from source in the [State Machine Reference § OMS](reference/state-machine-diagrams.md#oms--oms_states).
 
 ### Fulfillment Workflow
 
@@ -334,7 +337,7 @@ Manages the fulfillment lifecycle for all fulfiller orders in a single order usi
 
 - **State Machine Orchestration** — Managed using the `runStateMachine` driver to transition orders through fulfillment stages (`processing`, `shipped`, `delivered`, etc.).
 - **Simulated Strategy** — Executes the simulated fulfillment strategy for each fulfiller order using the state machine driver.
-- **Simulated Fulfillment** — Timer-based simulation with configurable delays via workflow memo (`processingDelayMs`, `shippingDelayMs`, `deliveryDelayMs`). Defaults to 60 seconds per phase.
+- **Simulated Fulfillment** — Timer-based simulation with configurable delays via workflow memo (`processingDelayMs`, `shippingDelayMs`, `deliveryDelayMs`). Defaults to 15 seconds per phase.
 - **Manual Fulfillment Mode** — When `MANUAL_FULFILLMENT` feature flag is enabled, the simulated strategy waits for explicit signals to advance through shipped → delivered.
 - **Inventory Lifecycle** — Transfers reservations to fulfillers at start. Fulfills inventory on delivery, releases on rejection/cancellation.
 - **OMS Signaling** — Signals the parent OMS workflow with `FulfillmentStatusUpdate` on each status transition.
@@ -705,13 +708,13 @@ Workflows import from `activities.ts`, which contains only the proxy signatures.
 Signal, query, and update definitions are centralized in a `definitions.ts` file per domain:
 
 ```typescript
-// src/temporal/cart/definitions.ts
-export const addItemToCartUpdate = defineUpdate<CartDetails, [AddItemSignal]>('addItemToCartUpdate');
+// src/temporal/contracts/cart.ts — single source of truth
+export const cartUpdate = defineUpdate<CartUpdateResponse, [CartEvent]>('cartUpdate');
 export const getCartQuery = defineQuery<CartDetails>('getCart');
 export const checkoutCompletedSignal = defineSignal<[CheckoutCompletedPayload]>('checkoutCompleted');
 ```
 
-Workflows re-export these definitions for worker registration compatibility.
+Each domain's `definitions.ts` re-exports these from the contracts file for worker registration compatibility. Note the cart exposes one consolidated `cartUpdate` taking a discriminated `CartEvent` (`{ type: 'addItem', … }`, `{ type: 'beginCheckout' }`, …) rather than one update per operation; checkout, by contrast, defines per-command updates (`setShippingUpdate`, `submitOrderUpdate`).
 
 ### Document Builder Pattern
 
@@ -774,7 +777,7 @@ npx tsx scripts/seed.ts https://app.example.com  # Target a remote deployment
 
 ### Catalog Source
 
-The `sample-data/catalog.json` file is exported from the Night Heron Platform via its catalog export tooling. It contains 266 products, 10,600 variants, and 57 collections with product images hosted on Google Cloud Storage.
+The `sample-data/catalog.json` file is exported from the Night Heron Platform via its catalog export tooling. It contains 260 products, 10,411 variants, and 52 collections with product images hosted on Google Cloud Storage.
 
 ---
 
@@ -879,6 +882,9 @@ deployment change, not a code change.
 | `ELASTICSEARCH_URL` | Yes | `http://localhost:9200` | Elasticsearch endpoint |
 | `ELASTICSEARCH_API_KEY` | Cloud only | — | Elasticsearch API key |
 | `NEXT_PUBLIC_APP_URL` | Yes | `http://localhost:3000` | Public application URL |
+| `NEXT_PUBLIC_CHECKOUT_READY_TIMEOUT_MS` | No | `30000` | How long the checkout page waits for the checkout workflow before erroring |
+| `TEMPORAL_UI_URL` | No | `http://localhost:8233` | Temporal UI base URL used for links in the Order Trace tool |
+| `LOG_LEVEL` | No | `debug` (dev) / `info` | Pino log level |
 | `OTEL_ENABLED` | No | `false` | Enable OpenTelemetry tracing (requires observability stack) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OTLP HTTP endpoint for trace export |
 

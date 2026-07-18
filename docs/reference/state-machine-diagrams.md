@@ -520,6 +520,6 @@ flowchart LR
 
 ### State-Transition Audit (ADR-0010)
 
-Independently of the domain projections above, the framework records **every state-machine transition** to the Cassandra `workflow_state_transitions` table — from/to state, trigger + payload, a full context snapshot, and the captured `prepare`/`finalize` activity calls — via an async in-workflow recorder (off the hot path, 90-day TTL). The [order-trace dev tool](/dev/order-trace) reads this to show per-transition state diffs across a whole order journey.
+Independently of the domain projections above, the framework records **every state-machine transition** to the Cassandra `workflow_state_transitions` table — from/to state, trigger + payload, a full context snapshot, and the captured `prepare`/`finalize` activity calls — via an async in-workflow recorder (off the hot path, 90-day TTL). The [order-trace dev tool](http://localhost:3000/dev/order-trace) reads this to show per-transition state diffs across a whole order journey.
 
 > Cassandra UUIDs must always be passed as `types.Uuid.fromString(id)` — raw strings cause silent zero-row returns.

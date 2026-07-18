@@ -9,10 +9,12 @@
 
 In development, all six domain workers run in a single Node.js process over one gRPC connection,
 each polling its own task queue (`src/temporal/worker.ts`) — one thing to start, restart, and read
-logs from. That is a development convenience, not the production shape. In production, workers run
-one per process, with as many processes per worker type as its queue's load demands. Because the
-task queues were separate all along, moving between the two topologies is a deployment change, not
-a refactor. This guide covers both shapes and the path between them.
+logs from. The same unified process is also the pragmatic first *hosted* shape
+([Deployment Options](cloud-deployment.md), Option B: one always-on container running all six
+domains). The split topology — one worker type per process, with as many processes per queue as
+its load demands — is what the architecture is shaped for when load arrives: because the task
+queues were separate all along, moving from the unified process to the split one is a deployment
+change, not a refactor. This guide covers both shapes and the path between them.
 
 ## Outline
 

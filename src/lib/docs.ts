@@ -85,6 +85,54 @@ export const DOC_ENTRIES: DocEntry[] = [
     category: 'Guides',
   },
   {
+    slug: 'testing-guide',
+    title: 'Testing Without Containers',
+    description:
+      'The three-level test pyramid — pure deciders, time-skipping workflow tests, cross-domain e2e — with no Docker required. (Stub.)',
+    file: 'docs/testing-guide.md',
+    category: 'Guides',
+  },
+  {
+    slug: 'data-architecture',
+    title: 'Data Architecture for Scale',
+    description:
+      'CQRS with Cassandra as the write side and Elasticsearch as the app-facing query API. (Stub.)',
+    file: 'docs/data-architecture.md',
+    category: 'Guides',
+  },
+  {
+    slug: 'worker-scaling',
+    title: 'Worker Topology',
+    description:
+      'From one dev process to per-domain production scaling — task queues as the seam. (Stub.)',
+    file: 'docs/worker-scaling.md',
+    category: 'Guides',
+  },
+  {
+    slug: 'ai-development-guide',
+    title: 'AI-First Development',
+    description:
+      'The agent operating layer: rules, skills, runnable workflows, and the gates that make agent contributions safe. (Stub.)',
+    file: 'docs/ai-development-guide.md',
+    category: 'Guides',
+  },
+  {
+    slug: 'google-app-engine-paved-path',
+    title: 'GAE: Scalability by Constraint',
+    description:
+      'Research note — how Google App Engine’s paved path to scaling shaped this architecture.',
+    file: 'docs/google-app-engine-paved-path.md',
+    category: 'Reference',
+  },
+  {
+    slug: 'push-vs-pull-autoscaling',
+    title: 'Autoscaling by Push and by Pull',
+    description:
+      'Research note — GAE/Cloud Run push scaling vs Temporal’s pull model: stickiness, scale-to-zero, Serverless Workers.',
+    file: 'docs/push-vs-pull-autoscaling.md',
+    category: 'Reference',
+  },
+  {
     slug: 'state-machine-diagrams',
     title: 'State Machine Reference',
     description:

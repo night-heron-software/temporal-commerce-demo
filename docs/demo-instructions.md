@@ -37,7 +37,7 @@ This starts the Next.js dev server and Temporal workers concurrently. Wait for `
 
 ### 4. Set Fulfillment Mode
 
-Go to `http://localhost:3000/admin/orders` and confirm the **Fulfillment Mode** toggle is set to **Automatic**. This lets the fulfillment workflow auto-advance through `in_production → shipped → delivered` with ~60-second delays, so the audience sees the full lifecycle during the demo without manual intervention.
+Go to `http://localhost:3000/admin/orders` and confirm the **Fulfillment Mode** toggle is set to **Automatic**. This lets the fulfillment workflow auto-advance through `in_production → shipped → delivered` with ~15-second delays, so the audience sees the full lifecycle during the demo without manual intervention.
 
 ---
 
@@ -60,7 +60,7 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 
 1. In the **Storefront**, click a collection and select a product
 2. Click **Add to Cart**
-3. Glance at the **Temporal UI** — point out the new `cart-{uuid}` workflow (Running)
+3. Glance at the **Temporal UI** — point out the new `demo.cart.{uuid}` workflow (Running)
 4. Add **one more item** from a different product
 5. Click into the cart workflow in Temporal UI — briefly show the event history with `UpdateAccepted` / `UpdateCompleted` events
 
@@ -81,7 +81,7 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 
 1. Click **Place Order** → the Confirmation page appears
 2. Switch to **Temporal UI** and show the workflow cascade:
-   - `cart-{uuid}` — **Completed** (received the `checkoutCompleted` signal)
+   - `demo.cart.{uuid}` — **Completed** (received the `checkoutCompleted` signal)
    - `demo.checkout.{uuid}` — **Completed**
    - `demo.order.{orderId}` — **Running** (OMS workflow)
    - `demo.fulfillment.{orderId}` — **Running** (fulfillment simulation)

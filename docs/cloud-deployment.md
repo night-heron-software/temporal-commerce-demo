@@ -256,11 +256,18 @@ Compose, a container host, or a Lambda invocation.
 | `TEMPORAL_TLS_KEY` | Managed Temporal | — | Base64-encoded mTLS client key |
 | `CASSANDRA_CONTACT_POINTS` | Yes | `localhost:9042` | Cassandra contact points |
 | `CASSANDRA_KEYSPACE` | Yes | `catalog` | Cassandra keyspace name |
+| `CASSANDRA_DC` | No | `dc1` | Cassandra data center name |
 | `CASSANDRA_USE_TLS` | Hosted | `false` | Enable TLS for Cassandra |
 | `CASSANDRA_SECURE_BUNDLE_PATH` | Astra only | — | Path to Astra secure bundle |
+| `CASSANDRA_USERNAME` | Hosted | — | Cassandra authentication username |
+| `CASSANDRA_PASSWORD` | Hosted | — | Cassandra authentication password |
 | `ELASTICSEARCH_URL` | Yes | `http://localhost:9200` | Elasticsearch endpoint |
 | `ELASTICSEARCH_API_KEY` | Hosted | — | Elasticsearch API key |
 | `NEXT_PUBLIC_APP_URL` | Yes | `http://localhost:3000` | Public app URL |
+| `TEMPORAL_UI_URL` | No | `http://localhost:8233` | Temporal UI base URL (Order Trace links) |
+| `LOG_LEVEL` | No | `info` | Pino log level |
+| `OTEL_ENABLED` | No | `false` | Enable OpenTelemetry tracing |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OTLP HTTP trace export endpoint |
 
 ## Open questions
 

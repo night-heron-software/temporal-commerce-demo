@@ -17,9 +17,9 @@ behind it.
    gotchas), [`.agent/skills/`](../.agent/skills/) (domain knowledge: Next.js, TypeScript +
    Temporal).
 2. **Runnable workflows instead of tribal knowledge** — the [`.agent/workflows/`](../.agent/workflows/)
-   library (start-local-dev, initialize, status, verify, e2e-test, temporal-worker-changes,
-   project-hygiene, shutdown): the same paved path humans follow, executable by an agent that
-   starts cold.
+   library (start-local-dev, initialize, status, verify, verify-cassandra-schema, e2e-test,
+   temporal-worker-changes, project-hygiene, open-browser-tabs, shutdown): the same paved path
+   humans follow, executable by an agent that starts cold.
 3. **AI-first scripts** — non-interactive, deterministic, exit-code honest:
    `scripts/status.sh`, `scripts/validate-system.ts`, `scripts/verify-checkout.ts`,
    `scripts/wait-for-workers.ts`; `npm run dev:init` as the one-command world reset an agent can

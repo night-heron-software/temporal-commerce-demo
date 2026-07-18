@@ -84,14 +84,16 @@ The cart is the best entry point because everyone understands shopping carts, an
 ```typescript
 // Use updateWithStart to lazily create the workflow
 const startOp = new WithStartWorkflowOperation('cartWorkflow', {
-  workflowId: `cart-${cartId}`,
+  // buildWorkflowStartOptions → workflowId `demo.cart.{cartId}` + correlation Search Attributes
+  ...buildWorkflowStartOptions({ storeId: DEMO_STORE_ID, domain: 'cart', entityId: cartId, cartId }),
   args: [{ cartId }],
-  taskQueue: 'cart-queue',
+  taskQueue: Constants.CART_TASK_QUEUE,
   workflowIdConflictPolicy: 'USE_EXISTING',  // ← idempotent
+  workflowExecutionTimeout: '30 days',
 });
 return await client.workflow.executeUpdateWithStart(updateDef, {
   startWorkflowOperation: startOp,
-  args: args
+  args,
 });
 ```
 
@@ -105,9 +107,10 @@ return await client.workflow.executeUpdateWithStart(updateDef, {
 // Reading cart state — zero database calls
 const cart = await handle.query(getCartQuery);
 
-// Mutating cart state — returns updated cart synchronously
-const updatedCart = await handle.executeUpdate(addItemToCartUpdate, {
-  args: [{ variantId, quantity, price }]
+// Mutating cart state — one consolidated update, dispatched by event type;
+// returns the updated cart synchronously
+const updatedCart = await handle.executeUpdate(cartUpdate, {
+  args: [{ type: 'addItem', variantId, quantity, price }]
 });
 ```
 
@@ -151,22 +154,20 @@ const incrementUpdateCount = async () => {
 
 Checkout is where Temporal really shines — it's a multi-step, long-running process with timeouts, cancellations, and cross-workflow coordination.
 
-### Pattern 4: Parent-Child Workflow with ABANDON Policy
+### Pattern 4: Parent-Child Workflow with REQUEST_CANCEL Policy
 
-> When the user clicks "Checkout", the cart workflow starts a checkout child workflow. We use the `ABANDON` parent close policy, which means the checkout survives even if the cart is destroyed (e.g., the user clears cookies and creates a new cart).
+> When the user clicks "Checkout", the cart workflow starts a checkout child workflow. We use the `REQUEST_CANCEL` parent close policy: if the cart workflow closes while a checkout is in flight, the checkout receives a cancellation request rather than living on as an orphan — which matters, because an orphaned checkout would keep holding inventory reservations. Cancellation lets it release them.
 
 ```typescript
 await startChild('checkoutWorkflow', {
-  workflowId: checkoutWorkflowId,
+  ...checkoutStart,
   taskQueue: 'checkout-queue',
-  parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON,
+  parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
   args: [{
-    cartId: cart.cartId,
-    parentCartWorkflowId,
-    items: cart.items,
-    // ... snapshot of cart state at checkout time
+    ...buildCheckoutInput(ctx.cart, parentCartWorkflowId),
+    checkoutVersion: newCheckoutVersion,
   }],
-  workflowExecutionTimeout: '2 hours'
+  workflowExecutionTimeout: '2 hours',
 });
 ```
 
@@ -177,16 +178,21 @@ await startChild('checkoutWorkflow', {
 > The checkout workflow is a state machine: `validating → collecting → complete`. The UI steps (shipping → payment → review) are derived from which prerequisites are satisfied. States and transitions are managed declaratively using a custom state machine driver.
 
 ```typescript
-// The state function for the shipping step
-export async function shippingState(ctx, input) {
-  if (input.kind === 'timeout') return cancelCheckoutTransition(ctx);
-  const event = input.event;
-
-  if (event.kind === 'setShipping') {
-    return processShipping(ctx, event.shippingAddress);
-  }
-  return rejectInput(ctx, event, 'shipping');
-}
+// The `setShipping` command declared on the `collecting` state — condensed
+setShipping: {
+  async prepare(ctx, event) {
+    return prepareSetShipping(ctx, event.shippingAddress);   // I/O at the edge
+  },
+  decide(ctx, event, _meta, prepared) {                      // pure decision
+    const context = apply(ctx, { type: 'setShipping',
+      shippingAddress: event.shippingAddress, prepared });
+    if (prepared.paymentIntentError) {
+      return { context, next: 'collecting', response: context.state,
+               error: prepared.paymentIntentError };
+    }
+    return { context, next: 'collecting', response: context.state };
+  },
+},
 ```
 
 > Notice the guard: shipping can be set from `shipping`, `payment`, or `review`. This enables back-navigation — the user can return to the shipping step from payment or review and the workflow recalculates costs correctly. Try implementing that with a saga.
@@ -493,15 +499,15 @@ npm run dev:up                       # Start Next.js + Temporal workers
 ### Recommended Demo Flow
 
 1. **Browse catalog** → show products loaded from Elasticsearch
-2. **Add to cart** → show `cart-{id}` workflow appear in Temporal UI
+2. **Add to cart** → show `demo.cart.{cartId}` workflow appear in Temporal UI
 3. **Add more items** → show update events accumulating in history
 4. **Begin checkout** → show child `demo.checkout.{uuid}` workflow spawn
 5. **Enter shipping** → show the `setShippingUpdate` in event history
 6. **Enter payment** → show step transition to `review`
 7. **Submit order** → show:
    - Checkout signals cart with `checkoutCompleted`
-   - `order-{id}` workflow starts
-   - `fulfillment-{id}` workflow starts
+   - `demo.order.{orderId}` workflow starts
+   - `demo.fulfillment.{orderId}` workflow starts
    - Cart workflow completes
 8. **Watch fulfillment** → show simulated timers advancing through `in_production → shipped → delivered`
 9. **Show admin panel** → order status updating in real-time via ES projections

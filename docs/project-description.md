@@ -3,7 +3,7 @@
 A full-stack e-commerce application built entirely on [Temporal](https://temporal.io) durable execution. Every state transition — from adding an item to a cart through order fulfillment and delivery — is a Temporal workflow. No message queues, no cron jobs, no saga orchestrators. The business logic *is* the infrastructure.
 
 **Stack:** Next.js 16 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
-**Scale:** 127 source files · ~19,000 LOC · 6 Temporal workflow domains · 266 products · 10,600 variants
+**Scale:** 157 source files · ~25,700 LOC · 6 Temporal workflow domains · 260 products · 10,411 variants
 
 ### Disclaimers
 
@@ -11,7 +11,7 @@ This project is derived from a much more comprehensive e-commerce platform curre
 
 AI tooling was used extensively for code generation and documentation throughout this project. Correctness is enforced by the project's verification gates rather than line-by-line review: a three-level test suite (pure decider unit tests, workflow tests against Temporal's time-skipping test server, and a cross-domain e2e), CI checks for lint / types / formatting / diagram freshness, and custom ESLint rules that enforce the architecture's invariants. Prose in comments and docs may still carry generation artifacts.
 
-The product catalog — including images, descriptions, and metadata — was generated using AI and [Printify](https://printify.com/). All 266 products were first created as real products in a Printify store; the data and mockup images were then exported and adapted to fit this demo.
+The product catalog — including images, descriptions, and metadata — was generated using AI and [Printify](https://printify.com/). All 260 products were first created as real products in a Printify store; the data and mockup images were then exported and adapted to fit this demo.
 
 ---
 
@@ -76,15 +76,15 @@ The cart is a long-running Temporal workflow that acts as a live, queryable enti
 | **Live state** | React UI reads cart state via Temporal queries; mutations are Temporal updates with synchronous return values |
 | **Infinite lifetime** | `continueAsNew` after 100 updates resets the event history while preserving full cart state |
 | **Graceful shutdown** | `await condition(allHandlersFinished)` ensures in-flight update handlers complete before `continueAsNew` |
-| **Child orchestration** | Checkout is started as a child workflow with `ABANDON` parent close policy |
+| **Child orchestration** | Checkout is started as a child workflow with `REQUEST_CANCEL` parent close policy — cart closure cancels an in-flight checkout so it releases its reservations |
 
 ### Checkout — Declarative Step-based State Machine
 
-Checkout orchestrates the shipping → payment → review → complete steps as a state machine managed by the `runStateMachine` driver. Order processing runs inline within the `review` state.
+Checkout is a state machine managed by the `runStateMachine` driver with two working states — `validating → collecting` — plus a terminal `complete`. The UI's shipping → payment → review steps are *derived* from which prerequisites are satisfied in `collecting`, not modeled as machine states, and order processing runs inline within the `collecting` state's `submitOrder` handler.
 
 | Pattern | Implementation |
 | --- | --- |
-| **State configuration** | Transitions and guards are defined declaratively in states config. Each step represents a distinct machine state |
+| **State configuration** | Transitions and guards are defined declaratively in states config; `collecting` declares every command it accepts (`setShipping`, `setPayment`, `submitOrder`, …) |
 | **Update event mapping** | Custom update handlers map incoming signals/payloads (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events |
 | **Reservation management** | Inventory reservations are renewed at checkout start, released on timeout/cancellation, confirmed on success |
 | **Timeout** | `condition(() => complete, '1 hour')` auto-cancels stale checkouts and releases inventory |
@@ -234,7 +234,7 @@ Task queue isolation means a slow fulfillment activity cannot block cart operati
 | 1 | `updateWithStart` — atomic lazy entity creation | Cart |
 | 2 | Query/Update handlers — workflow as live entity | Cart, Checkout, OMS |
 | 3 | `continueAsNew` — infinite entity lifetime | Cart, Inventory Service |
-| 4 | Parent-child with `ABANDON` policy | Cart → Checkout |
+| 4 | Parent-child with `REQUEST_CANCEL` policy | Cart → Checkout |
 | 5 | Declarative state machine (`runStateMachine`) | Cart, Checkout, Fulfillment |
 | 6 | `condition()` with timeout — reservation TTL | Checkout, Inventory |
 | 7 | Cross-workflow signaling via `getExternalWorkflowHandle` | Checkout → Cart, Fulfillment → OMS |
@@ -263,7 +263,7 @@ The application follows a principle of **Redemptive State Recovery**: when a wor
 ```text
 temporal-commerce-demo/
 ├── cassandra/                  # CQL schema definitions
-├── sample-data/                # Product catalog (266 products, 57 collections, 10,600 variants)
+├── sample-data/                # Product catalog (260 products, 52 collections, 10,411 variants)
 ├── scripts/                    # Seed orchestrator
 ├── docs/
 │   ├── project-description.md  # This document
@@ -333,4 +333,4 @@ npm run dev:up       # Start storefront app (Next.js) + Temporal workers concurr
 - [Demo Instructions](demo-instructions.md) — Streamlined 4–5 minute live demo walkthrough
 - [Developer Guide](developer-guide.md) — Local development setup and debugging
 - [Deployment Options](cloud-deployment.md) — Survey of hosted options, biased toward serverless push *(exploratory)*
-- [Temporal Lessons Learned](temporal-lessons-learned.md) — 25 hard-won lessons from building on Temporal durable execution
+- [Temporal Lessons Learned](temporal-lessons-learned.md) — 26 hard-won lessons from building on Temporal durable execution

@@ -244,7 +244,7 @@ These are the academic papers that established the distributed systems primitive
 | :--- | :--- |
 | [The New Stack — What Is a Golden Path?](https://thenewstack.io/how-to-pave-golden-paths-that-actually-go-somewhere/) | Defines the paved/golden path concept in platform engineering: curated, opinionated routes through the SDLC that bundle best practices into the default workflow. |
 | [Microsoft — Platform Engineering Guide](https://learn.microsoft.com/en-us/platform-engineering/) | Microsoft's framework for platform engineering, including the "treat developers as customers" mindset and the balance between guardrails and autonomy. |
-| [Octopus Deploy — Golden Paths](https://octopus.com/devops/platform-engineering/golden-paths/) | Practical guide to implementing golden paths, including the distinction between "guardrails" (structural constraints) and "guidelines" (aspirational documentation). |
+| [Octopus Deploy — Platform Engineering](https://octopus.com/devops/platform-engineering/) | Practical guide to implementing golden paths, including the distinction between "guardrails" (structural constraints) and "guidelines" (aspirational documentation). |
 | [Evan Bottcher — What I Talk About When I Talk About Platforms](https://martinfowler.com/articles/talk-about-platforms.html) (Martin Fowler blog) | Foundational essay on internal platforms as products, with the principle that a platform should make the right thing easy and the wrong thing hard. |
 
 ### Temporal.io: Durable Execution
@@ -253,7 +253,7 @@ These are the academic papers that established the distributed systems primitive
 | :--- | :--- |
 | [Temporal.io Documentation](https://docs.temporal.io/) | Official documentation covering workflows, activities, task queues, and the durable execution programming model. |
 | [Maxim Fateev — Durable Execution (Replay 2022 Keynote)](https://www.youtube.com/watch?v=GfCv0FkwTO4) | Temporal's CTO introduces "durable execution" as a core abstraction — the idea that a program's state is preserved automatically through infrastructure crashes. Directly relevant to §2.3 (Request Timeouts → Task Decomposition). |
-| [SE Radio Episode 596 — Maxim Fateev on Durable Execution with Temporal](https://se-radio.net/2023/12/se-radio-596-maxim-fateev-on-durable-execution-with-temporal/) | Deep-dive interview covering Temporal's architecture, the role of determinism, the difference between workflows and activities, and the history of forking Cadence. |
+| [SE Radio Episode 596 — Maxim Fateev on Durable Execution with Temporal](https://se-radio.net/2023/12/se-radio-596-maxim-fateev-on-durable-execution-with-temporalse-radio-596/) | Deep-dive interview covering Temporal's architecture, the role of determinism, the difference between workflows and activities, and the history of forking Cadence. |
 | [Temporal Blog](https://temporal.io/blog) | Technical articles on workflow patterns, error handling, and production deployment. |
 
 ### Apache Cassandra: Data Modeling and Scalability
@@ -272,4 +272,4 @@ These are the academic papers that established the distributed systems primitive
 | [Mastering Chaos — A Netflix Guide to Microservices](https://www.youtube.com/watch?v=CZ3wIuvmHeM) | Josh Evans (Netflix) | Netflix's journey from monolith to microservices. Demonstrates the same "constraints create scale" principle: stateless services, externalized state, and circuit breakers as structural requirements rather than optional patterns. |
 | [Turning the Database Inside Out](https://www.youtube.com/watch?v=fU9hR3kiOK0) | Martin Kleppmann | Reframes databases as event logs with derived views — the conceptual foundation for CQRS and event sourcing. Directly relevant to this project's inventory CQRS architecture. |
 | [Designing Data-Intensive Applications](https://dataintensive.net/) | Martin Kleppmann (O'Reilly, 2017) | The definitive book on distributed data systems. Covers replication, partitioning, consistency models, and stream processing. Essential context for understanding why Cassandra + Temporal is a deliberate architectural choice. |
-| [The Art of Scalability](https://theartofscalability.com/) | Martin Abbott, Michael Fisher (2015) | Introduces the AKF Scale Cube (X/Y/Z axis scaling). This project uses Y-axis (functional decomposition via Temporal domains) and Z-axis (data partitioning via Cassandra partition keys). |
+| [The Art of Scalability](https://akfpartners.com/books/the-art-of-scalability) | Martin Abbott, Michael Fisher (2015) | Introduces the AKF Scale Cube (X/Y/Z axis scaling). This project uses Y-axis (functional decomposition via Temporal domains) and Z-axis (data partitioning via Cassandra partition keys). |

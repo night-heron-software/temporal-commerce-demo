@@ -17,8 +17,8 @@ Install these before cloning the repository:
 brew install node
 
 # Or using nvm (recommended for version management)
-nvm install 20
-nvm use 20
+nvm install 22
+nvm use 22
 ```
 
 Verify: `node --version` should show v22 or higher.
@@ -131,7 +131,7 @@ npm run infra:up:obs
 
 1. **Browse the catalog** — [http://localhost:3000/shop](http://localhost:3000/shop) should show a product grid with images and prices
 2. **Add an item to the cart** — click a product and click "Add to Cart"
-3. **Check the Temporal UI** — [http://localhost:8233](http://localhost:8233) should show a running `cart-{uuid}` workflow
+3. **Check the Temporal UI** — [http://localhost:8233](http://localhost:8233) should show a running `demo.cart.{uuid}` workflow
 
 If all three work, you're fully operational.
 

@@ -460,7 +460,7 @@ try {
 
 ### 22. Workflow-per-entity vs. singleton service — choose by cardinality
 
-**The lesson:** We initially considered workflow-per-entity for inventory (one workflow per SKU). With ~2,700 products and multiple variants each, this would have created thousands of concurrent workflows, overwhelming the Temporal UI and creating massive `continueAsNew` overhead.
+**The lesson:** We initially considered workflow-per-entity for inventory (one workflow per SKU). With 260 products expanding to more than 10,000 variants, this would have created thousands of concurrent workflows, overwhelming the Temporal UI and creating massive `continueAsNew` overhead.
 
 | Model | Use When | Examples in This Project |
 | --- | --- | --- |
