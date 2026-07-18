@@ -81,9 +81,9 @@ Projection writes are **workflow-mediated and non-blocking**: the
 Elasticsearch latency off the update hot path, and Temporal's retries make the projection pipeline
 durable without any queue infrastructure of its own.
 
-### Dirty-flag batching
+### Dirty-flag batching (demo-scoped)
 
-The inventory singleton's projection loop is the pattern at its sharpest
+The inventory singleton's projection loop batches with a dirty-flag sweep
 ([inventory/workflows.ts](../src/temporal/inventory/workflows.ts)):
 
 ```ts
@@ -91,8 +91,13 @@ await condition(() => dirtySkus.size > 0, CONSISTENCY_SWEEP_INTERVAL);
 ```
 
 Wake when there's work *or* when the sweep interval passes — event-driven and time-driven behavior
-in one expression. Five rapid cart additions become one Elasticsearch write. That line replaces a
-message-queue consumer *and* a cron job.
+in one expression, so five rapid cart additions become one Elasticsearch write.
+
+**Scope this honestly:** the mechanism is purpose-built for this demo's reservation functionality,
+and the singleton it lives in is the design's known bottleneck — a single workflow funneling all
+SKU updates won't scale past demo traffic (see the
+[Developer Guide's inventory limitations](developer-guide.md#domain-workflows)). Treat it as a
+neat expression of Temporal's `condition`, not a projection architecture to lift.
 
 ## Elasticsearch as the app's query API
 

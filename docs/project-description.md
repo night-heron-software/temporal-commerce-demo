@@ -22,7 +22,7 @@ Every e-commerce system is a distributed state machine. A shopping cart lives in
 This project demonstrates that Temporal eliminates that entire infrastructure layer. The application has:
 
 - **No message queue** — no Kafka, no RabbitMQ, no SQS. Workflow signals replace all async messaging.
-- **No cron jobs** — the inventory service workflow replaces "run every 5 minutes" with `condition(() => dirty, '5m')`.
+- **No cron jobs** — scheduled behavior is a workflow timer: cart expiry and checkout timeouts are declarations in the state machine, not jobs scanning for stale rows.
 - **No dead-letter queues** — Temporal's retry policies and activity timeouts handle all transient failures.
 - **No saga orchestrator** — the checkout workflow *is* the saga. Steps, compensations, and timeouts are just workflow code.
 - **No distributed transaction coordinator** — `updateWithStart` gives atomic create-or-update. `allHandlersFinished` gives graceful shutdown.

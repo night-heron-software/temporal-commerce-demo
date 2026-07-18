@@ -23,7 +23,7 @@ Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasti
 Every e-commerce system is a distributed state machine. The traditional approach wires cart, payment, inventory, and fulfillment together with REST calls, message queues, cron jobs, and reconciliation scripts. This project demonstrates that Temporal can replace that entire infrastructure layer:
 
 - **No message queue** — workflow signals replace all async messaging.
-- **No cron jobs** — `condition(() => dirty, '5m')` replaces "run every 5 minutes".
+- **No cron jobs** — scheduled behavior is a workflow timer: a cart's 30-day expiry and a checkout's 1-hour timeout are declarations in the state machine, not jobs scanning for stale rows.
 - **No dead-letter queues** — Temporal retry policies and activity timeouts absorb transient failures.
 - **No saga orchestrator** — the checkout workflow *is* the saga.
 - **No distributed transaction coordinator** — `updateWithStart` gives atomic create-or-update.
