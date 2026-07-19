@@ -14,15 +14,7 @@ function short(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}…` : id;
 }
 
-function IdChip({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className: string;
-}) {
+function IdChip({ label, value, className }: { label: string; value: string; className: string }) {
   const [copied, setCopied] = useState(false);
 
   const copy = async (e: React.MouseEvent) => {

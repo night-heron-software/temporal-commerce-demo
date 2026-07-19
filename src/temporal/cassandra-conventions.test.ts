@@ -34,7 +34,10 @@ const BANNED = 'ALLOW ' + 'FILTERING';
 
 describe('Cassandra conventions (ratchet)', () => {
   it(`no source query uses ${BANNED}`, () => {
-    const offenders = [...sourceFiles(path.join(ROOT, 'src')), ...sourceFiles(path.join(ROOT, 'scripts'))]
+    const offenders = [
+      ...sourceFiles(path.join(ROOT, 'src')),
+      ...sourceFiles(path.join(ROOT, 'scripts')),
+    ]
       .filter((f) => fs.readFileSync(f, 'utf8').toUpperCase().includes(BANNED))
       .map((f) => path.relative(ROOT, f));
     expect(offenders, `queries must supply the partition key; denormalize instead`).toEqual([]);

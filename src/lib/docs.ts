@@ -103,8 +103,7 @@ export const DOC_ENTRIES: DocEntry[] = [
   {
     slug: 'worker-scaling',
     title: 'Worker Topology',
-    description:
-      'From one dev process to per-domain production scaling — task queues as the seam.',
+    description: 'From one dev process to per-domain production scaling — task queues as the seam.',
     file: 'docs/worker-scaling.md',
     category: 'Guides',
   },

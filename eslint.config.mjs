@@ -109,6 +109,15 @@ const eslintConfig = defineConfig([
         },
       ],
     },
+  },
+  {
+    // CommonJS scripts (e.g. scripts/standalone-activity-smoke.cjs) are .cjs on
+    // purpose — they run under plain `node` with no TS/ESM toolchain. require()
+    // is their module system, not a style violation.
+    files: ["**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
   }
 ]);
 
