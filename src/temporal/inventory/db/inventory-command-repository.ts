@@ -295,11 +295,12 @@ export const InventoryCommandRepository = {
 
     // If not enough available, attempt preemption of stale TEMPORARY reservations
     if (totalAvailable < args.quantity) {
-      const preemptable = await executeCql<ReservationRow>(
-        `SELECT * FROM inventory_reservations_w
-         WHERE blank_sku = ? AND status = 'TEMPORARY' ALLOW FILTERING`,
-        [args.blankSku],
+      // Partition read over the active TEMPORARY working set (bounded by live carts),
+      // narrowed to this SKU in application code (no table-wide filtering clause).
+      const temporaries = await executeCql<ReservationRow>(
+        `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
       );
+      const preemptable = temporaries.filter((r) => r.blank_sku === args.blankSku);
 
       const toPreempt = selectPreemptibleReservations(preemptable, {
         totalAvailable,
@@ -398,6 +399,24 @@ export const InventoryCommandRepository = {
         ) VALUES (?, ?, ?, ?, ?, 'TEMPORARY')`,
         params: [args.cartId, args.reservationId, args.blankSku, args.variantId, args.quantity],
       },
+      {
+        query: `INSERT INTO inventory_reservations_by_status_w (
+          status, reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
+          quantity, reference_id, expires_at, created_at, updated_at
+        ) VALUES ('TEMPORARY', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          args.reservationId,
+          args.blankSku,
+          args.cartId,
+          args.variantId,
+          null,
+          args.quantity,
+          args.referenceId,
+          expiresAt,
+          now,
+          now,
+        ],
+      },
     ]);
 
     logger.info(
@@ -452,7 +471,7 @@ export const InventoryCommandRepository = {
       throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} on release`);
     }
 
-    // Update reservation status and remove from cart lookup
+    // Update reservation status and remove from cart lookup + active registry
     await executeBatch([
       {
         query: `UPDATE inventory_reservations_w
@@ -464,6 +483,11 @@ export const InventoryCommandRepository = {
         query: `DELETE FROM inventory_reservations_by_cart_w
                 WHERE cart_id = ? AND reservation_id = ?`,
         params: [reservation.cart_id, reservationId],
+      },
+      {
+        query: `DELETE FROM inventory_reservations_by_status_w
+                WHERE status = ? AND reservation_id = ?`,
+        params: [reservation.status, reservationId],
       },
     ]);
 
@@ -496,12 +520,20 @@ export const InventoryCommandRepository = {
     }
 
     const newExpiresAt = new Date(Date.now() + newTtlSeconds * 1000);
-    await executeCql(
-      `UPDATE inventory_reservations_w
-       SET expires_at = ?, updated_at = toTimestamp(now())
-       WHERE reservation_id = ?`,
-      [newExpiresAt, reservationId],
-    );
+    await executeBatch([
+      {
+        query: `UPDATE inventory_reservations_w
+                SET expires_at = ?, updated_at = toTimestamp(now())
+                WHERE reservation_id = ?`,
+        params: [newExpiresAt, reservationId],
+      },
+      {
+        query: `UPDATE inventory_reservations_by_status_w
+                SET expires_at = ?, updated_at = toTimestamp(now())
+                WHERE status = ? AND reservation_id = ?`,
+        params: [newExpiresAt, reservation.status, reservationId],
+      },
+    ]);
 
     logger.info({ reservationId, newTtlSeconds }, 'Renewed reservation');
     await signalInventoryChanged([reservation.blank_sku]);
@@ -558,7 +590,7 @@ export const InventoryCommandRepository = {
       );
     }
 
-    // Update reservation status and remove from cart lookup
+    // Update reservation status and remove from cart lookup + active registry
     await executeBatch([
       {
         query: `UPDATE inventory_reservations_w
@@ -570,6 +602,11 @@ export const InventoryCommandRepository = {
         query: `DELETE FROM inventory_reservations_by_cart_w
                 WHERE cart_id = ? AND reservation_id = ?`,
         params: [reservation.cart_id, reservationId],
+      },
+      {
+        query: `DELETE FROM inventory_reservations_by_status_w
+                WHERE status = ? AND reservation_id = ?`,
+        params: [reservation.status, reservationId],
       },
     ]);
 
@@ -607,6 +644,28 @@ export const InventoryCommandRepository = {
                 SET status = 'CONFIRMED'
                 WHERE cart_id = ? AND reservation_id = ?`,
         params: [rows[0].cart_id, reservationId],
+      },
+      // Active registry: the row moves partitions (TEMPORARY -> CONFIRMED)
+      {
+        query: `DELETE FROM inventory_reservations_by_status_w
+                WHERE status = ? AND reservation_id = ?`,
+        params: [rows[0].status, reservationId],
+      },
+      {
+        query: `INSERT INTO inventory_reservations_by_status_w (
+          status, reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
+          quantity, reference_id, expires_at, created_at, updated_at
+        ) VALUES ('CONFIRMED', ?, ?, ?, ?, ?, ?, ?, null, ?, toTimestamp(now()))`,
+        params: [
+          reservationId,
+          rows[0].blank_sku,
+          rows[0].cart_id,
+          rows[0].variant_id,
+          rows[0].fulfiller_id,
+          rows[0].quantity,
+          rows[0].reference_id,
+          rows[0].created_at,
+        ],
       },
     ]);
 
@@ -679,6 +738,11 @@ export const InventoryCommandRepository = {
                 WHERE cart_id = ? AND reservation_id = ?`,
         params: [reservation.cart_id, reservationId],
       },
+      {
+        query: `DELETE FROM inventory_reservations_by_status_w
+                WHERE status = ? AND reservation_id = ?`,
+        params: [reservation.status, reservationId],
+      },
     ]);
 
     logger.info({ reservationId, fulfillerId }, 'Fulfilled reservation');
@@ -693,22 +757,38 @@ export const InventoryCommandRepository = {
     fulfillerId: string,
     quantity: number,
   ): Promise<void> {
-    await executeCql(
-      `UPDATE inventory_reservations_w
-       SET fulfiller_id = ?, quantity = ?, updated_at = toTimestamp(now())
-       WHERE reservation_id = ?`,
-      [fulfillerId, quantity, reservationId],
-    );
-
-    // Look up blank_sku for the signal
+    // Load first: the active registry must only be written for rows that exist there
+    // (a blind UPDATE would upsert a ghost row into the status partition).
     const transferRows = await executeCql<ReservationRow>(
-      `SELECT blank_sku FROM inventory_reservations_w WHERE reservation_id = ?`,
+      `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
       [reservationId],
     );
-    logger.info({ reservationId, fulfillerId, quantity }, 'Transferred reservation to fulfiller');
-    if (transferRows.length > 0) {
-      await signalInventoryChanged([transferRows[0].blank_sku]);
+    if (transferRows.length === 0) {
+      logger.warn({ reservationId }, 'Reservation not found for transfer');
+      return;
     }
+    const current = transferRows[0];
+
+    const statements = [
+      {
+        query: `UPDATE inventory_reservations_w
+                SET fulfiller_id = ?, quantity = ?, updated_at = toTimestamp(now())
+                WHERE reservation_id = ?`,
+        params: [fulfillerId, quantity, reservationId] as unknown[],
+      },
+    ];
+    if (current.status === 'TEMPORARY' || current.status === 'CONFIRMED') {
+      statements.push({
+        query: `UPDATE inventory_reservations_by_status_w
+                SET fulfiller_id = ?, quantity = ?, updated_at = toTimestamp(now())
+                WHERE status = ? AND reservation_id = ?`,
+        params: [fulfillerId, quantity, current.status, reservationId],
+      });
+    }
+    await executeBatch(statements);
+
+    logger.info({ reservationId, fulfillerId, quantity }, 'Transferred reservation to fulfiller');
+    await signalInventoryChanged([current.blank_sku]);
   },
 
   // --- Batch Operations ---
@@ -854,12 +934,14 @@ export const InventoryCommandRepository = {
    * Get all expired TEMPORARY reservations (for service workflow expiration).
    */
   async getExpiredReservations(): Promise<ReservationRecord[]> {
-    // Note: Uses secondary index on status (idx_reservations_status).
+    // Partition read over active TEMPORARY reservations; expiry filtered in app code.
     const rows = await executeCql<ReservationRow>(
-      `SELECT * FROM inventory_reservations_w
-       WHERE status = 'TEMPORARY' AND expires_at < toTimestamp(now()) ALLOW FILTERING`,
+      `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
     );
-    return rows.map(rowToReservation);
+    const now = Date.now();
+    return rows
+      .filter((r) => r.expires_at != null && r.expires_at.getTime() < now)
+      .map(rowToReservation);
   },
 
   /**
@@ -873,10 +955,15 @@ export const InventoryCommandRepository = {
    * Get all active reservations from write tables (for projection to read tables).
    */
   async getActiveReservations(): Promise<ReservationRecord[]> {
-    const rows = await executeCql<ReservationRow>(
-      `SELECT * FROM inventory_reservations_w
-       WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
-    );
-    return rows.map(rowToReservation);
+    // Two partition reads — the registry holds only active rows, so this is the result set.
+    const [temporary, confirmed] = await Promise.all([
+      executeCql<ReservationRow>(
+        `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
+      ),
+      executeCql<ReservationRow>(
+        `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'CONFIRMED'`,
+      ),
+    ]);
+    return [...temporary, ...confirmed].map(rowToReservation);
   },
 };

@@ -69,6 +69,26 @@ interface ReservationWriteRow {
 const LOW_STOCK_THRESHOLD = 10;
 
 /**
+ * Active (TEMPORARY + CONFIRMED) reservations from the status-partitioned registry —
+ * two partition reads over the active working set; never a scan of reservation history.
+ * Optionally narrowed to a set of SKUs in application code.
+ */
+async function fetchActiveReservations(blankSkus?: string[]): Promise<ReservationWriteRow[]> {
+  const [temporary, confirmed] = await Promise.all([
+    executeCql<ReservationWriteRow>(
+      `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
+    ),
+    executeCql<ReservationWriteRow>(
+      `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'CONFIRMED'`,
+    ),
+  ]);
+  const all = [...temporary, ...confirmed];
+  if (!blankSkus) return all;
+  const wanted = new Set(blankSkus);
+  return all.filter((r) => wanted.has(r.blank_sku));
+}
+
+/**
  * Read all stock from write tables, aggregate per SKU, and upsert into read tables.
  */
 export async function projectStockSummaries(): Promise<void> {
@@ -156,10 +176,7 @@ export async function projectStockSummaries(): Promise<void> {
  * Read active reservations from write tables and project to inventory_reservations_by_sku.
  */
 export async function projectReservationViews(): Promise<void> {
-  const activeReservations = await executeCql<ReservationWriteRow>(
-    `SELECT * FROM inventory_reservations_w
-     WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
-  );
+  const activeReservations = await fetchActiveReservations();
 
   if (activeReservations.length === 0) return;
 
@@ -295,10 +312,7 @@ function buildInventoryDoc(
  */
 export async function syncInventoryToES(): Promise<void> {
   const stockRows = await executeCql<StockWriteRow>(`SELECT * FROM inventory_stock_w`);
-  const reservationRows = await executeCql<ReservationWriteRow>(
-    `SELECT * FROM inventory_reservations_w
-     WHERE status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
-  );
+  const reservationRows = await fetchActiveReservations();
 
   if (stockRows.length === 0) return;
 
@@ -348,6 +362,19 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
   const summaryBatch: Array<{ query: string; params: unknown[] }> = [];
   const fulfillerBatch: Array<{ query: string; params: unknown[] }> = [];
   const lowStockBatch: Array<{ query: string; params: unknown[] }> = [];
+
+  // One partition read of the low-stock alert rows (bounded: low-stock SKUs only),
+  // grouped in app code so per-SKU cleanup below needs no per-row filtering query.
+  const lowStockRows = await executeCql<{ available_stock: number; blank_sku: string }>(
+    `SELECT available_stock, blank_sku FROM inventory_low_stock
+     WHERE threshold_bucket = 'default'`,
+  );
+  const lowStockBySku = new Map<string, number[]>();
+  for (const row of lowStockRows) {
+    const list = lowStockBySku.get(row.blank_sku) ?? [];
+    list.push(row.available_stock);
+    lowStockBySku.set(row.blank_sku, list);
+  }
 
   for (const blankSku of blankSkus) {
     const fulfillers = await executeCql<StockWriteRow>(
@@ -418,19 +445,13 @@ export async function projectStockForSkus(blankSkus: string[]): Promise<void> {
         params: [blankSku, availableStock, totalStock, now],
       });
     } else {
-      // Must delete all possible available_stock values for this SKU.
-      // Since we can't skip the available_stock clustering column, we query first
-      // then delete each matching row.
-      const existingRows = await executeCql<{ available_stock: number }>(
-        `SELECT available_stock FROM inventory_low_stock
-         WHERE threshold_bucket = 'default' AND available_stock >= 0 AND blank_sku = ? ALLOW FILTERING`,
-        [blankSku],
-      );
-      for (const row of existingRows) {
+      // Must delete all possible available_stock values for this SKU. The clustering
+      // column can't be skipped in a DELETE, so use the partition read taken above.
+      for (const availableValue of lowStockBySku.get(blankSku) ?? []) {
         lowStockBatch.push({
           query: `DELETE FROM inventory_low_stock
                   WHERE threshold_bucket = 'default' AND available_stock = ? AND blank_sku = ?`,
-          params: [row.available_stock, blankSku],
+          params: [availableValue, blankSku],
         });
       }
     }
@@ -455,6 +476,9 @@ export async function projectReservationsForSkus(blankSkus: string[]): Promise<v
 
   const batch: Array<{ query: string; params: unknown[] }> = [];
 
+  // One registry read for all target SKUs, grouped in app code
+  const activeForSkus = await fetchActiveReservations(blankSkus);
+
   for (const blankSku of blankSkus) {
     // Delete existing rows for this SKU (partition key delete)
     batch.push({
@@ -463,11 +487,7 @@ export async function projectReservationsForSkus(blankSkus: string[]): Promise<v
     });
 
     // Re-insert active reservations
-    const activeReservations = await executeCql<ReservationWriteRow>(
-      `SELECT * FROM inventory_reservations_w
-       WHERE blank_sku = ? AND status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
-      [blankSku],
-    );
+    const activeReservations = activeForSkus.filter((r) => r.blank_sku === blankSku);
 
     for (const r of activeReservations) {
       batch.push({
@@ -507,6 +527,9 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
   const client = getElasticsearchClient();
   const operations: unknown[] = [];
 
+  // One registry read for all target SKUs, grouped in app code
+  const activeForSkus = await fetchActiveReservations(blankSkus);
+
   for (const blankSku of blankSkus) {
     const fulfillers = await executeCql<StockWriteRow>(
       `SELECT * FROM inventory_stock_w WHERE blank_sku = ?`,
@@ -519,11 +542,7 @@ export async function syncInventoryToESForSkus(blankSkus: string[]): Promise<voi
       continue;
     }
 
-    const reservations = await executeCql<ReservationWriteRow>(
-      `SELECT * FROM inventory_reservations_w
-       WHERE blank_sku = ? AND status IN ('TEMPORARY', 'CONFIRMED') ALLOW FILTERING`,
-      [blankSku],
-    );
+    const reservations = activeForSkus.filter((r) => r.blank_sku === blankSku);
 
     operations.push({ index: { _index: ES_INDICES.inventory, _id: blankSku } });
     operations.push(buildInventoryDoc(blankSku, fulfillers, reservations));

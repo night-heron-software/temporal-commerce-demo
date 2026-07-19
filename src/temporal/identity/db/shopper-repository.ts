@@ -69,6 +69,11 @@ export class ShopperRepository {
         now,
       ],
     );
+    // id -> email lookup for cookie-session resolution (both columns immutable)
+    await executeCql(`INSERT INTO shoppers_by_id (id, email) VALUES (?, ?)`, [
+      shopper.id,
+      shopper.email,
+    ]);
   }
 
   async updatePassword(email: string, newHash: string): Promise<void> {

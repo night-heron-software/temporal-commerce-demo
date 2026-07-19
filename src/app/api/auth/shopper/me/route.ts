@@ -22,12 +22,19 @@ export async function GET() {
     return NextResponse.json({ shopper: null, savedAddress: null });
   }
 
-  // Look up shopper by ID
-  const rows = await executeCql<{
-    id: types.Uuid;
-    email: string;
-    name: string;
-  }>(`SELECT id, email, name FROM shoppers WHERE id = ? ALLOW FILTERING`, [shopperId]);
+  // Two partition-key reads: id -> email (immutable mapping), then email -> profile
+  const idRows = await executeCql<{ email: string }>(
+    `SELECT email FROM shoppers_by_id WHERE id = ?`,
+    [shopperId],
+  );
+  const rows =
+    idRows.length === 0
+      ? []
+      : await executeCql<{
+          id: types.Uuid;
+          email: string;
+          name: string;
+        }>(`SELECT id, email, name FROM shoppers WHERE email = ?`, [idRows[0].email]);
 
   if (rows.length === 0) {
     // Invalid cookie — clear it

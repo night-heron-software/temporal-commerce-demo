@@ -40,11 +40,12 @@ Cassandra here plays the role Datastore played on Google App Engine: a store who
 disallows queries that won't scale. Preserve that property:
 
 1. **Partition-key access only.** Every query supplies the full partition key. No `ALLOW FILTERING`,
-   no secondary indexes, no scans in application paths — a query's cost must track its result set,
-   not the table. If an access pattern needs a different key, add a denormalized table (see
-   `orders_by_customer`, `orders_by_confirmation` in `cassandra/schema.cql`). *Known exceptions:*
-   three `ALLOW FILTERING` queries in `inventory-command-repository.ts` — part of the inventory
-   service's demo-scoped design; do not copy the pattern, and do not add new ones.
+   no new secondary indexes, no scans in application paths — a query's cost must track its result
+   set, not the table. If an access pattern needs a different key, add a denormalized table (see
+   `orders_by_customer`, `orders_by_confirmation`, `inventory_reservations_by_status_w` in
+   `cassandra/schema.cql`). **Ratcheted:** `src/temporal/cassandra-conventions.test.ts` fails the
+   build on any `ALLOW FILTERING` in source and on any secondary index beyond the recorded
+   baseline — extend the schema, not the ratchet.
 2. **Lightweight transactions (LWT / `IF` clauses) are reserved** for irreducible cross-entity
    contention — today, only the per-SKU inventory stock counters. Like Datastore's entity-group
    transactions, each LWT is a small serialized hot spot: never use one as a general-purpose

@@ -271,8 +271,25 @@ CREATE TABLE IF NOT EXISTS inventory_reservations_w (
     created_at TIMESTAMP,
     updated_at TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_reservations_status ON inventory_reservations_w (status);
-CREATE INDEX IF NOT EXISTS idx_reservations_blank_sku ON inventory_reservations_w (blank_sku);
+
+-- Active-reservation registry: denormalized rows for TEMPORARY / CONFIRMED reservations only,
+-- partitioned by status so the sweep queries (expiration, projection) and SKU-preemption scans
+-- are partition reads over the active working set — never ALLOW FILTERING over all history.
+-- Terminal transitions (RELEASED / CANCELLED / FULFILLED) DELETE the row instead of moving it.
+CREATE TABLE IF NOT EXISTS inventory_reservations_by_status_w (
+    status TEXT,
+    reservation_id TEXT,
+    blank_sku TEXT,
+    cart_id TEXT,
+    variant_id TEXT,
+    fulfiller_id TEXT,
+    quantity INT,
+    reference_id TEXT,
+    expires_at TIMESTAMP,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    PRIMARY KEY (status, reservation_id)
+);
 
 CREATE TABLE IF NOT EXISTS inventory_reservations_by_cart_w (
     cart_id TEXT,
@@ -350,6 +367,13 @@ CREATE TABLE IF NOT EXISTS shoppers (
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     PRIMARY KEY (email)
+);
+
+-- Lookup table for cookie-session resolution (id -> email); both columns are immutable,
+-- so only shopper creation writes here.
+CREATE TABLE IF NOT EXISTS shoppers_by_id (
+    id UUID PRIMARY KEY,
+    email TEXT
 );
 
 CREATE TABLE IF NOT EXISTS shopper_shipping_addresses (
