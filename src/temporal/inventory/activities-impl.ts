@@ -69,20 +69,12 @@ interface ReservationWriteRow {
 const LOW_STOCK_THRESHOLD = 10;
 
 /**
- * Active (TEMPORARY + CONFIRMED) reservations from the status-partitioned registry —
- * two partition reads over the active working set; never a scan of reservation history.
- * Optionally narrowed to a set of SKUs in application code.
+ * Active (TEMPORARY + CONFIRMED) reservations, optionally narrowed to a set of SKUs
+ * in application code. Delegates to the repository's canonical registry accessor so
+ * the registry's table name and partition layout live in exactly one module.
  */
 async function fetchActiveReservations(blankSkus?: string[]): Promise<ReservationWriteRow[]> {
-  const [temporary, confirmed] = await Promise.all([
-    executeCql<ReservationWriteRow>(
-      `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
-    ),
-    executeCql<ReservationWriteRow>(
-      `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'CONFIRMED'`,
-    ),
-  ]);
-  const all = [...temporary, ...confirmed];
+  const all: ReservationWriteRow[] = await InventoryCommandRepository.getActiveReservationRows();
   if (!blankSkus) return all;
   const wanted = new Set(blankSkus);
   return all.filter((r) => wanted.has(r.blank_sku));

@@ -177,6 +177,66 @@ interface CartReservationRow {
 // Row Mappers
 // ============================================================
 
+// ============================================================
+// Active-reservation registry (inventory_reservations_by_status_w)
+// ============================================================
+// Single source for the registry's statements and reads. The by_status mirror
+// must travel with every main-table mutation; building the statements here makes
+// a forgotten or mis-keyed mirror a compile-time absence instead of silent drift,
+// and keeps the table name + partition literals in one place.
+
+/** DELETE the registry row — MUST be keyed by the PRE-mutation status (its partition). */
+function activeRegistryDelete(priorStatus: string, reservationId: string) {
+  return {
+    query: `DELETE FROM inventory_reservations_by_status_w
+            WHERE status = ? AND reservation_id = ?`,
+    params: [priorStatus, reservationId] as unknown[],
+  };
+}
+
+/** INSERT a registry row under its (new) status partition. */
+function activeRegistryInsert(row: {
+  status: 'TEMPORARY' | 'CONFIRMED';
+  reservation_id: string;
+  blank_sku: string;
+  cart_id: string;
+  variant_id: string;
+  fulfiller_id: string | null;
+  quantity: number;
+  reference_id: string;
+  expires_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}) {
+  return {
+    query: `INSERT INTO inventory_reservations_by_status_w (
+      status, reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
+      quantity, reference_id, expires_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    params: [
+      row.status,
+      row.reservation_id,
+      row.blank_sku,
+      row.cart_id,
+      row.variant_id,
+      row.fulfiller_id,
+      row.quantity,
+      row.reference_id,
+      row.expires_at,
+      row.created_at,
+      row.updated_at,
+    ] as unknown[],
+  };
+}
+
+/** Read one active-status partition (the working set for that status). */
+function readActiveStatusPartition(status: 'TEMPORARY' | 'CONFIRMED'): Promise<ReservationRow[]> {
+  return executeCql<ReservationRow>(
+    `SELECT * FROM inventory_reservations_by_status_w WHERE status = ?`,
+    [status],
+  );
+}
+
 function rowToReservation(row: ReservationRow): ReservationRecord {
   return {
     reservationId: row.reservation_id,
@@ -295,12 +355,24 @@ export const InventoryCommandRepository = {
 
     // If not enough available, attempt preemption of stale TEMPORARY reservations
     if (totalAvailable < args.quantity) {
-      // Partition read over the active TEMPORARY working set (bounded by live carts),
-      // narrowed to this SKU in application code (no table-wide filtering clause).
-      const temporaries = await executeCql<ReservationRow>(
-        `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
+      // Per-SKU partition read on the projected read table — cost tracks THIS SKU's
+      // reservations, not the site-wide working set. The projection lags by up to the
+      // ~5m consistency sweep, which is safe here: candidates must be older than the
+      // 15m MIN_HOLD_MS gate, and release() re-checks the source of truth (terminal
+      // guard + LWT), so a stale row fails closed rather than double-freeing.
+      const skuRows = await executeCql<{
+        reservation_id: string;
+        cart_id: string;
+        quantity: number;
+        status: string;
+        expires_at: Date | null;
+        created_at: Date;
+      }>(
+        `SELECT reservation_id, cart_id, quantity, status, expires_at, created_at
+         FROM inventory_reservations_by_sku WHERE blank_sku = ?`,
+        [args.blankSku],
       );
-      const preemptable = temporaries.filter((r) => r.blank_sku === args.blankSku);
+      const preemptable = skuRows.filter((r) => r.status === 'TEMPORARY');
 
       const toPreempt = selectPreemptibleReservations(preemptable, {
         totalAvailable,
@@ -399,24 +471,19 @@ export const InventoryCommandRepository = {
         ) VALUES (?, ?, ?, ?, ?, 'TEMPORARY')`,
         params: [args.cartId, args.reservationId, args.blankSku, args.variantId, args.quantity],
       },
-      {
-        query: `INSERT INTO inventory_reservations_by_status_w (
-          status, reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
-          quantity, reference_id, expires_at, created_at, updated_at
-        ) VALUES ('TEMPORARY', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [
-          args.reservationId,
-          args.blankSku,
-          args.cartId,
-          args.variantId,
-          null,
-          args.quantity,
-          args.referenceId,
-          expiresAt,
-          now,
-          now,
-        ],
-      },
+      activeRegistryInsert({
+        status: 'TEMPORARY',
+        reservation_id: args.reservationId,
+        blank_sku: args.blankSku,
+        cart_id: args.cartId,
+        variant_id: args.variantId,
+        fulfiller_id: null,
+        quantity: args.quantity,
+        reference_id: args.referenceId,
+        expires_at: expiresAt,
+        created_at: now,
+        updated_at: now,
+      }),
     ]);
 
     logger.info(
@@ -484,11 +551,7 @@ export const InventoryCommandRepository = {
                 WHERE cart_id = ? AND reservation_id = ?`,
         params: [reservation.cart_id, reservationId],
       },
-      {
-        query: `DELETE FROM inventory_reservations_by_status_w
-                WHERE status = ? AND reservation_id = ?`,
-        params: [reservation.status, reservationId],
-      },
+      activeRegistryDelete(reservation.status, reservationId),
     ]);
 
     logger.info({ reservationId, blankSku: reservation.blank_sku }, 'Released reservation');
@@ -603,11 +666,7 @@ export const InventoryCommandRepository = {
                 WHERE cart_id = ? AND reservation_id = ?`,
         params: [reservation.cart_id, reservationId],
       },
-      {
-        query: `DELETE FROM inventory_reservations_by_status_w
-                WHERE status = ? AND reservation_id = ?`,
-        params: [reservation.status, reservationId],
-      },
+      activeRegistryDelete(reservation.status, reservationId),
     ]);
 
     logger.info(
@@ -660,27 +719,20 @@ export const InventoryCommandRepository = {
         params: [rows[0].cart_id, reservationId],
       },
       // Active registry: the row moves partitions (TEMPORARY -> CONFIRMED)
-      {
-        query: `DELETE FROM inventory_reservations_by_status_w
-                WHERE status = ? AND reservation_id = ?`,
-        params: [rows[0].status, reservationId],
-      },
-      {
-        query: `INSERT INTO inventory_reservations_by_status_w (
-          status, reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
-          quantity, reference_id, expires_at, created_at, updated_at
-        ) VALUES ('CONFIRMED', ?, ?, ?, ?, ?, ?, ?, null, ?, toTimestamp(now()))`,
-        params: [
-          reservationId,
-          rows[0].blank_sku,
-          rows[0].cart_id,
-          rows[0].variant_id,
-          rows[0].fulfiller_id,
-          rows[0].quantity,
-          rows[0].reference_id,
-          rows[0].created_at,
-        ],
-      },
+      activeRegistryDelete(rows[0].status, reservationId),
+      activeRegistryInsert({
+        status: 'CONFIRMED',
+        reservation_id: reservationId,
+        blank_sku: rows[0].blank_sku,
+        cart_id: rows[0].cart_id,
+        variant_id: rows[0].variant_id,
+        fulfiller_id: rows[0].fulfiller_id,
+        quantity: rows[0].quantity,
+        reference_id: rows[0].reference_id,
+        expires_at: null,
+        created_at: rows[0].created_at,
+        updated_at: new Date(),
+      }),
     ]);
 
     logger.info({ reservationId }, 'Confirmed reservation');
@@ -752,11 +804,7 @@ export const InventoryCommandRepository = {
                 WHERE cart_id = ? AND reservation_id = ?`,
         params: [reservation.cart_id, reservationId],
       },
-      {
-        query: `DELETE FROM inventory_reservations_by_status_w
-                WHERE status = ? AND reservation_id = ?`,
-        params: [reservation.status, reservationId],
-      },
+      activeRegistryDelete(reservation.status, reservationId),
     ]);
 
     logger.info({ reservationId, fulfillerId }, 'Fulfilled reservation');
@@ -949,13 +997,24 @@ export const InventoryCommandRepository = {
    */
   async getExpiredReservations(): Promise<ReservationRecord[]> {
     // Partition read over active TEMPORARY reservations; expiry filtered in app code.
-    const rows = await executeCql<ReservationRow>(
-      `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
-    );
+    const rows = await readActiveStatusPartition('TEMPORARY');
     const now = Date.now();
     return rows
       .filter((r) => r.expires_at != null && r.expires_at.getTime() < now)
       .map(rowToReservation);
+  },
+
+  /**
+   * Raw active-registry rows (TEMPORARY + CONFIRMED) — the canonical accessor for
+   * the active working set. Projections/ES sync delegate here so the registry's
+   * table name and partition layout live in exactly one module.
+   */
+  async getActiveReservationRows(): Promise<ReservationRow[]> {
+    const [temporary, confirmed] = await Promise.all([
+      readActiveStatusPartition('TEMPORARY'),
+      readActiveStatusPartition('CONFIRMED'),
+    ]);
+    return [...temporary, ...confirmed];
   },
 
   /**
@@ -969,15 +1028,6 @@ export const InventoryCommandRepository = {
    * Get all active reservations from write tables (for projection to read tables).
    */
   async getActiveReservations(): Promise<ReservationRecord[]> {
-    // Two partition reads — the registry holds only active rows, so this is the result set.
-    const [temporary, confirmed] = await Promise.all([
-      executeCql<ReservationRow>(
-        `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'TEMPORARY'`,
-      ),
-      executeCql<ReservationRow>(
-        `SELECT * FROM inventory_reservations_by_status_w WHERE status = 'CONFIRMED'`,
-      ),
-    ]);
-    return [...temporary, ...confirmed].map(rowToReservation);
+    return (await this.getActiveReservationRows()).map(rowToReservation);
   },
 };
