@@ -7,7 +7,7 @@
  */
 
 import { Connection, Client, type ClientOptions } from '@temporalio/client';
-import type { Duration, SearchAttributePair } from '@temporalio/common';
+import type { Duration, RetryPolicy, SearchAttributePair } from '@temporalio/common';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS || 'localhost:7233';
 /** Exported for server code that builds Temporal Web UI deep links (order-trace). */
@@ -65,6 +65,11 @@ export async function getTemporalClient(): Promise<Client> {
  *
  * Pass `typedSearchAttributes` (via `buildActivityTypedSearchAttributes`, ADR-0011) so
  * standalone activities carry the same correlation tags as workflows where available.
+ *
+ * Bounded by default: callers here are synchronous HTTP handlers awaiting the result,
+ * so the helper caps retries (3 attempts, matching the retired proxy-stub policy) and
+ * total time (`scheduleToCloseTimeout`, which also bounds the SCHEDULED wait when no
+ * worker is polling — the per-attempt `startToCloseTimeout` alone would not).
  */
 export async function executeStandaloneActivity<T>(
   activityName: string,
@@ -73,8 +78,12 @@ export async function executeStandaloneActivity<T>(
     /** Business-meaningful activity ID (maps to ActivityOptions.id). */
     activityId: string;
     args: unknown[];
-    /** Per-attempt-inclusive run timeout. Defaults to '1 minute'. */
+    /** Per-attempt run timeout. Defaults to '10 seconds'. */
     startToCloseTimeout?: Duration;
+    /** Total cap across scheduling + all attempts. Defaults to '30 seconds'. */
+    scheduleToCloseTimeout?: Duration;
+    /** Defaults to 3 attempts — a failing dependency errors fast, never hangs the caller. */
+    retry?: RetryPolicy;
     typedSearchAttributes?: SearchAttributePair[];
   },
 ): Promise<T> {
@@ -83,7 +92,9 @@ export async function executeStandaloneActivity<T>(
     id: options.activityId,
     taskQueue: options.taskQueue,
     args: options.args,
-    startToCloseTimeout: options.startToCloseTimeout ?? '1 minute',
+    startToCloseTimeout: options.startToCloseTimeout ?? '10 seconds',
+    scheduleToCloseTimeout: options.scheduleToCloseTimeout ?? '30 seconds',
+    retry: options.retry ?? { maximumAttempts: 3 },
     typedSearchAttributes: options.typedSearchAttributes,
   });
 }

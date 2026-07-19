@@ -632,6 +632,20 @@ export const InventoryCommandRepository = {
       return;
     }
 
+    // Only TEMPORARY → CONFIRMED is legal. A retried confirm on an already-CONFIRMED
+    // row is an idempotent no-op; confirming a terminal (RELEASED/CANCELLED/FULFILLED)
+    // reservation must not resurrect it — that would flip the main row back to
+    // CONFIRMED and insert a never-expiring ghost into the active registry.
+    if (rows[0].status !== 'TEMPORARY') {
+      logger.warn(
+        { reservationId, status: rows[0].status },
+        rows[0].status === 'CONFIRMED'
+          ? 'Reservation already confirmed'
+          : 'Cannot confirm non-TEMPORARY reservation',
+      );
+      return;
+    }
+
     await executeBatch([
       {
         query: `UPDATE inventory_reservations_w
