@@ -1,8 +1,9 @@
 /**
  * Identity Domain Worker
  *
- * Standalone Temporal worker for the identity domain.
- * Handles: users, shoppers, API tokens, feature flags, and audit logging.
+ * Activities-only worker: the identity domain has no workflows — its operations
+ * are STANDALONE activities executed directly from the client (ADR-0006), so this
+ * worker registers activity implementations on identity-queue and nothing else.
  */
 
 import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
@@ -22,7 +23,6 @@ export default async function identityWorker(
     connection,
     namespace: 'default',
     taskQueue: IDENTITY_TASK_QUEUE,
-    workflowsPath: require.resolve('./workflows'),
     activities: { ...activities, ...transitionRecorderActivities },
     ...otelConfig,
   });

@@ -53,6 +53,7 @@
     "db:init": "docker exec -i demo-cassandra cqlsh < cassandra/schema.cql && echo '✓ Schema initialized'",
     "dev:seed": "tsx --env-file=.env.local ./scripts/seed.ts",
     "db:verify": "bash scripts/verify-schema.sh",
+    "smoke:standalone": "node scripts/standalone-activity-smoke.cjs",
     "workers-wait": "tsx --env-file=.env.local scripts/wait-for-workers.ts",
     "infra:up": "bash scripts/infra-start.sh",
     "infra:up:obs": "docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d",

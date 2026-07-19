@@ -68,24 +68,15 @@ services:
     networks:
       - demo-net
 
-  # Override the base temporal service to add OTEL tracing to Jaeger
+  # Override the base temporal service to add OTEL tracing to Jaeger.
+  # Only the additive OTEL vars live here — base env (DB, ES, dynamicconfig)
+  # comes from docker-compose.yml and merges per-variable. (A previous version
+  # re-listed the base env and silently overrode ES_VERSION back to v7.)
   temporal:
     depends_on:
-      - temporal-postgresql
-      - temporal-elasticsearch
-      - jaeger
+      jaeger:
+        condition: service_started
     environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
-      - POSTGRES_SEEDS=temporal-postgresql
-      - ENABLE_ES=true
-      - ES_SEEDS=temporal-elasticsearch
-      - ES_VERSION=v7
-      - SKIP_DEFAULT_NAMESPACE_CREATION=false
-      - DEFAULT_NAMESPACE=default
-      - TEMPORAL_CLI_ADDRESS=temporal:7233
       # OpenTelemetry — export traces to Jaeger
       - OTEL_TRACES_EXPORTER=otlp
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://demo-jaeger:4317

@@ -9,14 +9,18 @@ const cookieStore = await vi.hoisted(async () => {
   const { createCookieStoreMock } = await import('../../../../../test-support/next-route');
   return createCookieStoreMock();
 });
-const repos = vi.hoisted(() => ({ getByUserId: vi.fn(), save: vi.fn() }));
+const repos = vi.hoisted(() => ({ getByUserId: vi.fn() }));
+const temporal = vi.hoisted(() => ({ executeStandaloneActivity: vi.fn() }));
 
 vi.mock('next/headers', () => ({ cookies: async () => cookieStore }));
 vi.mock('@/temporal/identity', () => ({
   AddressRepository: class {
     getByUserId = repos.getByUserId;
-    save = repos.save;
   },
+}));
+// The address save is a STANDALONE activity (ADR-0006) executed via the client helper.
+vi.mock('@/lib/temporal-client', () => ({
+  executeStandaloneActivity: temporal.executeStandaloneActivity,
 }));
 
 import { GET, POST } from './route';
@@ -40,7 +44,7 @@ describe('/api/auth/shopper/address', () => {
     vi.clearAllMocks();
     cookieStore.reset();
     repos.getByUserId.mockResolvedValue([]);
-    repos.save.mockResolvedValue(undefined);
+    temporal.executeStandaloneActivity.mockResolvedValue(undefined);
   });
 
   it('GET returns an empty list when not signed in', async () => {
@@ -82,7 +86,13 @@ describe('/api/auth/shopper/address', () => {
       isDefault: true,
     });
     expect(body.address.addressId).toBeTypeOf('string');
-    expect(repos.save).toHaveBeenCalledWith('shopper-1', expect.objectContaining(ADDRESS_BODY));
+    expect(temporal.executeStandaloneActivity).toHaveBeenCalledWith(
+      'saveShopperAddress',
+      expect.objectContaining({
+        taskQueue: 'identity-queue',
+        args: ['shopper-1', expect.objectContaining(ADDRESS_BODY)],
+      }),
+    );
   });
 
   it('POST reuses the existing default addressId instead of generating a new one', async () => {

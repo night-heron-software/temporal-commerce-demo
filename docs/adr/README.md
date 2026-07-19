@@ -8,6 +8,7 @@ demo's code actually cites are carried here.
 | # | Title | Status |
 |---|-------|--------|
 | [0003](0003-prepare-decide-finalize-state-machines.md) | `prepare → decide → finalize` state machines on Temporal | Accepted |
+| [0006](0006-standalone-activities-for-thin-wrappers.md) | Standalone activities for thin single-activity wrappers | Accepted |
 | [0009](0009-chassaing-decider-split.md) | Chassaing `decide → events → evolve` split in the pure core | Accepted |
 | [0010](0010-async-transition-recording-projection.md) | Async state-transition recording projection | Accepted |
 | [0011](0011-workflow-id-and-correlation-tagging.md) | Parseable workflow IDs + Search-Attribute correlation tagging | Accepted |

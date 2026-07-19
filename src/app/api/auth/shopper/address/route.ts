@@ -10,6 +10,10 @@ import { createErrorResponse } from '@/lib/api-utils';
 import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
 import { AddressRepository } from '@/temporal/identity';
+import { executeStandaloneActivity } from '@/lib/temporal-client';
+import { IDENTITY_TASK_QUEUE, DEMO_STORE_ID } from '@/temporal/contracts/constants';
+import { SAVE_SHOPPER_ADDRESS_ACTIVITY } from '@/temporal/contracts/identity';
+import { buildActivityTypedSearchAttributes } from '@/temporal/contracts/activity-tagging';
 
 const SHOPPER_COOKIE = 'shopperId';
 const addressRepo = new AddressRepository();
@@ -56,7 +60,17 @@ export async function POST(request: NextRequest) {
     isDefault: true,
   };
 
-  await addressRepo.save(shopperId, address);
+  // STANDALONE activity on identity-queue (ADR-0006): worker execution + Temporal
+  // retries + its own history for a single logical write; no wrapper workflow.
+  await executeStandaloneActivity(SAVE_SHOPPER_ADDRESS_ACTIVITY, {
+    taskQueue: IDENTITY_TASK_QUEUE,
+    activityId: `shopper-address-save-${shopperId}-${address.addressId}`,
+    args: [shopperId, address],
+    typedSearchAttributes: buildActivityTypedSearchAttributes({
+      storeId: DEMO_STORE_ID,
+      domain: 'identity',
+    }),
+  });
 
   return NextResponse.json({ ok: true, address });
 }

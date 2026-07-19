@@ -49,12 +49,57 @@ services:
     networks:
       - demo-net
 
+  # ── Temporal (temporalio/server + one-shot bootstrap sidecars) ──────────────
+  # Migrated off the deprecated temporalio/auto-setup image (no 1.31+ tags exist).
+  # Schema init runs as one-shot sidecars before the server starts, and the
+  # `default` namespace is registered once the server is serving. Server >= 1.31
+  # is required for Standalone Activities (ADR-0006); the feature gate itself
+  # lives in infra/temporal/dynamicconfig/development-sql.yaml.
+  temporal-schema-setup:
+    container_name: demo-temporal-schema-setup
+    image: temporalio/admin-tools:1.31.1
+    depends_on:
+      temporal-postgresql:
+        condition: service_started
+    environment:
+      - POSTGRES_SEEDS=temporal-postgresql
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - DB_PORT=5432
+      - DBNAME=temporal
+    entrypoint: ["/bin/sh", "/scripts/setup-sql-schema.sh"]
+    volumes:
+      - ./infra/temporal/scripts:/scripts:ro
+    networks:
+      - demo-net
+    restart: on-failure
+
+  temporal-es-setup:
+    container_name: demo-temporal-es-setup
+    image: curlimages/curl:8.11.1
+    depends_on:
+      - temporal-elasticsearch
+    environment:
+      - ES_SEEDS=temporal-elasticsearch
+      - ES_PORT=9200
+      - ES_SCHEME=http
+      - ES_VIS_INDEX=temporal_visibility_v1_dev
+    entrypoint: ["/bin/sh", "/scripts/setup-es-index.sh"]
+    volumes:
+      - ./infra/temporal/scripts:/scripts:ro
+      - ./infra/temporal/scripts/es:/es-schema:ro
+    networks:
+      - demo-net
+    restart: on-failure
+
   temporal:
-    image: temporalio/auto-setup:1.29.1
+    image: temporalio/server:1.31.1
     container_name: demo-temporal
     depends_on:
-      - temporal-postgresql
-      - temporal-elasticsearch
+      temporal-schema-setup:
+        condition: service_completed_successfully
+      temporal-es-setup:
+        condition: service_completed_successfully
     ports:
       - "7233:7233"
       - "9464:9464"      # Prometheus metrics endpoint
@@ -67,18 +112,53 @@ services:
       - ENABLE_ES=true
       - ES_SEEDS=temporal-elasticsearch
       - ES_VERSION=v8
-      - SKIP_DEFAULT_NAMESPACE_CREATION=false
-      - DEFAULT_NAMESPACE=default
-      - TEMPORAL_CLI_ADDRESS=temporal:7233
+      - BIND_ON_IP=0.0.0.0
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./infra/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
+      # The server image ships nc (no temporal CLI / curl); port-open is the gate.
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
     networks:
       - demo-net
+
+  temporal-create-namespace:
+    container_name: demo-temporal-create-namespace
+    image: temporalio/admin-tools:1.31.1
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=default
+      - NAMESPACE_RETENTION=24h
+    entrypoint: ["/bin/sh", "/scripts/create-namespace.sh"]
+    volumes:
+      - ./infra/temporal/scripts:/scripts:ro
+    networks:
+      - demo-net
+    restart: on-failure
+
+  temporal-register-search-attributes:
+    container_name: demo-temporal-register-search-attributes
+    image: temporalio/admin-tools:1.31.1
+    depends_on:
+      temporal-create-namespace:
+        condition: service_completed_successfully
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=default
+    entrypoint: ["/bin/sh", "/scripts/register-search-attributes.sh"]
+    volumes:
+      - ./infra/temporal/scripts:/scripts:ro
+    networks:
+      - demo-net
+    restart: on-failure
 
   temporal-ui:
     image: temporalio/ui:2.34.0

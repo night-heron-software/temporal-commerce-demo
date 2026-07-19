@@ -15,9 +15,9 @@ const cookieStore = await vi.hoisted(async () => {
 });
 const repos = vi.hoisted(() => ({
   getShopperByEmail: vi.fn(),
-  createShopper: vi.fn(),
   getByUserId: vi.fn(),
 }));
+const temporal = vi.hoisted(() => ({ executeStandaloneActivity: vi.fn() }));
 const es = vi.hoisted(() => ({ search: vi.fn() }));
 const cartActions = vi.hoisted(() => ({ executeCartUpdate: vi.fn() }));
 
@@ -25,11 +25,14 @@ vi.mock('next/headers', () => ({ cookies: async () => cookieStore }));
 vi.mock('@/temporal/identity', () => ({
   ShopperRepository: class {
     getShopperByEmail = repos.getShopperByEmail;
-    createShopper = repos.createShopper;
   },
   AddressRepository: class {
     getByUserId = repos.getByUserId;
   },
+}));
+// Shopper creation is a STANDALONE activity (ADR-0006) executed via the client helper.
+vi.mock('@/lib/temporal-client', () => ({
+  executeStandaloneActivity: temporal.executeStandaloneActivity,
 }));
 vi.mock('@/lib/es-client', () => ({
   getElasticsearchClient: () => ({ search: es.search }),
@@ -52,7 +55,7 @@ describe('POST /api/auth/shopper/login', () => {
     vi.clearAllMocks();
     cookieStore.reset();
     repos.getShopperByEmail.mockResolvedValue(SHOPPER);
-    repos.createShopper.mockResolvedValue(undefined);
+    temporal.executeStandaloneActivity.mockResolvedValue(undefined);
     repos.getByUserId.mockResolvedValue([]);
     es.search.mockResolvedValue({ hits: { hits: [] } });
   });
@@ -73,7 +76,7 @@ describe('POST /api/auth/shopper/login', () => {
     const body = await res.json();
     expect(body.shopper).toEqual(SHOPPER);
     expect(body.savedAddress).toBeNull();
-    expect(repos.createShopper).not.toHaveBeenCalled();
+    expect(temporal.executeStandaloneActivity).not.toHaveBeenCalled();
 
     expect(cookieStore.get('shopperId')?.value).toBe('shopper-1');
     expect(cookieStore.setOptions.get('shopperId')).toMatchObject({
@@ -87,18 +90,27 @@ describe('POST /api/auth/shopper/login', () => {
     expect(repos.getShopperByEmail).toHaveBeenCalledWith('ada@example.com');
   });
 
-  it('auto-creates an account for an unknown email, deriving the name from the local part', async () => {
+  it('auto-creates an account for an unknown email via the createShopper standalone activity', async () => {
     repos.getShopperByEmail.mockResolvedValueOnce(null).mockResolvedValueOnce(SHOPPER);
 
     const res = await loginRequest({ email: 'ada@example.com' });
     expect(res.status).toBe(200);
 
-    expect(repos.createShopper).toHaveBeenCalledWith({
-      id: expect.any(String),
-      email: 'ada@example.com',
-      passwordHash: 'demo-no-password',
-      name: 'ada',
-    });
+    expect(temporal.executeStandaloneActivity).toHaveBeenCalledWith(
+      'createShopper',
+      expect.objectContaining({
+        taskQueue: 'identity-queue',
+        activityId: expect.stringMatching(/^shopper-create-/),
+        args: [
+          {
+            id: expect.any(String),
+            email: 'ada@example.com',
+            passwordHash: 'demo-no-password',
+            name: 'ada',
+          },
+        ],
+      }),
+    );
   });
 
   it('returns 500 when the shopper cannot be found after creation', async () => {

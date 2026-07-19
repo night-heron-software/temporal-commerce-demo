@@ -3,10 +3,11 @@
 # (cart → checkout → order → fulfillment → fulfiller-order), ported from nightheron-mono
 # (ADR-0011).
 #
-# Runs against the local demo-temporal container via docker exec (the auto-setup image
-# ships the `temporal` CLI). Idempotent: an attribute that already exists is left
-# untouched. The attribute names/types must match SEARCH_ATTRIBUTE_KEYS in
-# src/temporal/contracts/constants.ts.
+# Registration normally happens automatically: docker-compose runs the
+# temporal-register-search-attributes one-shot sidecar after namespace creation.
+# This host-side script exists for manual (re-)registration and as the belt to that
+# suspender — it runs the same idempotent sidecar script in a throwaway admin-tools
+# container on the compose network (the temporalio/server image ships no temporal CLI).
 #
 # For Temporal Cloud, register the same five Keyword attributes once via the Cloud UI
 # (Namespace → Search Attributes) or:
@@ -16,33 +17,21 @@
 #     --search-attribute "CartId=Keyword"
 set -euo pipefail
 
-CONTAINER="${TEMPORAL_CONTAINER:-demo-temporal}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 NS="${TEMPORAL_NAMESPACE:-default}"
-# The auto-setup server binds to the container's network IP, not loopback, so the
-# in-container CLI must be pointed at the container hostname explicitly.
-ADDR="${TEMPORAL_CONTAINER_ADDRESS:-${CONTAINER}:7233}"
+ADMIN_TOOLS_IMAGE="${ADMIN_TOOLS_IMAGE:-temporalio/admin-tools:1.31.1}"
 
-# All correlation attributes are Keyword (exact-match, filterable).
-ATTRS="CorrelationId StoreId Domain OrderId CartId"
+NET="$(docker network ls --format '{{.Name}}' | grep 'demo-net$' | head -1)"
+if [ -z "${NET}" ]; then
+  echo "ERROR: demo-net docker network not found — is the infrastructure running (npm run infra:up)?" >&2
+  exit 1
+fi
 
-echo "Waiting for namespace ${NS} to exist in ${CONTAINER}..."
-until docker exec "${CONTAINER}" temporal operator namespace describe --address "${ADDR}" -n "${NS}" >/dev/null 2>&1; do
-  sleep 1
-done
-
-existing="$(docker exec "${CONTAINER}" temporal operator search-attribute list --address "${ADDR}" --namespace "${NS}" 2>/dev/null || true)"
-
-for name in ${ATTRS}; do
-  if printf '%s\n' "${existing}" | grep -qw "${name}"; then
-    echo "Search attribute ${name} already registered."
-  else
-    docker exec "${CONTAINER}" temporal operator search-attribute create \
-      --address "${ADDR}" \
-      --namespace "${NS}" \
-      --name "${name}" \
-      --type Keyword
-    echo "Search attribute ${name} (Keyword) created."
-  fi
-done
-
-echo "✓ Search attribute registration complete."
+docker run --rm \
+  --network "${NET}" \
+  -v "${REPO_ROOT}/infra/temporal/scripts:/scripts:ro" \
+  -e TEMPORAL_ADDRESS=temporal:7233 \
+  -e DEFAULT_NAMESPACE="${NS}" \
+  "${ADMIN_TOOLS_IMAGE}" \
+  /bin/sh /scripts/register-search-attributes.sh

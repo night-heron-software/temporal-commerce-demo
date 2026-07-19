@@ -47,7 +47,11 @@ export interface SavedAddress {
 // Activity Interfaces (Workflow-safe — used with proxyActivities)
 // ============================================================================
 
-/** Identity activities — shopper management. */
+/**
+ * Identity activities — shopper management. All are STANDALONE activities
+ * (ADR-0006): single repository writes executed directly from the client via
+ * `executeStandaloneActivity`, no wrapper workflow.
+ */
 export interface IdentityActivities {
   createShopper(shopper: {
     id: string;
@@ -58,13 +62,14 @@ export interface IdentityActivities {
   }): Promise<void>;
   updateShopperProfile(email: string, updates: { name?: string; phone?: string }): Promise<void>;
   updateShopperPassword(email: string, hash: string): Promise<void>;
+  saveShopperAddress(userId: string, address: SavedAddress): Promise<void>;
 }
 
 // ============================================================================
-// Workflow Type Constants
+// Standalone Activity Names (ADR-0006 — no wrapper workflows in this domain)
 // ============================================================================
 
-// Shopper Workflows
-export const CREATE_SHOPPER_WORKFLOW_TYPE = 'createShopperWorkflow';
-export const UPDATE_SHOPPER_PROFILE_WORKFLOW_TYPE = 'updateShopperProfileWorkflow';
-export const UPDATE_SHOPPER_PASSWORD_WORKFLOW_TYPE = 'updateShopperPasswordWorkflow';
+export const CREATE_SHOPPER_ACTIVITY = 'createShopper';
+export const UPDATE_SHOPPER_PROFILE_ACTIVITY = 'updateShopperProfile';
+export const UPDATE_SHOPPER_PASSWORD_ACTIVITY = 'updateShopperPassword';
+export const SAVE_SHOPPER_ADDRESS_ACTIVITY = 'saveShopperAddress';

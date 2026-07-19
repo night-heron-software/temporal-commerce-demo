@@ -12,6 +12,10 @@ import { createLogger } from '@/lib/logger';
 import { cookies } from 'next/headers';
 import { v4 as uuidv4 } from 'uuid';
 import { ShopperRepository, AddressRepository } from '@/temporal/identity';
+import { executeStandaloneActivity } from '@/lib/temporal-client';
+import { IDENTITY_TASK_QUEUE, DEMO_STORE_ID } from '@/temporal/contracts/constants';
+import { CREATE_SHOPPER_ACTIVITY } from '@/temporal/contracts/identity';
+import { buildActivityTypedSearchAttributes } from '@/temporal/contracts/activity-tagging';
 
 const log = createLogger('api-auth-login');
 
@@ -30,14 +34,19 @@ export async function POST(request: NextRequest) {
   let shopper = await shopperRepo.getShopperByEmail(email);
 
   if (!shopper) {
-    // Auto-create shopper (email-only, no password for demo)
+    // Auto-create shopper (email-only, no password for demo) — a STANDALONE activity
+    // on identity-queue (ADR-0006): the write runs on the worker with Temporal retries
+    // and its own execution history; no wrapper workflow needed for a single write.
     const id = uuidv4();
     const name = email.split('@')[0]; // derive display name from email
-    await shopperRepo.createShopper({
-      id,
-      email,
-      passwordHash: 'demo-no-password',
-      name,
+    await executeStandaloneActivity(CREATE_SHOPPER_ACTIVITY, {
+      taskQueue: IDENTITY_TASK_QUEUE,
+      activityId: `shopper-create-${id}`,
+      args: [{ id, email, passwordHash: 'demo-no-password', name }],
+      typedSearchAttributes: buildActivityTypedSearchAttributes({
+        storeId: DEMO_STORE_ID,
+        domain: 'identity',
+      }),
     });
     shopper = await shopperRepo.getShopperByEmail(email);
   }

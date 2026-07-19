@@ -7,6 +7,7 @@
  */
 
 import { Connection, Client, type ClientOptions } from '@temporalio/client';
+import type { Duration, SearchAttributePair } from '@temporalio/common';
 
 const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS || 'localhost:7233';
 /** Exported for server code that builds Temporal Web UI deep links (order-trace). */
@@ -51,4 +52,38 @@ export async function getTemporalClient(): Promise<Client> {
     interceptors,
   });
   return cachedClient;
+}
+
+/**
+ * Execute a STANDALONE activity — a single activity run directly from the client with
+ * no wrapper workflow (ADR-0006). The activity's own Temporal execution history is the
+ * audit trail; the activity must be registered on a worker polling `taskQueue`.
+ *
+ * Requires Temporal Server >= 1.31 with the `activity.enableStandalone` dynamicconfig
+ * gate enabled (see infra/temporal/dynamicconfig/development-sql.yaml) and SDK >= 1.17.
+ * The API is Public Preview; this helper is the single place that references it.
+ *
+ * Pass `typedSearchAttributes` (via `buildActivityTypedSearchAttributes`, ADR-0011) so
+ * standalone activities carry the same correlation tags as workflows where available.
+ */
+export async function executeStandaloneActivity<T>(
+  activityName: string,
+  options: {
+    taskQueue: string;
+    /** Business-meaningful activity ID (maps to ActivityOptions.id). */
+    activityId: string;
+    args: unknown[];
+    /** Per-attempt-inclusive run timeout. Defaults to '1 minute'. */
+    startToCloseTimeout?: Duration;
+    typedSearchAttributes?: SearchAttributePair[];
+  },
+): Promise<T> {
+  const client = await getTemporalClient();
+  return client.activity.execute<T>(activityName, {
+    id: options.activityId,
+    taskQueue: options.taskQueue,
+    args: options.args,
+    startToCloseTimeout: options.startToCloseTimeout ?? '1 minute',
+    typedSearchAttributes: options.typedSearchAttributes,
+  });
 }
