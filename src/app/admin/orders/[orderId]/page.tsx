@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { getOrderState, updateOrderStatus, cancelOrder } from '../../admin-order-actions';
 import type { OrderState } from '@/temporal/oms/types';
+import EntityIds from '@/components/EntityIds';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
 export default function AdminOrderDetailPage() {
@@ -129,6 +130,9 @@ export default function AdminOrderDetailPage() {
             Order #{order.confirmationNumber}
           </h1>
           <p className="text-zinc-500 text-sm mt-1 font-mono">{order.orderId}</p>
+          <div className="mt-1.5">
+            <EntityIds correlationId={order.cartId} orderId={order.orderId} />
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <span

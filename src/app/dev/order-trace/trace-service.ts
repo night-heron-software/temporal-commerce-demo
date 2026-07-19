@@ -94,6 +94,8 @@ export interface OrderTrace {
   orderId: string;
   storeId: string;
   confirmationNumber?: string;
+  /** Correlation ID (= cart ID, ADR-0011) — ties every workflow in the journey together. */
+  cartId?: string;
   nodes: TraceNode[];
   statusHistory: TraceStatusHistoryRow[];
 }
@@ -435,5 +437,5 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
 
   const statusHistory = await fetchStatusHistory(orderId);
 
-  return { orderId, storeId, confirmationNumber, nodes, statusHistory };
+  return { orderId, storeId, confirmationNumber, cartId, nodes, statusHistory };
 }

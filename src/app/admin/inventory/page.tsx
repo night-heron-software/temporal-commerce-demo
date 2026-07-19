@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import EntityIds from '@/components/EntityIds';
 import {
   getInventoryStock,
   getInventoryReservations,
@@ -354,6 +355,9 @@ export default function AdminInventoryPage() {
                     >
                       {row.cartId.substring(0, 8)}…
                     </a>
+                    <div className="mt-0.5">
+                      <EntityIds correlationId={row.cartId} />
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-zinc-900 dark:text-zinc-100 tabular-nums">
                     {row.quantity}

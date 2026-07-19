@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getAllOrders, type OrderSummary } from '../admin-order-actions';
+import EntityIds from '@/components/EntityIds';
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
@@ -198,6 +199,9 @@ export default function AdminOrdersPage() {
                     <code className="bg-zinc-100 dark:bg-zinc-700 px-2 py-1 rounded text-sm font-mono">
                       {order.confirmationNumber || order.orderId.substring(0, 8)}
                     </code>
+                    <div className="mt-1">
+                      <EntityIds correlationId={order.cartId} orderId={order.orderId} />
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400 text-sm">
                     {order.customerEmail || 'Guest'}

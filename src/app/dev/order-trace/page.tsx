@@ -1231,6 +1231,13 @@ function TraceTabs({ trace }: { trace: OrderTrace }) {
           <code className="text-gray-200">{trace.orderId}</code>
           <CopyButton text={trace.orderId} />
         </span>
+        {trace.cartId && (
+          <span className="inline-flex items-center gap-1" title="CorrelationId (= cartId, ADR-0011)">
+            <span className="text-gray-500 mr-1">Correlation</span>
+            <code className="text-violet-300">{trace.cartId}</code>
+            <CopyButton text={trace.cartId} />
+          </span>
+        )}
         {trace.confirmationNumber && (
           <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 mr-1">Confirmation</span>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import EntityIds from '@/components/EntityIds';
 import {
   searchElasticsearch,
   getIndexStats,
@@ -318,6 +319,15 @@ export default function AdminSearchPage() {
                         score: {hit.score.toFixed(2)}
                       </span>
                     </button>
+
+                    {(hit.source?.cartId || hit.source?.orderId) != null && (
+                      <div className="px-4 pb-2 -mt-1 pl-11">
+                        <EntityIds
+                          correlationId={(hit.source.cartId as string) ?? null}
+                          orderId={(hit.source.orderId as string) ?? null}
+                        />
+                      </div>
+                    )}
 
                     {isExpanded && (
                       <div className="border-t border-zinc-100 dark:border-zinc-700 px-4 py-3 bg-zinc-50 dark:bg-zinc-900/50">

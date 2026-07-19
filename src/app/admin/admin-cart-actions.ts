@@ -30,6 +30,8 @@ export interface CartSummary {
     step: string;
     workflowId?: string;
   };
+  /** Present once the checkout has placed an order. */
+  orderId?: string;
 }
 
 /**
@@ -71,6 +73,7 @@ export async function getActiveCarts(): Promise<ActionResult<CartSummary[]>> {
           checkout: details.checkout
             ? { step: details.checkout.step, workflowId: checkoutWorkflowId ?? undefined }
             : undefined,
+          orderId: details.checkout?.order?.orderId,
         });
       } catch {
         // Workflow may have completed between list and query — skip

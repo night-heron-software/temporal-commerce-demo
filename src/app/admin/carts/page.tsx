@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { getActiveCarts, getCartDetails, type CartSummary } from '../admin-cart-actions';
 import type { CartDetails } from '@/app/shop/cart-actions';
+import EntityIds from '@/components/EntityIds';
 
 export default function AdminCartsPage() {
   const [carts, setCarts] = useState<CartSummary[]>([]);
@@ -233,6 +234,11 @@ export default function AdminCartsPage() {
                   ⚡
                 </a>
               </button>
+
+              {/* Correlation / order IDs (cartId IS the CorrelationId, ADR-0011) */}
+              <div className="px-5 pb-2 -mt-1 pl-14">
+                <EntityIds correlationId={cart.cartId} orderId={cart.orderId} />
+              </div>
 
               {/* Expanded Details */}
               {expandedCart === cart.cartId && (

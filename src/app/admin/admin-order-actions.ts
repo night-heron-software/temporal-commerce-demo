@@ -31,6 +31,8 @@ export interface OrderSummary {
   currency: string;
   status: string;
   createdAt: string;
+  /** Correlation ID (= cart ID, ADR-0011); null if the row predates cart_id. */
+  cartId: string | null;
   /**
    * Temporal UI workflows page filtered to this order's journey
    * (`CorrelationId = cartId`, ADR-0011); null if the row predates cart_id.
@@ -79,6 +81,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       currency: row.currency ?? 'USD',
       status: row.status ?? 'unknown',
       createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
+      cartId: row.cart_id,
       temporalUrl: row.cart_id ? temporalWorkflowsByCorrelationUrl(row.cart_id) : null,
     }));
 
