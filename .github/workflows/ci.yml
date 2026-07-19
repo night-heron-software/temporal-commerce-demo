@@ -9,9 +9,9 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -19,7 +19,7 @@ jobs:
       # The @temporalio/testing time-skipping test server binary is downloaded on first
       # use; cache it so workflow-level tests don't re-download every run.
       - name: Cache Temporal test-server binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.temporalio
