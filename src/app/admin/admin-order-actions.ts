@@ -9,6 +9,7 @@
 
 import { getTemporalClient } from '@/lib';
 import { executeCqlAll } from '@/lib';
+import { TEMPORAL_NAMESPACE } from '@/lib/temporal-client';
 import { createLogger } from '@/lib/logger';
 import {
   getOrderStateQuery,
@@ -30,6 +31,19 @@ export interface OrderSummary {
   currency: string;
   status: string;
   createdAt: string;
+  /**
+   * Temporal UI workflows page filtered to this order's journey
+   * (`CorrelationId = cartId`, ADR-0011); null if the row predates cart_id.
+   * Built server-side because TEMPORAL_UI_URL is a server-only env var.
+   */
+  temporalUrl: string | null;
+}
+
+/** Temporal UI workflows list filtered by the correlation (= cart) ID. */
+function temporalWorkflowsByCorrelationUrl(cartId: string): string {
+  const base = process.env.TEMPORAL_UI_URL || 'http://localhost:8233';
+  const query = encodeURIComponent(`CorrelationId="${cartId}"`);
+  return `${base}/namespaces/${TEMPORAL_NAMESPACE}/workflows?query=${query}`;
 }
 
 /**
@@ -46,8 +60,9 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       currency: string;
       status: string;
       created_at: Date | null;
+      cart_id: string | null;
     }>(
-      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at FROM orders`,
+      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at, cart_id FROM orders`,
     );
 
     const sorted = rows.sort((a, b) => {
@@ -64,6 +79,7 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       currency: row.currency ?? 'USD',
       status: row.status ?? 'unknown',
       createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
+      temporalUrl: row.cart_id ? temporalWorkflowsByCorrelationUrl(row.cart_id) : null,
     }));
 
     return { success: true, data };

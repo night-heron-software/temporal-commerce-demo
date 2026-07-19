@@ -227,6 +227,17 @@ export default function AdminOrdersPage() {
                       >
                         Trace
                       </Link>
+                      {order.temporalUrl && (
+                        <a
+                          href={order.temporalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="All Temporal workflows in this order's journey (CorrelationId query)"
+                          className="text-violet-600 dark:text-violet-400 hover:underline font-medium text-sm"
+                        >
+                          Workflows&nbsp;↗
+                        </a>
+                      )}
                     </span>
                   </td>
                 </tr>
