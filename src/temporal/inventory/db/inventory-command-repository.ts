@@ -909,9 +909,7 @@ export const InventoryCommandRepository = {
     }
 
     // Map each original item back to the reservation for its blank_sku
-    const skuToReservation = new Map(
-      skuResults.map((r) => [r.blankSku, r.result.reservationId!]),
-    );
+    const skuToReservation = new Map(skuResults.map((r) => [r.blankSku, r.result.reservationId!]));
 
     return {
       success: true,
