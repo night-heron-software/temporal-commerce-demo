@@ -108,6 +108,14 @@ export const DOC_ENTRIES: DocEntry[] = [
     category: 'Guides',
   },
   {
+    slug: 'observability-guide',
+    title: 'Observability',
+    description:
+      'The OTEL_ENABLED=true stack — Jaeger tracing, what is instrumented, and where the metrics path falls short.',
+    file: 'docs/observability-guide.md',
+    category: 'Guides',
+  },
+  {
     slug: 'ai-development-guide',
     title: 'AI-First Development',
     description:

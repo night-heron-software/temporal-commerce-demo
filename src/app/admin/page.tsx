@@ -1,5 +1,25 @@
 import Link from 'next/link';
 
+function PatternGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-purple-700 dark:text-purple-300">
+        {title}
+      </h3>
+      <ul className="mt-2 space-y-1.5">{children}</ul>
+    </div>
+  );
+}
+
+function Pattern({ name, where }: { name: string; where: string }) {
+  return (
+    <li className="text-sm text-zinc-600 dark:text-zinc-400">
+      <span className="text-zinc-800 dark:text-zinc-200">{name}</span>{' '}
+      <span className="text-zinc-400 dark:text-zinc-500">— {where}</span>
+    </li>
+  );
+}
+
 export default function AdminDashboardPage() {
   return (
     <div className="max-w-4xl mx-auto p-8">
@@ -129,20 +149,55 @@ export default function AdminDashboardPage() {
         </Link>
 
         {/* Temporal Patterns */}
-        <div className="p-6 bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 rounded-xl border border-purple-200 dark:border-purple-800">
+        <div className="md:col-span-2 p-6 bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 rounded-xl border border-purple-200 dark:border-purple-800">
           <div className="text-3xl mb-3">🧩</div>
           <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
             Patterns Demonstrated
           </h2>
-          <ul className="text-sm text-zinc-600 dark:text-zinc-400 mt-2 space-y-1">
-            <li>• Long-running entity workflows (Cart)</li>
-            <li>• Workflow Updates (sync request-response)</li>
-            <li>• Continue-as-New (history management)</li>
-            <li>• Child workflows (Cart → Checkout)</li>
-            <li>• State machines (Checkout, Order)</li>
-            <li>• Timer-based simulation (Fulfillment)</li>
-            <li>• CQRS singleton service (Inventory)</li>
-          </ul>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+            What this demo actually exercises, and where to go read it.
+          </p>
+
+          <div className="grid sm:grid-cols-2 gap-x-8 gap-y-6 mt-5">
+            <PatternGroup title="Entity lifetime">
+              <Pattern name="Long-running entity workflows" where="Cart, Inventory" />
+              <Pattern name="updateWithStart — atomic lazy creation" where="Cart" />
+              <Pattern name="signalWithStart — singleton auto-start" where="Inventory" />
+              <Pattern name="Continue-as-New with handler drain" where="Cart, Inventory" />
+            </PatternGroup>
+
+            <PatternGroup title="Interaction">
+              <Pattern name="Updates (sync request-response)" where="Cart, Checkout, OMS" />
+              <Pattern name="Signals & Queries as live read models" where="all domains" />
+              <Pattern
+                name="condition() timers — TTL & idle timeout"
+                where="Cart, Checkout, Fulfillment"
+              />
+              <Pattern
+                name="Standalone activities, no wrapper workflow"
+                where="Identity — ADR-0006"
+              />
+            </PatternGroup>
+
+            <PatternGroup title="Topology">
+              <Pattern name="startChild + REQUEST_CANCEL" where="Cart → Checkout" />
+              <Pattern name="startChild + ABANDON — independent child" where="OMS → Fulfillment" />
+              <Pattern name="Activity-spawned peer, no parent link" where="Checkout → OMS" />
+              <Pattern name="getExternalWorkflowHandle signaling" where="every reverse edge" />
+              <Pattern name="Isolated task queues, shared connection" where="6 workers" />
+            </PatternGroup>
+
+            <PatternGroup title="Architecture">
+              <Pattern
+                name="prepare → decide → finalize, pure decider"
+                where="ADR-0003 / ADR-0009"
+              />
+              <Pattern name="Saga compensation on terminal states" where="Checkout, Cart" />
+              <Pattern name="Async transition-recording projection" where="ADR-0010" />
+              <Pattern name="Search Attribute + memo correlation" where="ADR-0011" />
+              <Pattern name="CQRS event processor, dirty-flag batching" where="Inventory, OMS" />
+            </PatternGroup>
+          </div>
         </div>
       </div>
     </div>
