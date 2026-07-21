@@ -7,16 +7,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
 import { executeCql, executeCqlAll } from '@/lib';
 import { getElasticsearchClient } from '@/lib/es-client';
-import { INDEX_MAPPINGS } from '@/lib/es-index-mappings';
+import { INDEX_MAPPINGS, NEVER_REINDEX, REINDEXABLE_INDICES } from '@/lib/es-index-mappings';
 
 /** Cassandra UUID columns have a toString() method */
 type CqlUuid = { toString(): string };
 
-const VALID_INDICES = Object.keys(INDEX_MAPPINGS);
+const VALID_INDICES = REINDEXABLE_INDICES;
 
 export async function POST(request: NextRequest) {
   try {
     const { index } = (await request.json()) as { index: string };
+
+    if (NEVER_REINDEX.has(index)) {
+      return createErrorResponse(
+        400,
+        `${index} has no Cassandra source and is never reindexed — doing so would delete the only copy of the data.`,
+      );
+    }
 
     if (index !== 'all' && !VALID_INDICES.includes(index)) {
       return createErrorResponse(

@@ -41,6 +41,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               >
                 Order Trace
               </Link>
+              <Link
+                href="/dev/system-errors"
+                className="text-zinc-300 hover:text-white transition-colors"
+              >
+                System Errors
+              </Link>
               <Link href="/docs" className="text-zinc-300 hover:text-white transition-colors">
                 Docs
               </Link>
