@@ -204,7 +204,7 @@ temporal-commerce-demo/
 │   │   ├── temporal-client.ts
 │   │   ├── feature-flags.ts
 │   │   ├── email-service.ts
-│   │   └── logger.ts          # Pino logger factory
+│   │   └── logger.ts          # Pino logger — stdout + per-process file + ES error index
 │   └── temporal/              # All Temporal domain code
 │       ├── contracts/         # Shared type definitions & constants
 │       │   ├── cart.ts        # Cart types + signal/update definitions
@@ -846,17 +846,43 @@ The Temporal UI at `http://localhost:8233` is the primary debugging tool. Use it
 
 ### Logs
 
-Workers use `pino` for structured logging. Run with `pino-pretty` for human-readable output:
+The storefront and the workers share one `pino` logger (`src/lib/logger.ts`), fanned out to three
+destinations via `pino.multistream`:
+
+| Stream | Destination | Notes |
+| --- | --- | --- |
+| stdout | terminal | `pino-pretty` colorized in dev, raw JSON in production |
+| file | `logs/demo-<service>-<date>.log` | Always on. Raw JSON, one file per process |
+| errors | `system_errors` Elasticsearch index | `level >= 50` only, fire-and-forget |
+
+Because `npm run dev:up` runs both processes from the repo root, each one tags its own file via
+`LOG_SERVICE`, set inline by the npm scripts — `demo-web-<date>.log` and
+`demo-workers-<date>.log`. Files older than `LOG_RETENTION_DAYS` (default 7) are pruned when a
+process writes its first line.
 
 ```bash
-npm run dev:worker  # Automatically uses pino-pretty in dev
+npm run dev:worker  # pino-pretty in dev; also writes logs/demo-workers-<date>.log
+npm run dev:logs    # tail today's log files from every process
 ```
 
-Key log namespaces:
+Temporal's own Core runtime logs are bridged into the same logger by `Runtime.install` in
+`src/temporal/worker.ts`, so workflow-side `log.*` calls land in all three streams too.
+
+Key log namespaces (the `component` binding):
 
 - `[OMS]` — Order management workflow events
 - `[DataFlow]` — Data transformation tracing (when `DATA_FLOW_LOGGING` is enabled)
 - `worker` — Worker lifecycle events
+
+#### System Errors viewer
+
+Error and fatal lines are queryable at **`/dev/system-errors`** — filter by level, free-text
+message, and time window; expand a row for the stack trace and structured context. The index is
+created by the first error logged, so an empty view on a healthy system is expected.
+
+`system_errors` is the one index with no Cassandra source to rebuild from, so `/api/dev/reindex`
+refuses to touch it — a delete-and-recreate would destroy the only copy. Use the viewer's
+**Clear all** button to empty it instead.
 
 ### Docker Container Logs
 
@@ -937,6 +963,10 @@ deployment change, not a code change.
 | `NEXT_PUBLIC_CHECKOUT_READY_TIMEOUT_MS` | No | `30000` | How long the checkout page waits for the checkout workflow before erroring |
 | `TEMPORAL_UI_URL` | No | `http://localhost:8233` | Temporal UI base URL used for links in the Order Trace tool |
 | `LOG_LEVEL` | No | `debug` (dev) / `info` | Pino log level |
+| `LOG_DIR` | No | `logs` | Directory for per-process JSON log files (gitignored) |
+| `LOG_SERVICE` | No | `app` | Log filename tag — set inline by the npm scripts (`web`/`workers`/`scripts`) |
+| `LOG_RETENTION_DAYS` | No | `7` | Log files older than this are pruned on first write |
+| `LOG_ES_ERRORS` | No | `true` | Set `false` to stop forwarding errors to the `system_errors` index |
 | `OTEL_ENABLED` | No | `false` | Enable OpenTelemetry tracing (requires observability stack) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OTLP HTTP endpoint for trace export |
 
