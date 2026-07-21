@@ -118,6 +118,20 @@ export default function AdminDashboardPage() {
           </p>
         </Link>
 
+        {/* System Logs */}
+        <Link
+          href="/dev/logs"
+          className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-purple-400 dark:hover:border-purple-500 transition-all hover:shadow-lg"
+        >
+          <div className="text-3xl mb-3">📜</div>
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
+            System Logs
+          </h2>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            Live structured log lines across all services, searchable by log level, service, and free text.
+          </p>
+        </Link>
+
         {/* Docs */}
         <Link
           href="/docs"
