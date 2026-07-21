@@ -103,13 +103,11 @@ export default function SystemErrorsPage() {
   }, [fetchErrors]);
 
   const clearAll = useCallback(async () => {
-    if (!confirm('Delete every document in the system_errors index? This cannot be undone.')) {
-      return;
-    }
     try {
       const res = await fetch('/api/dev/system-errors', { method: 'DELETE' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setExpanded(null);
+      setPage(1);
       await fetchErrors();
     } catch (err) {
       setError((err as Error).message);
