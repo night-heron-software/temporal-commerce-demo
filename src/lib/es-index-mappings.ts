@@ -327,7 +327,39 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       deliveredAt: { type: 'date' },
     },
   },
+
+  /**
+   * Error/fatal log lines forwarded by the pino stream in `src/lib/logger.ts`.
+   *
+   * Unlike every other index here, this one has no Cassandra source — ES holds the only copy.
+   * `/api/dev/reindex` deliberately refuses to touch it (see NEVER_REINDEX there); use the
+   * Clear button on /dev/system-errors to empty it.
+   */
+  system_errors: {
+    properties: {
+      errorId: { type: 'keyword' },
+      timestamp: { type: 'date' },
+      level: { type: 'keyword' },
+      message: { type: 'text' },
+      component: { type: 'keyword' },
+      storeId: { type: 'keyword' },
+      stack: { type: 'text', index: false },
+      context: { type: 'object', dynamic: true },
+    },
+  },
 };
+
+/**
+ * Indices with no Cassandra source to rebuild from — ES holds the only copy, so a
+ * delete-and-recreate reindex would destroy real data. `/api/dev/reindex` refuses these.
+ *
+ * `carts`/`fulfillments`/`shipments` are also source-less but are NOT listed here: recreating
+ * them empty is the intended behaviour. `system_errors` is the log itself.
+ */
+export const NEVER_REINDEX: ReadonlySet<string> = new Set(['system_errors']);
+
+/** Index names `/api/dev/reindex` is allowed to rebuild. */
+export const REINDEXABLE_INDICES = Object.keys(INDEX_MAPPINGS).filter((i) => !NEVER_REINDEX.has(i));
 
 export async function ensureIndicesExist(): Promise<void> {
   const { getElasticsearchClient } = await import('./es-client');
