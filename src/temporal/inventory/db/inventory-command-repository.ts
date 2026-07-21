@@ -856,7 +856,10 @@ export const InventoryCommandRepository = {
   // --- Batch Operations ---
 
   /**
-   * Reserve all items for a cart in parallel.
+   * Reserve all items for a cart, consolidated by blank_sku.
+   * Multiple variants may share the same underlying blank — we accumulate their
+   * quantities so there is exactly one LWT reserve (one CAS on inventory_stock_w)
+   * per unique blank_sku. Safe to parallelize since each targets a different partition.
    * Rolls back on any failure.
    */
   async reserveAll(
@@ -865,36 +868,56 @@ export const InventoryCommandRepository = {
     referenceId?: string,
   ): Promise<BatchReserveResult> {
     const ttlSeconds = 15 * 60; // 15 minutes for checkout
-    const results = await Promise.all(
-      items.map((item) =>
-        this.reserve({
-          reservationId: `${cartId}-${item.variantId}`,
+
+    // Accumulate quantities per blank_sku so there is exactly one CAS per partition.
+    const byBlankSku = items.reduce((acc, item) => {
+      const entry = acc.get(item.blankSku);
+      if (entry) {
+        entry.totalQuantity += item.quantity;
+        entry.variants.push(item.variantId);
+      } else {
+        acc.set(item.blankSku, { totalQuantity: item.quantity, variants: [item.variantId] });
+      }
+      return acc;
+    }, new Map<string, { totalQuantity: number; variants: string[] }>());
+
+    // One reserve per unique blank_sku — different partitions, safe to parallelize.
+    const skuResults = await Promise.all(
+      Array.from(byBlankSku.entries()).map(async ([blankSku, { totalQuantity, variants }]) => ({
+        blankSku,
+        result: await this.reserve({
+          reservationId: `${cartId}-${blankSku}`,
           cartId,
-          blankSku: item.blankSku,
-          variantId: item.variantId,
-          quantity: item.quantity,
+          blankSku,
+          variantId: variants[0], // representative variant for the record
+          quantity: totalQuantity,
           referenceId: referenceId ?? `checkout-${cartId}`,
           ttlSeconds,
         }),
-      ),
+      })),
     );
 
-    const failures = results.filter((r) => !r.success);
+    const failures = skuResults.filter((r) => !r.result.success);
     if (failures.length > 0) {
       // Roll back successful reservations
-      const successfulIds = results
-        .filter((r) => r.success && r.reservationId)
-        .map((r) => r.reservationId!);
+      const successfulIds = skuResults
+        .filter((r) => r.result.success && r.result.reservationId)
+        .map((r) => r.result.reservationId!);
       await Promise.all(successfulIds.map((id) => this.release(id)));
 
-      return { success: false, error: failures[0].error };
+      return { success: false, error: failures[0].result.error };
     }
+
+    // Map each original item back to the reservation for its blank_sku
+    const skuToReservation = new Map(
+      skuResults.map((r) => [r.blankSku, r.result.reservationId!]),
+    );
 
     return {
       success: true,
-      reservations: results.map((r, i) => ({
-        variantId: items[i].variantId,
-        reservationId: r.reservationId!,
+      reservations: items.map((item) => ({
+        variantId: item.variantId,
+        reservationId: skuToReservation.get(item.blankSku)!,
       })),
     };
   },
