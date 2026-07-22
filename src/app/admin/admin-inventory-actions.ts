@@ -1,6 +1,7 @@
 'use server';
 
 import { executeCql } from '@/lib';
+import { InventoryCommandRepository } from '@/temporal/inventory/db/inventory-command-repository';
 
 // ─── Stock Summary ───
 
@@ -67,41 +68,62 @@ export interface ReservationRow {
   createdAt: string;
 }
 
-export async function getInventoryReservations(): Promise<{
+export async function getInventoryReservations(scope: 'active' | 'all' = 'active'): Promise<{
   success: boolean;
   data: ReservationRow[];
   error?: string;
 }> {
   try {
-    interface DbRow {
-      reservation_id: string;
-      blank_sku: string;
-      cart_id: string;
-      variant_id: string;
-      fulfiller_id: string | null;
-      quantity: number;
-      status: string;
-      expires_at: Date | null;
-      created_at: Date;
+    let data: ReservationRow[];
+
+    if (scope === 'active') {
+      // Partition read of the by_status active registry (TEMPORARY + CONFIRMED) —
+      // no full-table scan for the default view.
+      const records = await InventoryCommandRepository.getActiveReservations();
+      data = records.map((r) => ({
+        reservationId: r.reservationId,
+        blankSku: r.blankSku,
+        cartId: r.cartId,
+        variantId: r.variantId,
+        fulfillerId: r.fulfillerId,
+        quantity: r.quantity,
+        status: r.status,
+        expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    } else {
+      // 'all' is the explicit historical view: a full-table scan over every reservation
+      // ever written (RELEASED/CANCELLED debris included). Dev tool — opt-in only.
+      interface DbRow {
+        reservation_id: string;
+        blank_sku: string;
+        cart_id: string;
+        variant_id: string;
+        fulfiller_id: string | null;
+        quantity: number;
+        status: string;
+        expires_at: Date | null;
+        created_at: Date;
+      }
+
+      const rows = await executeCql<DbRow>(
+        `SELECT reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
+                quantity, status, expires_at, created_at
+         FROM inventory_reservations_w`,
+      );
+
+      data = rows.map((r) => ({
+        reservationId: r.reservation_id,
+        blankSku: r.blank_sku,
+        cartId: r.cart_id,
+        variantId: r.variant_id,
+        fulfillerId: r.fulfiller_id,
+        quantity: r.quantity,
+        status: r.status,
+        expiresAt: r.expires_at ? r.expires_at.toISOString() : null,
+        createdAt: r.created_at.toISOString(),
+      }));
     }
-
-    const rows = await executeCql<DbRow>(
-      `SELECT reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
-              quantity, status, expires_at, created_at
-       FROM inventory_reservations_w`,
-    );
-
-    const data: ReservationRow[] = rows.map((r) => ({
-      reservationId: r.reservation_id,
-      blankSku: r.blank_sku,
-      cartId: r.cart_id,
-      variantId: r.variant_id,
-      fulfillerId: r.fulfiller_id,
-      quantity: r.quantity,
-      status: r.status,
-      expiresAt: r.expires_at ? r.expires_at.toISOString() : null,
-      createdAt: r.created_at.toISOString(),
-    }));
 
     // Active first (TEMPORARY, CONFIRMED), then by created_at desc
     const statusOrder: Record<string, number> = {
@@ -140,9 +162,10 @@ export async function getInventoryStats(): Promise<{
   error?: string;
 }> {
   try {
+    // Active-registry partition read — stats only need the active count, never the scan.
     const [stockResult, reservationResult] = await Promise.all([
       getInventoryStock(),
-      getInventoryReservations(),
+      getInventoryReservations('active'),
     ]);
 
     if (!stockResult.success || !reservationResult.success) {
@@ -171,9 +194,8 @@ export async function getInventoryStats(): Promise<{
         totalStock: stock.reduce((s, r) => s + r.totalStock, 0),
         totalReserved: stock.reduce((s, r) => s + r.reservedStock, 0),
         totalAvailable: stock.reduce((s, r) => s + r.availableStock, 0),
-        activeReservations: reservations.filter(
-          (r) => r.status === 'TEMPORARY' || r.status === 'CONFIRMED',
-        ).length,
+        // The active read already returns only TEMPORARY + CONFIRMED rows.
+        activeReservations: reservations.length,
         lowStockSkus: stock.filter((r) => r.availableStock < LOW_STOCK_THRESHOLD).length,
       },
     };
