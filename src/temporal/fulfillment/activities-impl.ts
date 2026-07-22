@@ -5,6 +5,7 @@ import type { TrackingInfo } from './activities';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import { getFlag } from '../../lib/feature-flags';
 import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
+import { buildReservationId } from '../contracts/inventory';
 
 export async function getFeatureFlag(name: string): Promise<boolean> {
   return getFlag(name);
@@ -50,7 +51,7 @@ export async function transferInventoryReservations(
   );
 
   for (const item of items) {
-    const reservationId = `${cartId}-${item.variantId}`;
+    const reservationId = buildReservationId(cartId, item.variantId);
     await InventoryCommandRepository.transferToFulfiller(
       reservationId,
       item.fulfillerId,
@@ -69,7 +70,7 @@ export async function fulfillInventoryReservations(
   const esClient = getElasticsearchClient();
 
   for (const item of items) {
-    const reservationId = `${cartId}-${item.variantId}`;
+    const reservationId = buildReservationId(cartId, item.variantId);
     await InventoryCommandRepository.fulfill(reservationId);
 
     // Remove reservation doc from ES
@@ -94,7 +95,7 @@ export async function releaseInventoryReservations(
   const esClient = getElasticsearchClient();
 
   for (const item of items) {
-    const reservationId = `${cartId}-${item.variantId}`;
+    const reservationId = buildReservationId(cartId, item.variantId);
     // cancel() handles CONFIRMED reservations, release() handles TEMPORARY
     const reservation = await InventoryCommandRepository.getReservation(reservationId);
     if (!reservation) continue;

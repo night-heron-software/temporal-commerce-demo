@@ -31,6 +31,7 @@ function makeActivities() {
     syncInventoryToESForSkus: vi.fn(async () => undefined),
     // Full-scan (periodic consistency sweep)
     expireReservations: vi.fn(async () => 0),
+    reconcileStockCounters: vi.fn(async () => 0),
     projectStockSummaries: vi.fn(async () => undefined),
     projectReservationViews: vi.fn(async () => undefined),
     projectLowStockAlerts: vi.fn(async () => undefined),

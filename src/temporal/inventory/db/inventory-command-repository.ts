@@ -1,4 +1,5 @@
 import { Inventory } from '../../contracts';
+import { buildReservationId } from '../../contracts/inventory';
 /**
  * Inventory Command Repository (CQRS Write Side)
  *
@@ -21,13 +22,6 @@ function isUnlimited(totalStock: number): boolean {
 }
 
 /**
- * Minimum hold time before a TEMPORARY reservation becomes preemptable (see reserve()).
- * Business rationale: a shopper's cart reservation is protected for at least this long so
- * an active checkout is never yanked mid-flow; past it, stale carts lose to new demand.
- */
-export const MIN_HOLD_MS = 15 * 60 * 1000; // 15 minutes
-
-/**
  * Sum available stock (total − reserved) across a SKU's fulfiller rows.
  * Any fulfiller with UNLIMITED_STOCK makes the SKU effectively infinite.
  * Pure — shared by getStockLevel() and both aggregation points in reserve().
@@ -40,36 +34,100 @@ export function computeTotalAvailable(
 }
 
 /**
- * Pick which stale TEMPORARY reservations to preempt so a new reservation of
- * `quantityNeeded` can fit. Pure decision logic (I/O stays in reserve()):
- * only reservations held past MIN_HOLD_MS qualify, oldest are preempted first
- * (FIFO), the requesting cart's own reservations are never preempted, and
- * preemption stops as soon as enough stock is freed.
+ * Pick which expired TEMPORARY reservations to preempt so a new reservation of
+ * `quantityNeeded` can fit. Pure decision logic (I/O stays in the reserve path).
+ *
+ * Only reservations whose TTL has lapsed qualify — live holds are never touched, no matter
+ * how old. Age is deliberately NOT the gate: renewals extend `expires_at` without touching
+ * `created_at`, so a wall-clock-old hold can still belong to an active checkout. Preempting
+ * an expired hold is just an inline version of what the expiry sweep would do minutes later.
+ * Oldest are preempted first (FIFO) and preemption stops once enough stock is freed.
  */
 export function selectPreemptibleReservations<
-  T extends { cart_id: string; quantity: number; created_at: Date; expires_at: Date | null },
+  T extends { quantity: number; created_at: Date; expires_at: Date | null },
 >(
   candidates: T[],
   opts: {
     totalAvailable: number;
     quantityNeeded: number;
-    requestingCartId: string;
     nowMs: number;
   },
 ): T[] {
-  const stale = candidates
-    .filter((r) => r.expires_at && opts.nowMs > r.created_at.getTime() + MIN_HOLD_MS)
+  const expired = candidates
+    .filter((r) => r.expires_at !== null && r.expires_at.getTime() < opts.nowMs)
     .sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
 
   let freedStock = 0;
   const toPreempt: T[] = [];
-  for (const r of stale) {
+  for (const r of expired) {
     if (opts.totalAvailable + freedStock >= opts.quantityNeeded) break;
-    if (r.cart_id === opts.requestingCartId) continue;
     freedStock += r.quantity;
     toPreempt.push(r);
   }
   return toPreempt;
+}
+
+/** One per-variant reservation row to create within a single blank_sku group. */
+export interface ReservationEntry {
+  reservationId: string;
+  variantId: string;
+  quantity: number;
+}
+
+/**
+ * Group cart items by blank_sku into per-variant reservation entries.
+ *
+ * The grouping preserves PR #17's contention fix — one LWT CAS per blank_sku partition —
+ * while every variant keeps its OWN reservation row keyed `buildReservationId(cartId,
+ * variantId)`, so all lookup sites (fulfillment transfer/fulfill/release, cart release,
+ * reconcile) address rows that actually exist. Pure — exported for the regression test.
+ */
+export function groupItemsByBlankSku(
+  cartId: string,
+  items: Array<{ variantId: string; blankSku: string; quantity: number }>,
+): Map<string, ReservationEntry[]> {
+  const groups = new Map<string, ReservationEntry[]>();
+  for (const item of items) {
+    const entry: ReservationEntry = {
+      reservationId: buildReservationId(cartId, item.variantId),
+      variantId: item.variantId,
+      quantity: item.quantity,
+    };
+    const group = groups.get(item.blankSku);
+    if (group) group.push(entry);
+    else groups.set(item.blankSku, [entry]);
+  }
+  return groups;
+}
+
+/**
+ * Recompute what reserved_stock SHOULD be per (blank_sku, fulfiller_id) from the active
+ * reservation rows. Pure — the drift reconciler compares this against inventory_stock_w and
+ * CAS-corrects. Rows without an attributed fulfiller cannot be attributed to a counter and
+ * are skipped (they should not exist now that reserve() stamps the fulfiller at creation;
+ * the reconciler logs any it sees).
+ */
+export function computeExpectedReserved(
+  rows: Array<{ blank_sku: string; fulfiller_id: string | null; quantity: number }>,
+): Map<string, number> {
+  const expected = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.fulfiller_id) continue;
+    const key = `${row.blank_sku}|${row.fulfiller_id}`;
+    expected.set(key, (expected.get(key) ?? 0) + row.quantity);
+  }
+  return expected;
+}
+
+/**
+ * LWT contention on the stock counter. Activities rethrow this so Temporal's retry policy
+ * takes over — contention is transient and retryable, unlike genuine insufficient stock.
+ */
+export class InventoryContentionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InventoryContentionError';
+  }
 }
 
 export interface StockLevel {
@@ -113,12 +171,16 @@ export interface ReserveResult {
   success: boolean;
   reservationId?: string;
   error?: string;
+  /** True when the failure was LWT contention — transient, retry-worthy. */
+  contention?: boolean;
 }
 
 export interface BatchReserveResult {
   success: boolean;
   reservations?: Array<{ variantId: string; reservationId: string }>;
   error?: string;
+  /** True when any underlying failure was LWT contention — transient, retry-worthy. */
+  contention?: boolean;
 }
 
 export interface ReservationRecord {
@@ -254,6 +316,75 @@ function rowToReservation(row: ReservationRow): ReservationRecord {
 }
 
 // ============================================================
+// Guarded counter mutation
+// ============================================================
+
+const CAS_MAX_ATTEMPTS = 3;
+
+/**
+ * Adjust a stock row's counters via compare-and-set with a small jittered retry.
+ *
+ * All counter mutations go through here so none of them is a lost-update race: read the row,
+ * compute the new values, apply IFF `reserved_stock` is still what we read. On exhausted
+ * attempts this THROWS — callers run inside Temporal activities whose retry policy takes
+ * over, and the drift reconciler is the final backstop. An underflow (drift already present)
+ * is clamped to zero but logged at error level — never silently.
+ */
+async function casAdjustStock(
+  blankSku: string,
+  fulfillerId: string,
+  reservedDelta: number,
+  totalDelta = 0,
+): Promise<void> {
+  const client = await getCassandraClient();
+
+  for (let attempt = 1; attempt <= CAS_MAX_ATTEMPTS; attempt++) {
+    const rows = await executeCql<StockRow>(
+      `SELECT total_stock, reserved_stock FROM inventory_stock_w
+       WHERE blank_sku = ? AND fulfiller_id = ?`,
+      [blankSku, fulfillerId],
+    );
+    if (rows.length === 0) {
+      throw new Error(`Stock row not found for SKU ${blankSku} / fulfiller ${fulfillerId}`);
+    }
+    const current = rows[0];
+
+    let newReserved = current.reserved_stock + reservedDelta;
+    if (newReserved < 0) {
+      logger.error(
+        { blankSku, fulfillerId, reserved: current.reserved_stock, reservedDelta },
+        'reserved_stock underflow — counter drift detected, clamping to 0',
+      );
+      newReserved = 0;
+    }
+    const newTotal =
+      totalDelta === 0 || isUnlimited(current.total_stock)
+        ? current.total_stock
+        : current.total_stock + totalDelta;
+
+    const result = await client.execute(
+      `UPDATE inventory_stock_w
+       SET reserved_stock = ?, total_stock = ?, updated_at = toTimestamp(now())
+       WHERE blank_sku = ? AND fulfiller_id = ?
+       IF reserved_stock = ?`,
+      [newReserved, newTotal, blankSku, fulfillerId, current.reserved_stock],
+      { prepare: true },
+    );
+    if (result.rows[0]['[applied]']) return;
+
+    logger.warn(
+      { blankSku, fulfillerId, attempt },
+      'Stock counter CAS not applied — concurrent modification, retrying',
+    );
+    await new Promise((r) => setTimeout(r, 25 + Math.random() * 75));
+  }
+
+  throw new InventoryContentionError(
+    `Stock counter CAS exhausted after ${CAS_MAX_ATTEMPTS} attempts for ${blankSku}/${fulfillerId}`,
+  );
+}
+
+// ============================================================
 // Repository
 // ============================================================
 
@@ -331,35 +462,48 @@ export const InventoryCommandRepository = {
   // --- Reservation Lifecycle ---
 
   /**
-   * Reserve inventory for a single item using LWT for atomicity.
-   * Atomically increments reserved_stock IFF available stock is sufficient.
+   * Reserve a group of per-variant entries that share one blank_sku.
    *
-   * PREEMPTION: If available stock is insufficient, checks for TEMPORARY
-   * reservations older than MIN_HOLD_TIME on this SKU. Preempts them FIFO
-   * (oldest first) until enough stock is freed, then reserves.
+   * The core of the reserve path: ONE LWT CAS on the chosen fulfiller row for the group's
+   * total quantity (PR #17's contention fix), then one reservation ROW PER VARIANT — each
+   * keyed `buildReservationId(cartId, variantId)` and attributed to the fulfiller whose
+   * counter was incremented, so release/cancel/fulfill can decrement the right row later.
+   *
+   * PREEMPTION: if available stock is insufficient, expired TEMPORARY holds on this SKU are
+   * released FIFO (an inline expiry sweep) — live holds are never preempted.
+   *
+   * If the record batch fails after the LWT applied, the increment is compensated; if the
+   * compensation also fails, the drift reconciler heals the counter at the next sweep.
    */
-  async reserve(args: ReserveArgs): Promise<ReserveResult> {
-    // Find the fulfiller with the most available stock for this SKU
+  async reserveGroup(
+    blankSku: string,
+    cartId: string,
+    entries: ReservationEntry[],
+    referenceId: string,
+    ttlSeconds: number,
+  ): Promise<ReserveResult> {
+    const quantity = entries.reduce((sum, e) => sum + e.quantity, 0);
+
     const stockRows = await executeCql<StockRow>(
       `SELECT fulfiller_id, total_stock, reserved_stock FROM inventory_stock_w
        WHERE blank_sku = ?`,
-      [args.blankSku],
+      [blankSku],
     );
 
     if (stockRows.length === 0) {
-      return { success: false, error: `No stock found for SKU: ${args.blankSku}` };
+      return { success: false, error: `No stock found for SKU: ${blankSku}` };
     }
 
     // Calculate total available across all fulfillers
     let totalAvailable = computeTotalAvailable(stockRows);
 
-    // If not enough available, attempt preemption of stale TEMPORARY reservations
-    if (totalAvailable < args.quantity) {
+    // If not enough available, release expired TEMPORARY holds on this SKU (inline sweep)
+    if (totalAvailable < quantity) {
       // Per-SKU partition read on the projected read table — cost tracks THIS SKU's
       // reservations, not the site-wide working set. The projection lags by up to the
-      // ~5m consistency sweep, which is safe here: candidates must be older than the
-      // 15m MIN_HOLD_MS gate, and release() re-checks the source of truth (terminal
-      // guard + LWT), so a stale row fails closed rather than double-freeing.
+      // ~5m consistency sweep, which is safe here: only expired holds qualify, and
+      // release() re-checks the source of truth (terminal guard), so a stale row
+      // fails closed rather than double-freeing.
       const skuRows = await executeCql<{
         reservation_id: string;
         cart_id: string;
@@ -370,28 +514,22 @@ export const InventoryCommandRepository = {
       }>(
         `SELECT reservation_id, cart_id, quantity, status, expires_at, created_at
          FROM inventory_reservations_by_sku WHERE blank_sku = ?`,
-        [args.blankSku],
+        [blankSku],
       );
       const preemptable = skuRows.filter((r) => r.status === 'TEMPORARY');
 
       const toPreempt = selectPreemptibleReservations(preemptable, {
         totalAvailable,
-        quantityNeeded: args.quantity,
-        requestingCartId: args.cartId,
+        quantityNeeded: quantity,
         nowMs: Date.now(),
       });
       const freedStock = toPreempt.reduce((sum, r) => sum + r.quantity, 0);
 
-      if (totalAvailable + freedStock >= args.quantity) {
-        // Preempt the stale reservations
+      if (totalAvailable + freedStock >= quantity) {
         for (const r of toPreempt) {
           logger.info(
-            {
-              preemptedReservation: r.reservation_id,
-              blankSku: args.blankSku,
-              forCart: args.cartId,
-            },
-            'Preempting stale TEMPORARY reservation',
+            { preemptedReservation: r.reservation_id, blankSku, forCart: cartId },
+            'Preempting expired TEMPORARY reservation',
           );
           await this.release(r.reservation_id);
         }
@@ -400,7 +538,7 @@ export const InventoryCommandRepository = {
         const freshRows = await executeCql<StockRow>(
           `SELECT fulfiller_id, total_stock, reserved_stock FROM inventory_stock_w
            WHERE blank_sku = ?`,
-          [args.blankSku],
+          [blankSku],
         );
         stockRows.length = 0;
         stockRows.push(...freshRows);
@@ -408,96 +546,150 @@ export const InventoryCommandRepository = {
       }
     }
 
-    // Find a fulfiller with enough available stock
-    const fulfiller = stockRows.find(
-      (r) => isUnlimited(r.total_stock) || r.total_stock - r.reserved_stock >= args.quantity,
+    // Pick the fulfiller with the MOST available stock (spreads CAS contention and leaves
+    // the most room for concurrent reserves, unlike first-match).
+    const eligible = stockRows.filter(
+      (r) => isUnlimited(r.total_stock) || r.total_stock - r.reserved_stock >= quantity,
     );
+    const fulfiller = eligible.reduce<StockRow | null>((best, r) => {
+      if (!best) return r;
+      const availOf = (row: StockRow) =>
+        isUnlimited(row.total_stock)
+          ? Number.MAX_SAFE_INTEGER
+          : row.total_stock - row.reserved_stock;
+      return availOf(r) > availOf(best) ? r : best;
+    }, null);
 
     if (!fulfiller) {
       return {
         success: false,
-        error: `Insufficient stock. Requested: ${args.quantity}, Available: ${totalAvailable}`,
+        error: `Insufficient stock. Requested: ${quantity}, Available: ${totalAvailable}`,
       };
     }
 
-    // LWT: atomically increment reserved_stock only if stock is sufficient
+    // LWT: atomically increment reserved_stock only if unchanged since our read
     const client = await getCassandraClient();
-    const newReserved = fulfiller.reserved_stock + args.quantity;
+    const newReserved = fulfiller.reserved_stock + quantity;
     const result = await client.execute(
       `UPDATE inventory_stock_w
        SET reserved_stock = ?, updated_at = toTimestamp(now())
        WHERE blank_sku = ? AND fulfiller_id = ?
        IF reserved_stock = ?`,
-      [newReserved, args.blankSku, fulfiller.fulfiller_id, fulfiller.reserved_stock],
+      [newReserved, blankSku, fulfiller.fulfiller_id, fulfiller.reserved_stock],
       { prepare: true },
     );
 
-    // Check if LWT was applied
     const applied = result.rows[0]['[applied]'];
     if (!applied) {
       logger.warn(
-        { blankSku: args.blankSku, fulfillerId: fulfiller.fulfiller_id },
+        { blankSku, fulfillerId: fulfiller.fulfiller_id },
         'LWT not applied for reserve, concurrent modification detected',
       );
-      return { success: false, error: 'Concurrent modification, retry needed' };
+      return { success: false, contention: true, error: 'Concurrent modification, retry needed' };
     }
 
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + args.ttlSeconds * 1000);
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
 
-    // Insert reservation record + by-cart lookup (batch for cross-partition atomicity)
-    await executeBatch([
+    // Insert per-variant reservation records + mirrors, attributed to the fulfiller whose
+    // counter we just incremented.
+    const statements = entries.flatMap((entry) => [
       {
         query: `INSERT INTO inventory_reservations_w (
           reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
           quantity, reference_id, status, expires_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'TEMPORARY', ?, ?, ?)`,
         params: [
-          args.reservationId,
-          args.blankSku,
-          args.cartId,
-          args.variantId,
-          null,
-          args.quantity,
-          args.referenceId,
+          entry.reservationId,
+          blankSku,
+          cartId,
+          entry.variantId,
+          fulfiller.fulfiller_id,
+          entry.quantity,
+          referenceId,
           expiresAt,
           now,
           now,
-        ],
+        ] as unknown[],
       },
       {
         query: `INSERT INTO inventory_reservations_by_cart_w (
           cart_id, reservation_id, blank_sku, variant_id, quantity, status
         ) VALUES (?, ?, ?, ?, ?, 'TEMPORARY')`,
-        params: [args.cartId, args.reservationId, args.blankSku, args.variantId, args.quantity],
+        params: [cartId, entry.reservationId, blankSku, entry.variantId, entry.quantity],
       },
       activeRegistryInsert({
         status: 'TEMPORARY',
-        reservation_id: args.reservationId,
-        blank_sku: args.blankSku,
-        cart_id: args.cartId,
-        variant_id: args.variantId,
-        fulfiller_id: null,
-        quantity: args.quantity,
-        reference_id: args.referenceId,
+        reservation_id: entry.reservationId,
+        blank_sku: blankSku,
+        cart_id: cartId,
+        variant_id: entry.variantId,
+        fulfiller_id: fulfiller.fulfiller_id,
+        quantity: entry.quantity,
+        reference_id: referenceId,
         expires_at: expiresAt,
         created_at: now,
         updated_at: now,
       }),
     ]);
 
+    try {
+      await executeBatch(statements);
+    } catch (err) {
+      // Compensate the counter so the LWT increment doesn't leak as a phantom hold.
+      logger.error(
+        { blankSku, cartId, err },
+        'Reservation record batch failed after LWT — compensating counter',
+      );
+      try {
+        await casAdjustStock(blankSku, fulfiller.fulfiller_id, -quantity);
+      } catch (compErr) {
+        // Reconciler heals: counter > sum(active reservations) is corrected at next sweep.
+        logger.error(
+          { blankSku, err: compErr },
+          'Counter compensation failed — reconciler will heal',
+        );
+      }
+      return { success: false, error: 'Failed to write reservation records' };
+    }
+
     logger.info(
-      { reservationId: args.reservationId, blankSku: args.blankSku, quantity: args.quantity },
+      {
+        blankSku,
+        cartId,
+        fulfillerId: fulfiller.fulfiller_id,
+        quantity,
+        reservationIds: entries.map((e) => e.reservationId),
+      },
       'Reserved inventory',
     );
 
-    await signalInventoryChanged([args.blankSku]);
-    return { success: true, reservationId: args.reservationId };
+    await signalInventoryChanged([blankSku]);
+    return { success: true };
+  },
+
+  /**
+   * Reserve inventory for a single item. Thin wrapper over reserveGroup().
+   */
+  async reserve(args: ReserveArgs): Promise<ReserveResult> {
+    const result = await this.reserveGroup(
+      args.blankSku,
+      args.cartId,
+      [{ reservationId: args.reservationId, variantId: args.variantId, quantity: args.quantity }],
+      args.referenceId,
+      args.ttlSeconds,
+    );
+    return result.success ? { success: true, reservationId: args.reservationId } : result;
   },
 
   /**
    * Release a reservation (checkout cancel, timeout, or failure).
-   * Decrements reserved_stock and removes reservation records.
+   *
+   * Status flips FIRST, counter decrements SECOND — deliberately. If the decrement fails
+   * after the flip, a retry hits the terminal guard (no double-decrement) and the row is
+   * already gone from the active registry, so the drift reconciler lowers the counter at
+   * the next sweep. The reverse order risks decrementing twice, which is the oversell
+   * direction — this order fails safe.
    */
   async release(reservationId: string): Promise<void> {
     const rows = await executeCql<ReservationRow>(
@@ -512,33 +704,21 @@ export const InventoryCommandRepository = {
 
     const reservation = rows[0];
 
-    if (reservation.status === 'RELEASED' || reservation.status === 'FULFILLED') {
+    if (
+      reservation.status === 'RELEASED' ||
+      reservation.status === 'FULFILLED' ||
+      reservation.status === 'CANCELLED'
+    ) {
       logger.warn({ reservationId, status: reservation.status }, 'Reservation already terminal');
       return;
     }
 
-    // Decrement reserved_stock via LWT
-    const stockRows = await executeCql<StockRow>(
-      `SELECT fulfiller_id, reserved_stock FROM inventory_stock_w WHERE blank_sku = ?`,
-      [reservation.blank_sku],
-    );
-
-    // Find which fulfiller holds this reservation's stock
-    // For now, decrement from the first fulfiller (pre-assignment reservations)
-    if (stockRows.length > 0) {
-      const fulfiller = stockRows[0];
-      const newReserved = Math.max(0, fulfiller.reserved_stock - reservation.quantity);
-      await executeCql(
-        `UPDATE inventory_stock_w
-         SET reserved_stock = ?, updated_at = toTimestamp(now())
-         WHERE blank_sku = ? AND fulfiller_id = ?`,
-        [newReserved, reservation.blank_sku, fulfiller.fulfiller_id],
-      );
-    } else {
-      throw new Error(`Stock row not found for SKU: ${reservation.blank_sku} on release`);
+    const fulfillerId = reservation.fulfiller_id;
+    if (!fulfillerId) {
+      throw new Error(`Reservation ${reservationId} has no attributed fulfiller ID on release`);
     }
 
-    // Update reservation status and remove from cart lookup + active registry
+    // Flip status and remove from cart lookup + active registry
     await executeBatch([
       {
         query: `UPDATE inventory_reservations_w
@@ -553,6 +733,9 @@ export const InventoryCommandRepository = {
       },
       activeRegistryDelete(reservation.status, reservationId),
     ]);
+
+    // Decrement the counter on the reservation's OWN fulfiller row (attributed at reserve).
+    await casAdjustStock(reservation.blank_sku, fulfillerId, -reservation.quantity);
 
     logger.info({ reservationId, blankSku: reservation.blank_sku }, 'Released reservation');
     await signalInventoryChanged([reservation.blank_sku]);
@@ -627,33 +810,12 @@ export const InventoryCommandRepository = {
       return;
     }
 
-    // Decrement reserved_stock from the assigned fulfiller
     const fulfillerId = reservation.fulfiller_id;
     if (!fulfillerId) {
       throw new Error(`Reservation ${reservationId} has no assigned fulfiller ID on cancel`);
     }
 
-    const stockRows = await executeCql<StockRow>(
-      `SELECT reserved_stock FROM inventory_stock_w
-       WHERE blank_sku = ? AND fulfiller_id = ?`,
-      [reservation.blank_sku, fulfillerId],
-    );
-
-    if (stockRows.length > 0) {
-      const newReserved = Math.max(0, stockRows[0].reserved_stock - reservation.quantity);
-      await executeCql(
-        `UPDATE inventory_stock_w
-         SET reserved_stock = ?, updated_at = toTimestamp(now())
-         WHERE blank_sku = ? AND fulfiller_id = ?`,
-        [newReserved, reservation.blank_sku, fulfillerId],
-      );
-    } else {
-      throw new Error(
-        `Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on cancel`,
-      );
-    }
-
-    // Update reservation status and remove from cart lookup + active registry
+    // Status first, counter second — same fail-safe ordering rationale as release().
     await executeBatch([
       {
         query: `UPDATE inventory_reservations_w
@@ -668,6 +830,8 @@ export const InventoryCommandRepository = {
       },
       activeRegistryDelete(reservation.status, reservationId),
     ]);
+
+    await casAdjustStock(reservation.blank_sku, fulfillerId, -reservation.quantity);
 
     logger.info(
       { reservationId, blankSku: reservation.blank_sku, fulfillerId },
@@ -768,30 +932,9 @@ export const InventoryCommandRepository = {
       throw new Error(`Reservation ${reservationId} has no assigned fulfiller ID on fulfill`);
     }
 
-    // Decrement both total_stock and reserved_stock from the assigned fulfiller
-    const stockRows = await executeCql<StockRow>(
-      `SELECT total_stock, reserved_stock FROM inventory_stock_w
-       WHERE blank_sku = ? AND fulfiller_id = ?`,
-      [reservation.blank_sku, fulfillerId],
-    );
-
-    if (stockRows.length > 0) {
-      const stock = stockRows[0];
-      const newTotal = isUnlimited(stock.total_stock)
-        ? UNLIMITED_STOCK
-        : stock.total_stock - reservation.quantity;
-      await executeCql(
-        `UPDATE inventory_stock_w
-         SET total_stock = ?, reserved_stock = ?, updated_at = toTimestamp(now())
-         WHERE blank_sku = ? AND fulfiller_id = ?`,
-        [newTotal, stock.reserved_stock - reservation.quantity, reservation.blank_sku, fulfillerId],
-      );
-    } else {
-      throw new Error(
-        `Stock row not found for SKU: ${reservation.blank_sku} and fulfiller: ${fulfillerId} on fulfill`,
-      );
-    }
-
+    // Status first, counters second — same fail-safe ordering rationale as release().
+    // Decrements BOTH total_stock and reserved_stock (delivery consumes the physical unit);
+    // total is skipped automatically for UNLIMITED sentinel rows inside casAdjustStock.
     await executeBatch([
       {
         query: `UPDATE inventory_reservations_w
@@ -807,12 +950,25 @@ export const InventoryCommandRepository = {
       activeRegistryDelete(reservation.status, reservationId),
     ]);
 
+    await casAdjustStock(
+      reservation.blank_sku,
+      fulfillerId,
+      -reservation.quantity,
+      -reservation.quantity,
+    );
+
     logger.info({ reservationId, fulfillerId }, 'Fulfilled reservation');
     await signalInventoryChanged([reservation.blank_sku]);
   },
 
   /**
    * Transfer a reservation to a specific fulfiller (for fulfillment routing).
+   *
+   * Reservations are attributed to a fulfiller at reserve time, so a transfer that changes
+   * the fulfiller (or the quantity) must MOVE the reserved counter between stock rows —
+   * otherwise the old row stays inflated and the new row never covers the hold. Rows are
+   * updated before counters so the reconciler's expected view is already correct if a
+   * counter adjustment fails mid-way.
    */
   async transferToFulfiller(
     reservationId: string,
@@ -830,6 +986,8 @@ export const InventoryCommandRepository = {
       return;
     }
     const current = transferRows[0];
+    const priorFulfillerId = current.fulfiller_id;
+    const priorQuantity = current.quantity;
 
     const statements = [
       {
@@ -848,6 +1006,25 @@ export const InventoryCommandRepository = {
       });
     }
     await executeBatch(statements);
+
+    // Move the reserved counter to match the new attribution (active holds only —
+    // terminal reservations no longer occupy a counter).
+    if (current.status === 'TEMPORARY' || current.status === 'CONFIRMED') {
+      if (priorFulfillerId && priorFulfillerId !== fulfillerId) {
+        await casAdjustStock(current.blank_sku, priorFulfillerId, -priorQuantity);
+        await casAdjustStock(current.blank_sku, fulfillerId, quantity);
+      } else if (priorFulfillerId && quantity !== priorQuantity) {
+        await casAdjustStock(current.blank_sku, priorFulfillerId, quantity - priorQuantity);
+      } else if (!priorFulfillerId) {
+        // Legacy pre-attribution row: the counter lives on an unknown row; the reconciler
+        // will settle it against the new attribution at the next sweep.
+        logger.warn(
+          { reservationId, fulfillerId },
+          'Transfer of unattributed reservation — reconciler will settle counters',
+        );
+        await casAdjustStock(current.blank_sku, fulfillerId, quantity);
+      }
+    }
 
     logger.info({ reservationId, fulfillerId, quantity }, 'Transferred reservation to fulfiller');
     await signalInventoryChanged([current.blank_sku]);
@@ -869,53 +1046,44 @@ export const InventoryCommandRepository = {
   ): Promise<BatchReserveResult> {
     const ttlSeconds = 15 * 60; // 15 minutes for checkout
 
-    // Accumulate quantities per blank_sku so there is exactly one CAS per partition.
-    const byBlankSku = items.reduce((acc, item) => {
-      const entry = acc.get(item.blankSku);
-      if (entry) {
-        entry.totalQuantity += item.quantity;
-        entry.variants.push(item.variantId);
-      } else {
-        acc.set(item.blankSku, { totalQuantity: item.quantity, variants: [item.variantId] });
-      }
-      return acc;
-    }, new Map<string, { totalQuantity: number; variants: string[] }>());
+    // One reserveGroup per unique blank_sku (one CAS per partition), but every variant keeps
+    // its own reservation row — see groupItemsByBlankSku.
+    const groups = groupItemsByBlankSku(cartId, items);
 
-    // One reserve per unique blank_sku — different partitions, safe to parallelize.
     const skuResults = await Promise.all(
-      Array.from(byBlankSku.entries()).map(async ([blankSku, { totalQuantity, variants }]) => ({
+      Array.from(groups.entries()).map(async ([blankSku, entries]) => ({
         blankSku,
-        result: await this.reserve({
-          reservationId: `${cartId}-${blankSku}`,
-          cartId,
+        entries,
+        result: await this.reserveGroup(
           blankSku,
-          variantId: variants[0], // representative variant for the record
-          quantity: totalQuantity,
-          referenceId: referenceId ?? `checkout-${cartId}`,
+          cartId,
+          entries,
+          referenceId ?? `checkout-${cartId}`,
           ttlSeconds,
-        }),
+        ),
       })),
     );
 
     const failures = skuResults.filter((r) => !r.result.success);
     if (failures.length > 0) {
-      // Roll back successful reservations
+      // Roll back the groups that succeeded
       const successfulIds = skuResults
-        .filter((r) => r.result.success && r.result.reservationId)
-        .map((r) => r.result.reservationId!);
+        .filter((r) => r.result.success)
+        .flatMap((r) => r.entries.map((e) => e.reservationId));
       await Promise.all(successfulIds.map((id) => this.release(id)));
 
-      return { success: false, error: failures[0].result.error };
+      return {
+        success: false,
+        error: failures[0].result.error,
+        contention: failures.some((r) => r.result.contention),
+      };
     }
-
-    // Map each original item back to the reservation for its blank_sku
-    const skuToReservation = new Map(skuResults.map((r) => [r.blankSku, r.result.reservationId!]));
 
     return {
       success: true,
       reservations: items.map((item) => ({
         variantId: item.variantId,
-        reservationId: skuToReservation.get(item.blankSku)!,
+        reservationId: buildReservationId(cartId, item.variantId),
       })),
     };
   },
@@ -967,7 +1135,9 @@ export const InventoryCommandRepository = {
 
     // Release removed + changed
     const toRelease = [...removed, ...changed];
-    await Promise.all(toRelease.map((item) => this.release(`${cartId}-${item.variantId}`)));
+    await Promise.all(
+      toRelease.map((item) => this.release(buildReservationId(cartId, item.variantId))),
+    );
 
     // Reserve added + changed (with new quantities)
     const toReserve = [...added, ...changed];
@@ -1050,5 +1220,73 @@ export const InventoryCommandRepository = {
    */
   async getActiveReservations(): Promise<ReservationRecord[]> {
     return (await this.getActiveReservationRows()).map(rowToReservation);
+  },
+
+  /**
+   * Drift reconciler: recompute reserved_stock per (blank_sku, fulfiller_id) from the active
+   * reservation rows and CAS-correct any counter that disagrees.
+   *
+   * This is the backstop for every non-atomic pair in the write path: an LWT increment whose
+   * record batch failed (phantom hold), a status flip whose decrement failed, a transfer
+   * whose counter move half-applied. Runs in the periodic consistency sweep. Every
+   * correction is logged at warn — drift is always a bug signal, never routine.
+   *
+   * Returns the number of counters corrected.
+   */
+  async reconcileStockCounters(): Promise<number> {
+    const [activeRows, stockRows] = await Promise.all([
+      this.getActiveReservationRows(),
+      this.getAllStockRows(),
+    ]);
+
+    const unattributed = activeRows.filter((r) => !r.fulfiller_id);
+    if (unattributed.length > 0) {
+      logger.error(
+        { reservationIds: unattributed.map((r) => r.reservation_id) },
+        'Active reservations without fulfiller attribution — cannot reconcile these',
+      );
+    }
+
+    const expected = computeExpectedReserved(activeRows);
+    let corrections = 0;
+
+    for (const stock of stockRows) {
+      const key = `${stock.blank_sku}|${stock.fulfiller_id}`;
+      const expectedReserved = expected.get(key) ?? 0;
+      if (stock.reserved_stock === expectedReserved) continue;
+
+      logger.warn(
+        {
+          blankSku: stock.blank_sku,
+          fulfillerId: stock.fulfiller_id,
+          actual: stock.reserved_stock,
+          expected: expectedReserved,
+        },
+        'Stock counter drift detected — correcting',
+      );
+      // Single direct CAS to the expected value, conditioned on the value we computed the
+      // expectation against. Not-applied means the counter moved (live traffic) — in that
+      // case the expectation itself is stale, so skip and let the next sweep re-evaluate
+      // rather than retrying against a moving target.
+      const client = await getCassandraClient();
+      const result = await client.execute(
+        `UPDATE inventory_stock_w
+         SET reserved_stock = ?, updated_at = toTimestamp(now())
+         WHERE blank_sku = ? AND fulfiller_id = ?
+         IF reserved_stock = ?`,
+        [expectedReserved, stock.blank_sku, stock.fulfiller_id, stock.reserved_stock],
+        { prepare: true },
+      );
+      if (result.rows[0]['[applied]']) {
+        corrections++;
+      } else {
+        logger.warn(
+          { blankSku: stock.blank_sku, fulfillerId: stock.fulfiller_id },
+          'Drift correction skipped (counter moved under us) — next sweep re-evaluates',
+        );
+      }
+    }
+
+    return corrections;
   },
 };

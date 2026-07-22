@@ -3,7 +3,11 @@
  * Wired to real InventoryCommandRepository for Cassandra-backed inventory
  */
 
-import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
+import {
+  InventoryCommandRepository,
+  InventoryContentionError,
+} from '../inventory/db/inventory-command-repository';
+import { buildReservationId } from '../contracts/inventory';
 import { executeCql } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
 import { getElasticsearchClient } from '../../lib';
@@ -70,7 +74,7 @@ export async function reserveCartItem(
       return null;
     }
 
-    const reservationId = `${cartId}-${variantId}`;
+    const reservationId = buildReservationId(cartId, variantId);
     const result = await InventoryCommandRepository.reserve({
       reservationId,
       blankSku,
@@ -103,11 +107,16 @@ export async function reserveCartItem(
         .catch((e: unknown) => logger.warn({ err: e }, 'Failed to index reservation'));
 
       return result.reservationId!;
+    } else if (result.contention) {
+      // Transient LWT conflict — throw so Temporal's activity retry policy takes over,
+      // instead of surfacing a hard "reservation failed" to the shopper.
+      throw new InventoryContentionError(result.error ?? 'Inventory counter contention');
     } else {
       logger.warn({ blankSku, error: result.error }, 'Reservation failed');
       return null;
     }
   } catch (e) {
+    if (e instanceof InventoryContentionError) throw e;
     logger.error({ variantId, err: e }, 'Reserve failed');
     return null;
   }

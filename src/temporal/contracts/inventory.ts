@@ -1,3 +1,16 @@
+/**
+ * Deterministic reservation id — the single source of truth for the scheme.
+ *
+ * Every reservation row is keyed per (cart, variant). Sites that derive an id to look a
+ * reservation back up (fulfillment transfer/fulfill/release, cart release, reconcile) MUST use
+ * this function rather than templating the string inline: PR #17 briefly moved creation to a
+ * per-blank-sku key while lookups still derived per-variant ids, silently no-oping every
+ * fulfillment-side mutation.
+ */
+export function buildReservationId(cartId: string, variantId: string): string {
+  return `${cartId}-${variantId}`;
+}
+
 export interface InventoryItem {
   variantId: string;
   fulfillerLocations: Record<string, FulfillerLocation>; // keyed by fulfillerId

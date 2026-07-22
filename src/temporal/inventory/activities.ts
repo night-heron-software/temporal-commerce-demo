@@ -12,6 +12,7 @@ export interface InventoryActivities {
   syncInventoryToESForSkus(blankSkus: string[]): Promise<void>;
   // Full-scan (periodic consistency)
   expireReservations(): Promise<number>;
+  reconcileStockCounters(): Promise<number>;
   projectStockSummaries(): Promise<void>;
   projectReservationViews(): Promise<void>;
   projectLowStockAlerts(): Promise<void>;
@@ -23,6 +24,7 @@ export const {
   projectReservationsForSkus,
   syncInventoryToESForSkus,
   expireReservations,
+  reconcileStockCounters,
   projectStockSummaries,
   projectReservationViews,
   projectLowStockAlerts,
