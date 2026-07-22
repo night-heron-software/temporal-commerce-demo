@@ -99,17 +99,37 @@ Status: ✅ PASS
 
 | Check | Result |
 | ----- | ------ |
+| Backend projections behind the pages | ✅ ES `inventory` doc + `inventory_stock_summary` both 99/0 for the ordered SKU; cart indexed; order indexed `delivered` |
+| Root-cause of FULFILLED reservation showing (user finding) | ✅ identified — `admin-inventory-actions.ts:89-91` full-scans `inventory_reservations_w`, which retains terminal rows by design; pre-#20 FULFILL never fired so terminal FULFILLED rows are newly visible |
+| ES `reservations` index state | ✅ empty as expected (doc deleted at fulfill) |
 
 **User-performed tests**
 
 | Step | Result |
 | ---- | ------ |
+| Dashboard cards + Patterns Demonstrated card | ✅ render correctly |
+| Orders page: CRU89HK9 delivered, manual-fulfillment toggle present | ✅ |
+| Inventory page stock numbers | ✅ data correct, but see issue below |
+| Carts page lists the cart | ⚠️ see issue below |
+| Search returns the order | ✅ |
 
 **User comments & suggestions**
 
-_pending_
+> "A reservation still shows up with status FULFILLED on /admin/inventory with reservations
+> selected. The carts page has no way to search for non-active carts."
 
-Status: _pending_
+Status: ⚠️ PASS with 2 findings → Follow-ups #1, #2
+
+---
+
+### (Station 3 findings promoted to Follow-ups)
+
+1. **/admin/inventory reservations view shows terminal rows** — reads the full
+   `inventory_reservations_w` write table (terminal rows retained by design; newly visible now
+   that FULFILL works post-#20). Fix: default to the active registry
+   (`getActiveReservations()`) or add a status filter with active-only default.
+2. **/admin/carts cannot find non-active carts** — no search/filter for completed or abandoned
+   carts. Fix: status filter + lookup by cartId/email against the `carts` ES index.
 
 ---
 
