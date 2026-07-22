@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { RefreshButton } from '@/components/RefreshButton';
 import {
+  computeGanttWindow,
   deriveTransitions,
   diffSnapshots,
   type SnapshotChange,
@@ -167,35 +168,80 @@ function detectParallel(nodes: TraceNode[]): Map<string, TraceNode[]> {
 function GanttChart({ nodes }: { nodes: TraceNode[] }) {
   const now = useRenderNow();
 
-  const times = nodes
-    .flatMap((n) => [
-      n.startTime ? new Date(n.startTime).getTime() : null,
-      n.closeTime ? new Date(n.closeTime).getTime() : null,
-    ])
-    .filter((t): t is number => t !== null);
+  // Default window fits everything EXCEPT the long-running order workflow (whose now-anchored
+  // bar would squash the seconds-scale journey); full extent retained for clamping + clip marks.
+  const defaultWindow = useMemo(() => computeGanttWindow(nodes, now), [nodes, now]);
+  const [win, setWin] = useState<{ start: number; end: number } | null>(null);
 
-  if (times.length === 0) return null;
+  if (!defaultWindow) return null;
+  const winStart = win?.start ?? defaultWindow.start;
+  const winEnd = win?.end ?? defaultWindow.end;
+  const span = winEnd - winStart || 1;
 
-  const minT = Math.min(...times);
-  // Cap the right edge: running workflows use "now", but don't stretch the axis too far
-  const maxT = Math.max(...times.map((t) => t), now);
-  const span = maxT - minT || 1;
+  const pan = (dir: -1 | 1) =>
+    setWin({ start: winStart + dir * span * 0.25, end: winEnd + dir * span * 0.25 });
+  const zoom = (factor: number) => {
+    const center = (winStart + winEnd) / 2;
+    let half = (span / 2) * factor;
+    // Zoom-out clamps to the full data extent (order workflow included); zoom-in floors at 1s.
+    half = Math.min(
+      Math.max(half, 500),
+      (defaultWindow.fullEnd - defaultWindow.fullStart) / 2 + span * 0.05,
+    );
+    setWin({ start: center - half, end: center + half });
+  };
+  const ctlBtn =
+    'px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-200 text-[11px] font-mono';
 
   return (
     <div className="px-4 py-3 border-b border-gray-700 bg-gray-900/40">
-      <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-3 font-semibold">
-        Timeline · parallelism view
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[10px] text-gray-500 uppercase tracking-widest font-semibold">
+          Timeline · parallelism view
+        </div>
+        <div className="flex items-center gap-1">
+          <button className={ctlBtn} onClick={() => pan(-1)} title="Pan earlier">
+            ◀
+          </button>
+          <button className={ctlBtn} onClick={() => pan(1)} title="Pan later">
+            ▶
+          </button>
+          <button className={ctlBtn} onClick={() => zoom(0.5)} title="Zoom in">
+            +
+          </button>
+          <button
+            className={ctlBtn}
+            onClick={() => zoom(2)}
+            title="Zoom out (clamped to full extent)"
+          >
+            −
+          </button>
+          <button
+            className={ctlBtn}
+            onClick={() => setWin(null)}
+            title="Reset to the default window"
+          >
+            reset
+          </button>
+        </div>
       </div>
 
       <div className="space-y-2">
         {nodes.map((node) => {
-          const start = node.startTime ? new Date(node.startTime).getTime() : minT;
+          const start = node.startTime ? new Date(node.startTime).getTime() : winStart;
           const end = node.closeTime ? new Date(node.closeTime).getTime() : now;
-          const leftPct = ((start - minT) / span) * 100;
-          const widPct = Math.max(((end - start) / span) * 100, 0.4);
           const duration = end - start;
           const accent = DOMAIN_ACCENT[node.domain];
           const isRunning = !node.closeTime;
+
+          // Clip the bar to the window; chevrons mark spans that extend past an edge.
+          const clipLeft = start < winStart;
+          const clipRight = end > winEnd;
+          const visStart = Math.max(start, winStart);
+          const visEnd = Math.min(end, winEnd);
+          const visible = visEnd > visStart;
+          const leftPct = ((visStart - winStart) / span) * 100;
+          const widPct = visible ? Math.max(((visEnd - visStart) / span) * 100, 0.4) : 0;
 
           return (
             <div key={node.workflowId} className="flex items-center gap-2 min-w-0">
@@ -206,20 +252,32 @@ function GanttChart({ nodes }: { nodes: TraceNode[] }) {
 
               {/* Bar track */}
               <div className="flex-1 relative h-5 bg-gray-950 rounded overflow-hidden">
-                <div
-                  className={`absolute top-0 h-full rounded ${accent.bar} ${isRunning ? 'opacity-80' : 'opacity-60'}`}
-                  style={{ left: `${leftPct}%`, width: `${widPct}%` }}
-                />
+                {visible && (
+                  <div
+                    className={`absolute top-0 h-full ${clipLeft ? '' : 'rounded-l'} ${clipRight ? '' : 'rounded-r'} ${accent.bar} ${isRunning ? 'opacity-80' : 'opacity-60'}`}
+                    style={{ left: `${leftPct}%`, width: `${widPct}%` }}
+                  />
+                )}
                 {/* Running pulse stripe */}
-                {isRunning && (
+                {visible && isRunning && (
                   <div
                     className={`absolute top-0 h-full rounded ${accent.bar} animate-pulse opacity-30`}
                     style={{ left: `${leftPct}%`, width: `${widPct}%` }}
                   />
                 )}
+                {clipLeft && (
+                  <span className="absolute left-0.5 top-0 h-full flex items-center text-[9px] text-gray-500">
+                    ◂
+                  </span>
+                )}
+                {clipRight && (
+                  <span className="absolute right-0.5 top-0 h-full flex items-center text-[9px] text-gray-500">
+                    ▸
+                  </span>
+                )}
               </div>
 
-              {/* Duration */}
+              {/* Duration (true duration, independent of the window) */}
               <div className="w-16 shrink-0 text-[10px] text-gray-500 text-left font-mono">
                 {fmtDuration(duration)}
                 {isRunning ? ' ⟳' : ''}
@@ -233,8 +291,8 @@ function GanttChart({ nodes }: { nodes: TraceNode[] }) {
       <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-700 font-mono">
         <div className="w-28 shrink-0" />
         <div className="flex-1 flex justify-between">
-          <span>{fmtTime(new Date(minT).toISOString())}</span>
-          <span>{fmtTime(new Date(maxT).toISOString())}</span>
+          <span>{fmtTime(new Date(winStart).toISOString())}</span>
+          <span>{fmtTime(new Date(winEnd).toISOString())}</span>
         </div>
         <div className="w-16 shrink-0" />
       </div>
