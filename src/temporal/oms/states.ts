@@ -349,12 +349,19 @@ const assigningFulfillers = oms.state('assigning_fulfillers', {
       snapshotTimestamp: input.timestamp,
       thumbnailUrl: '',
     }));
-    return resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
+    const resolved = await resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
+    // Assignment IDs are generated here — prepare is the impure phase; `decide` stays
+    // pure (framework/authoring.ts doctrine), so it only consumes the prepared IDs.
+    return resolved.map((assignment) => ({
+      ...assignment,
+      assignmentId: `asg-${uuid4().slice(0, 8)}`,
+    }));
   },
   decide(
     ctx,
     _input,
     prepared: Array<{
+      assignmentId: string;
       fulfillerId: string;
       fulfillerName?: string;
       fulfillerType?: string;
@@ -367,7 +374,7 @@ const assigningFulfillers = oms.state('assigning_fulfillers', {
       const assignment = prepared[i];
       if (!assignment) continue; // unresolved line — falls back to the manual path
       draft.assignments.push({
-        assignmentId: `asg-${uuid4().slice(0, 8)}`,
+        assignmentId: assignment.assignmentId,
         lineItemId: item.lineItemId,
         variantId: item.variantId,
         fulfillerId: assignment.fulfillerId,
@@ -404,6 +411,7 @@ const assigningFulfillers = oms.state('assigning_fulfillers', {
 function buildFulfillment(
   draft: OrderState,
   timestamp: string,
+  fulfillerOrderIds: Record<string, string>,
 ): {
   fulfillerOrders: FulfillerOrder[];
   fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[];
@@ -417,7 +425,9 @@ function buildFulfillment(
   const fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[] = [];
 
   for (const [fulfillerId, assignments] of Object.entries(byFulfiller)) {
-    const fulfillerOrderId = `so-${uuid4().slice(0, 8)}`;
+    // IDs are pre-generated per fulfiller in the state's `prepare` (impure phase) —
+    // this function runs in `decide`, which stays pure.
+    const fulfillerOrderId = fulfillerOrderIds[fulfillerId];
 
     fulfillerOrders.push({
       fulfillerOrderId,
@@ -441,8 +451,10 @@ function buildFulfillment(
     }
 
     const items: Fulfillment.FulfillmentItem[] = assignments.map((a) => {
+      // Match by the assignment's own line item — assignments are line-scoped, and
+      // matching on variantId would price duplicate-variant lines from the first line.
       const orderItem = (draft.order.items as OrderCartItem[]).find(
-        (i) => i.variantId === a.variantId,
+        (i) => i.lineItemId === a.lineItemId,
       );
       return {
         sku: a.sku || a.variantId,
@@ -466,9 +478,28 @@ function buildFulfillment(
 }
 
 const requestingFulfillment = oms.state('requesting_fulfillment', {
-  decide(ctx, input: StateInput<OrderEvent, FulfillmentStatusUpdate>) {
+  // Fulfiller-order IDs are generated here — prepare is the impure phase; `decide`
+  // stays pure (framework/authoring.ts doctrine). One ID per fulfiller, mirroring
+  // `buildFulfillment`'s group-by-fulfiller; decide remains the source of truth for
+  // the grouping itself and simply consumes the prepared IDs.
+  async prepare(ctx) {
+    const fulfillerOrderIds: Record<string, string> = {};
+    for (const a of ctx.assignments) {
+      fulfillerOrderIds[a.fulfillerId] ??= `so-${uuid4().slice(0, 8)}`;
+    }
+    return { fulfillerOrderIds };
+  },
+  decide(
+    ctx,
+    input: StateInput<OrderEvent, FulfillmentStatusUpdate>,
+    prepared: { fulfillerOrderIds: Record<string, string> },
+  ) {
     const draft = copyOrderState(ctx);
-    const { fulfillerOrders, fulfillmentInputs } = buildFulfillment(draft, input.timestamp);
+    const { fulfillerOrders, fulfillmentInputs } = buildFulfillment(
+      draft,
+      input.timestamp,
+      prepared.fulfillerOrderIds,
+    );
     draft.fulfillerOrders = fulfillerOrders;
     draft.status = 'processing';
     return {
