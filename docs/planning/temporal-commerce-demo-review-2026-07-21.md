@@ -160,6 +160,18 @@ Item 4 (SDK metrics via `Runtime.install` telemetryOptions) is a separate, large
   defaults); unauthenticated mutating dev routes (`seed-*`, `dev/reindex`, `dev/init`,
   `admin/feature-flags`) have no NODE_ENV guard — acceptable for a demo, noted for awareness.
 
+### New findings surfaced while writing the P1 states tests (backlog candidates)
+
+- `fulfiller-states.ts` `submitting` never checks `submitFulfillerOrder`'s `result.success` —
+  a failed submission still advances to in_production, and the optional `fulfillerOrderId` is
+  assigned to the required `fulfillerExternalId`.
+- `oms/states.ts` calls `uuid4()` inside `decide` phases (assigningFulfillers, buildFulfillment)
+  — replay-safe but contrary to the decider headers' purity doctrine.
+- `buildFulfillment` prices line items by `.find()` on variantId — duplicate variantIds under
+  one fulfiller both price from the first line.
+- `routeByStatus` maps `partially_shipped` to the `shipped` state, whose non-manual timeout
+  auto-delivers everything — partial shipments silently complete on the timer.
+
 ## What's healthy
 
 Worth naming, because it's most of the repo: zero TODO/FIXME debt anywhere; all workflow awaits
