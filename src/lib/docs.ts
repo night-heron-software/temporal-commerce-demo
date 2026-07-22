@@ -116,14 +116,6 @@ export const DOC_ENTRIES: DocEntry[] = [
     category: 'Guides',
   },
   {
-    slug: 'validation-walkthrough',
-    title: 'Validation Walkthrough',
-    description:
-      'Interactive full-system validation tour — Claude-run checks, user-run steps, and questions per station; each run produces a dated session record.',
-    file: 'docs/validation-walkthrough.md',
-    category: 'Guides',
-  },
-  {
     slug: 'ai-development-guide',
     title: 'AI-First Development',
     description:
@@ -153,14 +145,6 @@ export const DOC_ENTRIES: DocEntry[] = [
     description:
       'Terms of art — fulfiller vs fulfillment, command vs fact, the reservation lifecycle, update vs signal.',
     file: 'docs/glossary.md',
-    category: 'Reference',
-  },
-  {
-    slug: 'review-2026-07-21',
-    title: 'Repo Review 2026-07-21',
-    description:
-      'Full-repo review — inventory write-path findings (incl. a reconcile-ID regression), coverage and observability gaps, and a validation runbook.',
-    file: 'docs/planning/temporal-commerce-demo-review-2026-07-21.md',
     category: 'Reference',
   },
   {
