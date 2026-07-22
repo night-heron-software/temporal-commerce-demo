@@ -148,6 +148,14 @@ export const DOC_ENTRIES: DocEntry[] = [
     category: 'Reference',
   },
   {
+    slug: 'review-2026-07-21',
+    title: 'Repo Review 2026-07-21',
+    description:
+      'Full-repo review — inventory write-path findings (incl. a reconcile-ID regression), coverage and observability gaps, and a validation runbook.',
+    file: 'docs/planning/temporal-commerce-demo-review-2026-07-21.md',
+    category: 'Reference',
+  },
+  {
     slug: 'state-machine-diagrams',
     title: 'State Machine Reference',
     description:
