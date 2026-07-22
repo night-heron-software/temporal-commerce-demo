@@ -3,8 +3,12 @@ import {
   computeTotalAvailable,
   computeExpectedReserved,
   groupItemsByBlankSku,
+  historyInsert,
   selectPreemptibleReservations,
+  PLATFORM_CART_ID,
   UNLIMITED_STOCK,
+  type HistoryEvent,
+  type HistoryOperation,
 } from './inventory-command-repository';
 import { buildReservationId } from '../../contracts/inventory';
 
@@ -162,5 +166,130 @@ describe('computeExpectedReserved', () => {
 
   it('is empty for no active reservations — reconciler then drives counters to zero', () => {
     expect(computeExpectedReserved([]).size).toBe(0);
+  });
+});
+
+describe('historyInsert', () => {
+  const AT = new Date('2026-07-21T12:00:00Z');
+
+  // Param positions in the built INSERT (columns in declaration order).
+  const P = {
+    cartId: 0,
+    at: 1,
+    seq: 2,
+    operation: 3,
+    reservationId: 4,
+    blankSku: 5,
+    variantId: 6,
+    fulfillerId: 7,
+    quantity: 8,
+    priorStatus: 9,
+    newStatus: 10,
+    referenceId: 11,
+    actor: 12,
+    details: 13,
+  } as const;
+
+  const event = (over: Partial<HistoryEvent> = {}): HistoryEvent => ({
+    cartId: 'cart-1',
+    operation: 'RESERVE',
+    reservationId: 'cart-1-v1',
+    blankSku: 'TEE',
+    variantId: 'v1',
+    fulfillerId: 'f1',
+    quantity: 2,
+    priorStatus: null,
+    newStatus: 'TEMPORARY',
+    referenceId: 'checkout-cart-1',
+    actor: 'demo.checkout.cart-1',
+    at: AT,
+    ...over,
+  });
+
+  it('targets inventory_history with all 14 columns bound in declaration order', () => {
+    const stmt = historyInsert(event());
+    expect(stmt.query).toContain('INSERT INTO inventory_history');
+    expect(stmt.params).toHaveLength(14);
+    expect(stmt.params[P.cartId]).toBe('cart-1');
+    expect(stmt.params[P.at]).toBe(AT);
+    expect(stmt.params[P.operation]).toBe('RESERVE');
+    expect(stmt.params[P.reservationId]).toBe('cart-1-v1');
+    expect(stmt.params[P.blankSku]).toBe('TEE');
+    expect(stmt.params[P.variantId]).toBe('v1');
+    expect(stmt.params[P.fulfillerId]).toBe('f1');
+    expect(stmt.params[P.quantity]).toBe(2);
+    expect(stmt.params[P.priorStatus]).toBeNull();
+    expect(stmt.params[P.newStatus]).toBe('TEMPORARY');
+    expect(stmt.params[P.referenceId]).toBe('checkout-cart-1');
+    expect(stmt.params[P.actor]).toBe('demo.checkout.cart-1');
+  });
+
+  it('builds one well-formed statement per operation type', () => {
+    const operations: HistoryOperation[] = [
+      'RESERVE',
+      'RESERVE_FAILED',
+      'RENEW',
+      'CONFIRM',
+      'RELEASE',
+      'CANCEL',
+      'FULFILL',
+      'TRANSFER',
+      'DRIFT_CORRECTION',
+    ];
+    for (const operation of operations) {
+      const stmt = historyInsert(event({ operation }));
+      expect(stmt.query).toContain('INSERT INTO inventory_history');
+      expect(stmt.params[P.operation]).toBe(operation);
+      expect(stmt.params).toHaveLength(14);
+    }
+  });
+
+  it('null-fills every omitted optional column (a DRIFT_CORRECTION-shaped minimal event)', () => {
+    const stmt = historyInsert({
+      cartId: PLATFORM_CART_ID,
+      operation: 'DRIFT_CORRECTION',
+      actor: 'reconciler',
+    });
+    expect(stmt.params[P.cartId]).toBe(PLATFORM_CART_ID);
+    for (const idx of [
+      P.reservationId,
+      P.blankSku,
+      P.variantId,
+      P.fulfillerId,
+      P.quantity,
+      P.priorStatus,
+      P.newStatus,
+      P.referenceId,
+      P.details,
+    ]) {
+      expect(stmt.params[idx]).toBeNull();
+    }
+    expect(stmt.params[P.at]).toBeInstanceOf(Date); // defaults to now
+  });
+
+  it('round-trips details through the JSON TEXT column', () => {
+    const details = {
+      counterBefore: 3,
+      counterAfter: 5,
+      error: 'Insufficient stock. Requested: 2, Available: 0',
+      contention: false,
+      forCart: 'cart-2',
+    };
+    const stmt = historyInsert(event({ details }));
+    expect(typeof stmt.params[P.details]).toBe('string');
+    expect(JSON.parse(stmt.params[P.details] as string)).toEqual(details);
+  });
+
+  it('assigns strictly increasing seq across consecutive builds (same-timestamp tiebreak)', () => {
+    const seqs = [1, 2, 3].map(() => historyInsert(event()).params[P.seq] as number);
+    expect(seqs[1]).toBe(seqs[0] + 1);
+    expect(seqs[2]).toBe(seqs[1] + 1);
+  });
+
+  it("falls back to the 'api' actor outside an activity context", () => {
+    // No Temporal activity context exists in this test process, so resolveActor()'s
+    // Context.current() path throws and the seed-route fallback applies.
+    const stmt = historyInsert(event({ actor: undefined }));
+    expect(stmt.params[P.actor]).toBe('api');
   });
 });

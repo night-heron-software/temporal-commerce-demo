@@ -23,6 +23,7 @@ import {
   DEMO_STORE_ID,
 } from '@/temporal/contracts/constants';
 import { Cart, Checkout, OMS, Fulfillment, Elasticsearch } from '@/temporal/contracts';
+import { InventoryCommandRepository } from '@/temporal/inventory/db/inventory-command-repository';
 import { defaultPayloadConverter } from '@temporalio/common';
 import { decodeHistoryEvents, type PayloadDecoder, type TraceEvent } from './history-decode';
 
@@ -90,6 +91,28 @@ export interface TraceStatusHistoryRow {
   updatedBy: string;
 }
 
+/**
+ * One inventory_history journal row for the trace, serialization-ready (ISO timestamp,
+ * `details` already JSON-parsed). The `actor` is the acting workflowId (matchable against
+ * `TraceNode.workflowId` client-side) or a system actor ('api' | 'expiry-sweep' |
+ * 'preemption' | 'reconciler').
+ */
+export interface TraceInventoryEvent {
+  at: string;
+  seq: number;
+  operation: string;
+  reservationId: string | null;
+  blankSku: string | null;
+  variantId: string | null;
+  fulfillerId: string | null;
+  quantity: number | null;
+  priorStatus: string | null;
+  newStatus: string | null;
+  referenceId: string | null;
+  actor: string;
+  details: unknown;
+}
+
 export interface OrderTrace {
   orderId: string;
   storeId: string;
@@ -98,6 +121,8 @@ export interface OrderTrace {
   cartId?: string;
   nodes: TraceNode[];
   statusHistory: TraceStatusHistoryRow[];
+  /** Correlation-keyed inventory operation journal (inventory_history) for the order's cart. */
+  inventory: { history: TraceInventoryEvent[] };
 }
 
 /** Lightweight order descriptor used when a lookup resolves to more than one order. */
@@ -414,6 +439,31 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
     if (node) nodes.push(node);
   }
 
+  // Inventory operation journal for the cart (correlation-keyed). Guarded: the trace must
+  // never 500 because the journal is unavailable (or the table predates this deploy).
+  let inventoryHistory: TraceInventoryEvent[] = [];
+  if (cartId) {
+    try {
+      inventoryHistory = (await InventoryCommandRepository.getHistoryByCart(cartId)).map((r) => ({
+        at: r.at.toISOString(),
+        seq: r.seq,
+        operation: r.operation,
+        reservationId: r.reservationId,
+        blankSku: r.blankSku,
+        variantId: r.variantId,
+        fulfillerId: r.fulfillerId,
+        quantity: r.quantity,
+        priorStatus: r.priorStatus,
+        newStatus: r.newStatus,
+        referenceId: r.referenceId,
+        actor: r.actor,
+        details: r.details,
+      }));
+    } catch {
+      inventoryHistory = [];
+    }
+  }
+
   // Primary: one visibility query returns every workflow in the journey — including the
   // checkout and per-fulfiller children that previously required state hops to discover.
   const correlationId = cartId;
@@ -437,5 +487,13 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
 
   const statusHistory = await fetchStatusHistory(orderId);
 
-  return { orderId, storeId, confirmationNumber, cartId, nodes, statusHistory };
+  return {
+    orderId,
+    storeId,
+    confirmationNumber,
+    cartId,
+    nodes,
+    statusHistory,
+    inventory: { history: inventoryHistory },
+  };
 }
