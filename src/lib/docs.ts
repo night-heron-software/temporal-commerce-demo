@@ -116,6 +116,14 @@ export const DOC_ENTRIES: DocEntry[] = [
     category: 'Guides',
   },
   {
+    slug: 'validation-walkthrough',
+    title: 'Validation Walkthrough',
+    description:
+      'Interactive full-system validation tour — Claude-run checks, user-run steps, and questions per station; each run produces a dated session record.',
+    file: 'docs/validation-walkthrough.md',
+    category: 'Guides',
+  },
+  {
     slug: 'ai-development-guide',
     title: 'AI-First Development',
     description:

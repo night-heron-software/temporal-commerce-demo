@@ -190,6 +190,9 @@ LWT self-contention — finding 1 is its only loose end.
 
 ## Validation runbook
 
+> **Superseded:** this runbook has been folded into the interactive
+> [validation walkthrough](../validation-walkthrough.md), which is the maintained workflow.
+
 ### Container-free (CI-equivalent)
 
 ```bash
