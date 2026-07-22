@@ -139,17 +139,23 @@ Status: ⚠️ PASS with 2 findings → Follow-ups #1, #2
 
 | Check | Result |
 | ----- | ------ |
+| Force test error (`POST /api/dev/reindex {"index":"nope"}`) | ✅ 400 with correlationId; flowed to `system_errors` |
 
 **User-performed tests**
 
 | Step | Result |
 | ---- | ------ |
+| Order Trace CRU89HK9 — three tabs render | ✅ |
+| Inventory History section: 5 journal rows, actor badges matching workflow-node domain colors, Temporal UI links | ✅ "Yes, fully correlated" |
+| /dev/system-errors shows the forced error | ✅ |
+| /dev/logs filters + taskQueue tags | ✅ |
+| /docs lists + renders Validation Walkthrough | ✅ |
 
 **User comments & suggestions**
 
-_pending_
+None.
 
-Status: _pending_
+Status: ✅ PASS
 
 ---
 
