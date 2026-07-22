@@ -152,8 +152,14 @@ listener unset and Prometheus scraping the wrong port):
   p95, task schedule→start latency by task queue, persistence latency p95, and poll success
   (worker liveness).
 
-**Remaining gap — no application metrics.** Only the Temporal server is a scrape target. Worker
-SDK metrics (task-queue latency, activity failures — via `Runtime.install` `telemetryOptions`)
+**Worker SDK metrics (added 2026-07-22).** `Runtime.install` sets
+`telemetryOptions.metrics.prometheus` (bind `0.0.0.0:9466`), exposing per-queue task-slot,
+poller, schedule→start latency, and activity failure metrics from the host-side worker process.
+Prometheus scrapes it as the `temporal-worker` job via `host.docker.internal:9466` (the
+prometheus service carries an `extra_hosts: host-gateway` entry for Linux portability), and the
+Temporal Server dashboard gains a Workers row.
+
+**Remaining gap — Next.js metrics.** The storefront process
 and Next.js metrics are neither exported nor scraped. That is a separate, larger choice.
 
 ---

@@ -35,6 +35,10 @@ services:
   prometheus:
     image: prom/prometheus:v3.4.1
     container_name: demo-prometheus
+    # Lets the in-container Prometheus scrape the host-side worker metrics endpoint
+    # (host.docker.internal resolves natively on Docker Desktop; host-gateway covers Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "9090:9090"
     volumes:

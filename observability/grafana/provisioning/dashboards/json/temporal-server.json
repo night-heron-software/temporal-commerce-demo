@@ -1,88 +1,213 @@
 {
   "title": "Temporal Server",
   "uid": "temporal-server",
-  "tags": ["temporal", "demo"],
+  "tags": [
+    "temporal",
+    "demo"
+  ],
   "timezone": "browser",
   "refresh": "10s",
-  "time": { "from": "now-30m", "to": "now" },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
   "panels": [
     {
       "id": 1,
       "type": "timeseries",
       "title": "gRPC request rate by operation (top 10)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "expr": "topk(10, sum by (operation) (rate(service_requests[1m])))",
           "legendFormat": "{{operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Service errors by operation",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "expr": "sum by (operation) (rate(service_errors[1m]))",
           "legendFormat": "{{operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 3,
       "type": "timeseries",
       "title": "Service latency p95 by service",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(service_latency_bucket[5m])))",
           "legendFormat": "{{service_name}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "Task schedule→start latency p95 by task queue",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "title": "Task schedule\u2192start latency p95 by task queue",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by (taskqueue, le) (rate(task_schedule_to_start_latency_bucket[5m])))",
           "legendFormat": "{{taskqueue}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 5,
       "type": "timeseries",
       "title": "Persistence latency p95 by operation (top 10)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
       "targets": [
         {
           "expr": "topk(10, histogram_quantile(0.95, sum by (operation, le) (rate(persistence_latency_bucket[5m]))))",
           "legendFormat": "{{operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     },
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Poll success (sync vs async) — worker liveness",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "title": "Poll success (sync vs async) \u2014 worker liveness",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
       "targets": [
-        { "expr": "sum(rate(poll_success[1m]))", "legendFormat": "poll_success" },
-        { "expr": "sum(rate(poll_success_sync[1m]))", "legendFormat": "poll_success_sync" }
+        {
+          "expr": "sum(rate(poll_success[1m]))",
+          "legendFormat": "poll_success"
+        },
+        {
+          "expr": "sum(rate(poll_success_sync[1m]))",
+          "legendFormat": "poll_success_sync"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Worker task slots used by task queue (SDK)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "sum by (task_queue, worker_type) (temporal_worker_task_slots_used)",
+          "legendFormat": "{{task_queue}} {{worker_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Workflow task schedule\u2192start p95 (SDK, per queue)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (task_queue, le) (rate(temporal_workflow_task_schedule_to_start_latency_bucket[5m])))",
+          "legendFormat": "{{task_queue}}"
+        },
+        {
+          "expr": "sum by (task_queue) (rate(temporal_activity_execution_failed[5m]))",
+          "legendFormat": "activity failures {{task_queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
     }
   ],
   "schemaVersion": 39,
-  "version": 1
+  "version": 2
 }
