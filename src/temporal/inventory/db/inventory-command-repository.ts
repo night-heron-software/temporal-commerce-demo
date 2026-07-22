@@ -7,6 +7,7 @@ import { buildReservationId } from '../../contracts/inventory';
  * Lightweight Transactions (LWT) for atomicity on critical operations.
  */
 
+import { Context } from '@temporalio/activity';
 import { executeCql, executeBatch, getCassandraClient } from '../../../lib';
 import { logger } from '../../../lib';
 import { signalInventoryChanged } from '../inventory-signal';
@@ -299,6 +300,183 @@ function readActiveStatusPartition(status: 'TEMPORARY' | 'CONFIRMED'): Promise<R
   );
 }
 
+// ============================================================
+// Inventory history journal (inventory_history)
+// ============================================================
+// Append-only, correlation-keyed (cart_id = correlationId, ADR-0011) record of every
+// inventory mutation — the order-trace tool reads it to show inventory operations
+// alongside the workflows that performed them. History statements ride inside each
+// operation's existing batch where one exists (atomic with the mutation); everything
+// else (failed reserves, drift corrections) is written best-effort.
+
+/** Partition key used for operations that have no owning cart (drift corrections). */
+export const PLATFORM_CART_ID = '__platform__';
+
+export type HistoryOperation =
+  | 'RESERVE'
+  | 'RESERVE_FAILED'
+  | 'RENEW'
+  | 'CONFIRM'
+  | 'RELEASE'
+  | 'CANCEL'
+  | 'FULFILL'
+  | 'TRANSFER'
+  | 'DRIFT_CORRECTION';
+
+/** One inventory-history event to journal. `actor`/`at` default at statement-build time. */
+export interface HistoryEvent {
+  cartId: string;
+  operation: HistoryOperation;
+  reservationId?: string;
+  blankSku?: string;
+  variantId?: string;
+  fulfillerId?: string | null;
+  quantity?: number;
+  priorStatus?: string | null;
+  newStatus?: string | null;
+  referenceId?: string;
+  /** Acting workflowId or system actor; defaults to resolveActor(). */
+  actor?: string;
+  /** Structured extras (error, contention, counter before/after, forCart, …) — stored as JSON. */
+  details?: Record<string, unknown>;
+  at?: Date;
+}
+
+/** An inventory_history row read back, camelCased with `details` JSON-parsed. */
+export interface InventoryHistoryRecord {
+  cartId: string;
+  at: Date;
+  seq: number;
+  operation: string;
+  reservationId: string | null;
+  blankSku: string | null;
+  variantId: string | null;
+  fulfillerId: string | null;
+  quantity: number | null;
+  priorStatus: string | null;
+  newStatus: string | null;
+  referenceId: string | null;
+  actor: string;
+  details: unknown;
+}
+
+interface InventoryHistoryRow {
+  cart_id: string;
+  at: Date;
+  seq: number;
+  operation: string;
+  reservation_id: string | null;
+  blank_sku: string | null;
+  variant_id: string | null;
+  fulfiller_id: string | null;
+  quantity: number | null;
+  prior_status: string | null;
+  new_status: string | null;
+  reference_id: string | null;
+  actor: string;
+  details: string | null;
+}
+
+/**
+ * Per-process monotonic tiebreak within a timestamp. Reset per process; (at, seq)
+ * collisions across processes are tolerable — the journal is append-only and distinct
+ * workers rarely share a millisecond within one cart partition.
+ */
+let historySeq = 0;
+
+/**
+ * Who performed the mutation: the acting workflowId when we are inside a Temporal
+ * activity, else 'api'.
+ *
+ * This deliberately deviates from the transition recorder's pattern of passing
+ * `workflowInfo()` down as data: threading an actor parameter through every repository
+ * call would churn the signatures used by all four activities-impl files, whereas
+ * `Context.current()` (AsyncLocalStorage under the hood) already knows the scheduling
+ * workflow — and the only non-activity caller (the seed-inventory route) correctly falls
+ * back to 'api' via the catch.
+ */
+function resolveActor(): string {
+  try {
+    return Context.current().info.workflowExecution?.workflowId ?? 'api';
+  } catch {
+    return 'api'; // not inside an activity (e.g. the seed-inventory route)
+  }
+}
+
+/**
+ * Build one inventory_history INSERT. Consumes the module seq counter; actor and
+ * timestamp default here so call sites stay declarative. Exported for the pure
+ * statement-shape tests.
+ */
+export function historyInsert(event: HistoryEvent): { query: string; params: unknown[] } {
+  return {
+    query: `INSERT INTO inventory_history (
+      cart_id, at, seq, operation, reservation_id, blank_sku, variant_id,
+      fulfiller_id, quantity, prior_status, new_status, reference_id, actor, details
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    params: [
+      event.cartId,
+      event.at ?? new Date(),
+      historySeq++,
+      event.operation,
+      event.reservationId ?? null,
+      event.blankSku ?? null,
+      event.variantId ?? null,
+      event.fulfillerId ?? null,
+      event.quantity ?? null,
+      event.priorStatus ?? null,
+      event.newStatus ?? null,
+      event.referenceId ?? null,
+      event.actor ?? resolveActor(),
+      event.details ? JSON.stringify(event.details) : null,
+    ] as unknown[],
+  };
+}
+
+/**
+ * Standalone best-effort journal write for events with no batch to ride in (failed
+ * reserves, drift corrections). Logs and swallows failures — history must never break
+ * the mutation path it observes.
+ */
+async function recordHistoryBestEffort(event: HistoryEvent): Promise<void> {
+  try {
+    const stmt = historyInsert(event);
+    await executeCql(stmt.query, stmt.params);
+  } catch (err) {
+    logger.error(
+      { err, operation: event.operation, cartId: event.cartId },
+      'Inventory history write failed (best-effort — mutation unaffected)',
+    );
+  }
+}
+
+function rowToHistoryRecord(row: InventoryHistoryRow): InventoryHistoryRecord {
+  let details: unknown = null;
+  if (row.details != null) {
+    try {
+      details = JSON.parse(row.details);
+    } catch {
+      details = row.details; // keep the raw string if it was never valid JSON
+    }
+  }
+  return {
+    cartId: row.cart_id,
+    at: row.at,
+    seq: row.seq,
+    operation: row.operation,
+    reservationId: row.reservation_id,
+    blankSku: row.blank_sku,
+    variantId: row.variant_id,
+    fulfillerId: row.fulfiller_id,
+    quantity: row.quantity,
+    priorStatus: row.prior_status,
+    newStatus: row.new_status,
+    referenceId: row.reference_id,
+    actor: row.actor,
+    details,
+  };
+}
+
 function rowToReservation(row: ReservationRow): ReservationRecord {
   return {
     reservationId: row.reservation_id,
@@ -531,7 +709,7 @@ export const InventoryCommandRepository = {
             { preemptedReservation: r.reservation_id, blankSku, forCart: cartId },
             'Preempting expired TEMPORARY reservation',
           );
-          await this.release(r.reservation_id);
+          await this.release(r.reservation_id, 'preemption', { forCart: cartId });
         }
 
         // Re-read stock after preemption
@@ -561,10 +739,17 @@ export const InventoryCommandRepository = {
     }, null);
 
     if (!fulfiller) {
-      return {
-        success: false,
-        error: `Insufficient stock. Requested: ${quantity}, Available: ${totalAvailable}`,
-      };
+      const error = `Insufficient stock. Requested: ${quantity}, Available: ${totalAvailable}`;
+      // Failed reserves are exactly what you want visible when debugging an order.
+      await recordHistoryBestEffort({
+        cartId,
+        operation: 'RESERVE_FAILED',
+        blankSku,
+        quantity,
+        referenceId,
+        details: { error, contention: false },
+      });
+      return { success: false, error };
     }
 
     // LWT: atomically increment reserved_stock only if unchanged since our read
@@ -585,7 +770,17 @@ export const InventoryCommandRepository = {
         { blankSku, fulfillerId: fulfiller.fulfiller_id },
         'LWT not applied for reserve, concurrent modification detected',
       );
-      return { success: false, contention: true, error: 'Concurrent modification, retry needed' };
+      const error = 'Concurrent modification, retry needed';
+      await recordHistoryBestEffort({
+        cartId,
+        operation: 'RESERVE_FAILED',
+        blankSku,
+        fulfillerId: fulfiller.fulfiller_id,
+        quantity,
+        referenceId,
+        details: { error, contention: true },
+      });
+      return { success: false, contention: true, error };
     }
 
     const now = new Date();
@@ -630,6 +825,20 @@ export const InventoryCommandRepository = {
         expires_at: expiresAt,
         created_at: now,
         updated_at: now,
+      }),
+      // History rides in the record batch — atomic with the reservation rows.
+      historyInsert({
+        cartId,
+        operation: 'RESERVE',
+        reservationId: entry.reservationId,
+        blankSku,
+        variantId: entry.variantId,
+        fulfillerId: fulfiller.fulfiller_id,
+        quantity: entry.quantity,
+        newStatus: 'TEMPORARY',
+        referenceId,
+        details: { counterBefore: fulfiller.reserved_stock, counterAfter: newReserved },
+        at: now,
       }),
     ]);
 
@@ -690,8 +899,17 @@ export const InventoryCommandRepository = {
    * already gone from the active registry, so the drift reconciler lowers the counter at
    * the next sweep. The reverse order risks decrementing twice, which is the oversell
    * direction — this order fails safe.
+   *
+   * `reason` labels system-initiated releases in the history journal ('expiry-sweep' from
+   * the expiry activity, 'preemption' from reserveGroup's inline sweep — with
+   * `extraDetails.forCart` naming the requesting cart); omitted, the history actor is the
+   * calling workflow (or 'api').
    */
-  async release(reservationId: string): Promise<void> {
+  async release(
+    reservationId: string,
+    reason?: string,
+    extraDetails?: Record<string, unknown>,
+  ): Promise<void> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
       [reservationId],
@@ -732,6 +950,22 @@ export const InventoryCommandRepository = {
         params: [reservation.cart_id, reservationId],
       },
       activeRegistryDelete(reservation.status, reservationId),
+      historyInsert({
+        cartId: reservation.cart_id,
+        operation: 'RELEASE',
+        reservationId,
+        blankSku: reservation.blank_sku,
+        variantId: reservation.variant_id,
+        fulfillerId,
+        quantity: reservation.quantity,
+        priorStatus: reservation.status,
+        newStatus: 'RELEASED',
+        referenceId: reservation.reference_id,
+        // System-initiated releases carry their sweep/preemption label as the actor.
+        actor: reason,
+        details:
+          reason || extraDetails ? { ...(reason ? { reason } : {}), ...extraDetails } : undefined,
+      }),
     ]);
 
     // Decrement the counter on the reservation's OWN fulfiller row (attributed at reserve).
@@ -779,6 +1013,19 @@ export const InventoryCommandRepository = {
                 WHERE status = ? AND reservation_id = ?`,
         params: [newExpiresAt, reservation.status, reservationId],
       },
+      historyInsert({
+        cartId: reservation.cart_id,
+        operation: 'RENEW',
+        reservationId,
+        blankSku: reservation.blank_sku,
+        variantId: reservation.variant_id,
+        fulfillerId: reservation.fulfiller_id,
+        quantity: reservation.quantity,
+        priorStatus: reservation.status,
+        newStatus: reservation.status,
+        referenceId: reservation.reference_id,
+        details: { newExpiresAt: newExpiresAt.toISOString(), ttlSeconds: newTtlSeconds },
+      }),
     ]);
 
     logger.info({ reservationId, newTtlSeconds }, 'Renewed reservation');
@@ -829,6 +1076,18 @@ export const InventoryCommandRepository = {
         params: [reservation.cart_id, reservationId],
       },
       activeRegistryDelete(reservation.status, reservationId),
+      historyInsert({
+        cartId: reservation.cart_id,
+        operation: 'CANCEL',
+        reservationId,
+        blankSku: reservation.blank_sku,
+        variantId: reservation.variant_id,
+        fulfillerId,
+        quantity: reservation.quantity,
+        priorStatus: reservation.status,
+        newStatus: 'CANCELLED',
+        referenceId: reservation.reference_id,
+      }),
     ]);
 
     await casAdjustStock(reservation.blank_sku, fulfillerId, -reservation.quantity);
@@ -897,6 +1156,18 @@ export const InventoryCommandRepository = {
         created_at: rows[0].created_at,
         updated_at: new Date(),
       }),
+      historyInsert({
+        cartId: rows[0].cart_id,
+        operation: 'CONFIRM',
+        reservationId,
+        blankSku: rows[0].blank_sku,
+        variantId: rows[0].variant_id,
+        fulfillerId: rows[0].fulfiller_id,
+        quantity: rows[0].quantity,
+        priorStatus: rows[0].status,
+        newStatus: 'CONFIRMED',
+        referenceId: rows[0].reference_id,
+      }),
     ]);
 
     logger.info({ reservationId }, 'Confirmed reservation');
@@ -948,6 +1219,18 @@ export const InventoryCommandRepository = {
         params: [reservation.cart_id, reservationId],
       },
       activeRegistryDelete(reservation.status, reservationId),
+      historyInsert({
+        cartId: reservation.cart_id,
+        operation: 'FULFILL',
+        reservationId,
+        blankSku: reservation.blank_sku,
+        variantId: reservation.variant_id,
+        fulfillerId,
+        quantity: reservation.quantity,
+        priorStatus: reservation.status,
+        newStatus: 'FULFILLED',
+        referenceId: reservation.reference_id,
+      }),
     ]);
 
     await casAdjustStock(
@@ -1005,6 +1288,26 @@ export const InventoryCommandRepository = {
         params: [fulfillerId, quantity, current.status, reservationId],
       });
     }
+    statements.push(
+      historyInsert({
+        cartId: current.cart_id,
+        operation: 'TRANSFER',
+        reservationId,
+        blankSku: current.blank_sku,
+        variantId: current.variant_id,
+        fulfillerId,
+        quantity,
+        priorStatus: current.status,
+        newStatus: current.status,
+        referenceId: current.reference_id,
+        details: {
+          fromFulfillerId: priorFulfillerId,
+          toFulfillerId: fulfillerId,
+          fromQuantity: priorQuantity,
+          toQuantity: quantity,
+        },
+      }),
+    );
     await executeBatch(statements);
 
     // Move the reserved counter to match the new attribution (active holds only —
@@ -1162,6 +1465,18 @@ export const InventoryCommandRepository = {
   },
 
   /**
+   * Read a cart's full inventory history — single-partition read, already clustered
+   * chronologically by (at, seq). Powers the order-trace Inventory section.
+   */
+  async getHistoryByCart(cartId: string): Promise<InventoryHistoryRecord[]> {
+    const rows = await executeCql<InventoryHistoryRow>(
+      `SELECT * FROM inventory_history WHERE cart_id = ?`,
+      [cartId],
+    );
+    return rows.map(rowToHistoryRecord);
+  },
+
+  /**
    * Get all reservations for a cart.
    */
   async getReservationsByCart(cartId: string): Promise<ReservationRecord[]> {
@@ -1279,6 +1594,15 @@ export const InventoryCommandRepository = {
       );
       if (result.rows[0]['[applied]']) {
         corrections++;
+        // Journal under the platform partition — a correction has no owning cart.
+        await recordHistoryBestEffort({
+          cartId: PLATFORM_CART_ID,
+          operation: 'DRIFT_CORRECTION',
+          blankSku: stock.blank_sku,
+          fulfillerId: stock.fulfiller_id,
+          actor: 'reconciler',
+          details: { actual: stock.reserved_stock, expected: expectedReserved },
+        });
       } else {
         logger.warn(
           { blankSku: stock.blank_sku, fulfillerId: stock.fulfiller_id },

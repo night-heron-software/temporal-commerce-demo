@@ -15,6 +15,7 @@ import type {
   TraceNode,
   TraceTransition,
   TraceActivityCall,
+  TraceInventoryEvent,
   OrderCandidate,
   TraceDomain,
   TraceStatusHistoryRow,
@@ -71,6 +72,13 @@ const DOMAIN_ACCENT: Record<TraceDomain, { border: string; badge: string; bar: s
 const STATUS_AUDIT_ACCENT = {
   border: 'border-emerald-700',
   badge: 'bg-emerald-900 text-emerald-200 border-emerald-700',
+};
+
+// Inventory is not a TraceDomain (its journal is correlation-keyed, not a workflow node),
+// so it gets its own accent rather than widening DOMAIN_ACCENT.
+const INVENTORY_ACCENT = {
+  border: 'border-teal-700',
+  badge: 'bg-teal-900 text-teal-200 border-teal-700',
 };
 
 type TraceTab = 'event-history' | 'state-machines' | 'status-history';
@@ -863,6 +871,150 @@ function TransitionsTimeline({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Inventory history section (correlation-keyed operation journal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Badge style for one journal operation: red-tinted failures, zinc system releases, teal rest. */
+function operationBadge(ev: TraceInventoryEvent): string {
+  if (ev.operation === 'RESERVE_FAILED') return 'bg-red-950 text-red-300 border-red-800';
+  if (ev.operation === 'RELEASE' && (ev.actor === 'expiry-sweep' || ev.actor === 'preemption'))
+    return 'bg-zinc-800 text-zinc-300 border-zinc-600';
+  return INVENTORY_ACCENT.badge;
+}
+
+/**
+ * The actor column — the workflow/state correlation. An actor that matches a trace node's
+ * workflowId renders as that node's domain badge linking to the Temporal UI; system actors
+ * ('api' | 'expiry-sweep' | 'preemption' | 'reconciler') render as neutral badges.
+ */
+function ActorBadge({ actor, nodes }: { actor: string; nodes: TraceNode[] }) {
+  const node = nodes.find((n) => n.workflowId === actor);
+  if (node) {
+    return (
+      <a
+        href={node.temporalUiUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={actor}
+        className={`inline-block px-2 py-0.5 rounded-full border text-xs hover:opacity-80 ${DOMAIN_ACCENT[node.domain].badge}`}
+      >
+        {DOMAIN_LABELS[node.domain]}
+      </a>
+    );
+  }
+  return (
+    <span className="inline-block px-2 py-0.5 rounded-full border text-xs bg-gray-700 text-gray-300 border-gray-600">
+      {actor}
+    </span>
+  );
+}
+
+/**
+ * The inventory_history journal for the order's cart: every mutation (reserves, failed
+ * reserves, renews, confirms, releases, cancels, fulfills, transfers) in one chronological
+ * table, with each row's actor correlated back to the trace's workflow nodes.
+ */
+function InventorySection({
+  history,
+  nodes,
+  forceOpen,
+}: {
+  history: TraceInventoryEvent[];
+  nodes: TraceNode[];
+  forceOpen: boolean;
+}) {
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = forceOpen || localOpen;
+
+  return (
+    <div className={`border-b border-gray-700 border-l-2 ${INVENTORY_ACCENT.border}`}>
+      <button
+        onClick={() => setLocalOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-800/50 text-left select-none"
+      >
+        <span className="text-gray-400 text-xs w-4 shrink-0">{open ? '▾' : '▸'}</span>
+        <span
+          className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${INVENTORY_ACCENT.badge}`}
+        >
+          Inventory
+        </span>
+        <span className="text-xs text-gray-500 ml-2">operation journal for this cart</span>
+        <span className="ml-auto text-[10px] text-gray-600 shrink-0">
+          {history.length} operations
+        </span>
+      </button>
+
+      {open &&
+        (history.length === 0 ? (
+          <div className="px-4 py-2 text-xs text-gray-600 italic">
+            No inventory history for this order&apos;s cart (predates the journal).
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="text-gray-600 uppercase text-[10px] tracking-wide font-sans border-b border-gray-800">
+                  <th className="px-3 py-1.5 text-left whitespace-nowrap">Time</th>
+                  <th className="px-3 py-1.5 text-left">Operation</th>
+                  <th className="px-3 py-1.5 text-left">Item</th>
+                  <th className="px-3 py-1.5 text-left whitespace-nowrap">Status</th>
+                  <th className="px-3 py-1.5 text-left">Actor</th>
+                  <th className="px-3 py-1.5 text-left">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((ev, i) => (
+                  <tr
+                    key={`${ev.at}-${ev.seq}-${i}`}
+                    className="border-t border-gray-800/60 hover:bg-gray-800/30"
+                  >
+                    <td className="px-3 py-1 text-gray-500 whitespace-nowrap">{fmtTime(ev.at)}</td>
+                    <td className="px-3 py-1">
+                      <span
+                        className={`inline-block px-1.5 py-0.5 rounded-full border text-[10px] ${operationBadge(ev)}`}
+                      >
+                        {ev.operation}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1 text-gray-400 whitespace-nowrap">
+                      {ev.blankSku ?? '—'}
+                      {ev.variantId && <span className="text-gray-600"> · {ev.variantId}</span>}
+                      {ev.quantity != null && (
+                        <span className="text-gray-300"> ×{ev.quantity}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1 text-gray-400 whitespace-nowrap">
+                      {ev.priorStatus || ev.newStatus ? (
+                        <>
+                          <span className="text-gray-500">{ev.priorStatus ?? '∅'}</span>
+                          {' → '}
+                          <span className="text-gray-200">{ev.newStatus ?? '∅'}</span>
+                        </>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="px-3 py-1">
+                      <ActorBadge actor={ev.actor} nodes={nodes} />
+                    </td>
+                    <td className="px-3 py-1 text-gray-400 max-w-[280px]">
+                      {ev.details != null ? (
+                        <ExpandableCell text={JSON.stringify(ev.details)} />
+                      ) : (
+                        <span className="text-gray-700">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function StateMachinesTab({ trace }: { trace: OrderTrace }) {
   const [expandAll, setExpandAll] = useState(false);
   const [full, setFull] = useState(false);
@@ -872,6 +1024,13 @@ function StateMachinesTab({ trace }: { trace: OrderTrace }) {
     <div>
       {/* Gantt */}
       <GanttChart nodes={trace.nodes} />
+
+      {/* Inventory operation journal — correlated with the workflow nodes via actor badges */}
+      <InventorySection
+        history={trace.inventory?.history ?? []}
+        nodes={trace.nodes}
+        forceOpen={expandAll}
+      />
 
       {/* Table toolbar — controls apply to every state machine's transitions at once */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-700 bg-gray-800/30">

@@ -905,6 +905,18 @@ created by the first error logged, so an empty view on a healthy system is expec
 refuses to touch it — a delete-and-recreate would destroy the only copy. Use the viewer's
 **Clear all** button to empty it instead.
 
+#### Inventory history
+
+Every inventory mutation — reserve, failed reserve, renew, confirm, release, cancel, fulfill,
+transfer, drift correction — is journaled at mutation time to the append-only
+`inventory_history` Cassandra table, keyed by cartId (= the correlationId, ADR-0011;
+`__platform__` for cart-less drift corrections) with the same 90-day TTL as
+`workflow_state_transitions`. Unlike the read tables it is not rebuildable: expiry sweeps,
+preemptions, failed reserves and drift corrections leave no other operation-level record. The
+journal is surfaced in the order-trace tool at
+[`/dev/order-trace`](http://localhost:3000/dev/order-trace) (State Machines tab → Inventory
+section), where each row's actor badge links back to the workflow that performed the operation.
+
 ### Docker Container Logs
 
 ```bash

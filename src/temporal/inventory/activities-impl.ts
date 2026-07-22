@@ -28,7 +28,9 @@ export async function expireReservations(): Promise<number> {
   const expired = await InventoryCommandRepository.getExpiredReservations();
   if (expired.length === 0) return 0;
 
-  await Promise.all(expired.map((r) => InventoryCommandRepository.release(r.reservationId)));
+  await Promise.all(
+    expired.map((r) => InventoryCommandRepository.release(r.reservationId, 'expiry-sweep')),
+  );
 
   logger.info({ count: expired.length }, 'Expired reservations released');
   return expired.length;
