@@ -41,3 +41,6 @@ jobs:
       # State diagrams are generated from source (static AST analysis); fail if a
       # states/decider change landed without regenerating them.
       - run: npm run docs:diagrams:check
+
+      # Production build — catches Next.js build/RSC errors that tsc alone does not.
+      - run: npm run build

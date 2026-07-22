@@ -131,7 +131,11 @@ findings are covered.
 
 ## P2 — Observability completion
 
-All four Known gaps in `docs/observability-guide.md:138-166` remain open:
+> **Update 2026-07-22:** items 1–3 fixed on `fix/observability-metrics` (PROMETHEUS_ENDPOINT,
+> scrape target, provisioned Temporal Server dashboard) and live-verified — target UP, dashboard
+> rendering real data. Item 4 (application metrics) remains the deliberate leftover.
+
+All four Known gaps in `docs/observability-guide.md` were open at review time:
 
 1. `PROMETHEUS_ENDPOINT` is unset on the `temporal` service (`docker-compose.yml:95-128`
    publishes 9464 but the server never opens the listener).
@@ -159,6 +163,18 @@ Item 4 (SDK metrics via `Runtime.install` telemetryOptions) is a separate, large
 - Minor: `.env.local` vs `.env.example` drift (`OTEL_ENABLED` default, two keys with code-side
   defaults); unauthenticated mutating dev routes (`seed-*`, `dev/reindex`, `dev/init`,
   `admin/feature-flags`) have no NODE_ENV guard — acceptable for a demo, noted for awareness.
+
+### New findings surfaced while writing the P1 states tests (backlog candidates)
+
+- `fulfiller-states.ts` `submitting` never checks `submitFulfillerOrder`'s `result.success` —
+  a failed submission still advances to in_production, and the optional `fulfillerOrderId` is
+  assigned to the required `fulfillerExternalId`.
+- `oms/states.ts` calls `uuid4()` inside `decide` phases (assigningFulfillers, buildFulfillment)
+  — replay-safe but contrary to the decider headers' purity doctrine.
+- `buildFulfillment` prices line items by `.find()` on variantId — duplicate variantIds under
+  one fulfiller both price from the first line.
+- `routeByStatus` maps `partially_shipped` to the `shipped` state, whose non-manual timeout
+  auto-delivers everything — partial shipments silently complete on the timer.
 
 ## What's healthy
 
