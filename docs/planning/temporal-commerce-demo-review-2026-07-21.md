@@ -131,7 +131,11 @@ findings are covered.
 
 ## P2 — Observability completion
 
-All four Known gaps in `docs/observability-guide.md:138-166` remain open:
+> **Update 2026-07-22:** items 1–3 fixed on `fix/observability-metrics` (PROMETHEUS_ENDPOINT,
+> scrape target, provisioned Temporal Server dashboard) and live-verified — target UP, dashboard
+> rendering real data. Item 4 (application metrics) remains the deliberate leftover.
+
+All four Known gaps in `docs/observability-guide.md` were open at review time:
 
 1. `PROMETHEUS_ENDPOINT` is unset on the `temporal` service (`docker-compose.yml:95-128`
    publishes 9464 but the server never opens the listener).

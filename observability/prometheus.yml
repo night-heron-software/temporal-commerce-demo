@@ -5,5 +5,7 @@ global:
 scrape_configs:
   - job_name: 'temporal-server'
     static_configs:
-      - targets: ['temporal:9090']
+      # 9464 is the server's PROMETHEUS_ENDPOINT listener (9090 is Prometheus's own port —
+      # scraping it here was the original misconfiguration).
+      - targets: ['temporal:9464']
     metrics_path: /metrics

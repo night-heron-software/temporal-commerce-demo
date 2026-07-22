@@ -4,9 +4,9 @@ Everything in this guide is gated behind a single flag: `OTEL_ENABLED=true` in `
 it off (the default), the tracing code paths are complete no-ops — no SDK is loaded, no exporter
 connections are attempted, and the observability containers never start.
 
-> **Status note.** The tracing half of this stack (Jaeger) is wired end to end. The metrics half
-> (Prometheus → Grafana) is **not currently functional** — see
-> [Known gaps](#known-gaps) before you rely on it.
+> **Status note.** Both halves of this stack are wired end to end: traces (Jaeger) and server
+> metrics (Prometheus → Grafana). The remaining gap is application/worker metrics — see
+> [Metrics](#metrics).
 
 ---
 
@@ -135,47 +135,37 @@ topology that traces currently do not.
 
 ---
 
-## Known gaps
+## Metrics
 
-These are real defects in the current configuration, not caveats about how to use it. The tracing
-path works; the metrics path does not.
+The server metrics path works end to end (fixed 2026-07-22; it originally shipped with the
+listener unset and Prometheus scraping the wrong port):
 
-**1. The Temporal server emits no Prometheus metrics.**
-[docker-compose.yml:105](../docker-compose.yml#L105) publishes port `9464` and comments it as the
-"Prometheus metrics endpoint", but the `temporalio/server` image only starts that listener when
-`PROMETHEUS_ENDPOINT` is set — and it is set nowhere in the repo. Verified against the running
-container: nothing is listening on `9464`.
+- The `temporal` service sets `PROMETHEUS_ENDPOINT=0.0.0.0:9464`
+  ([docker-compose.yml](../docker-compose.yml)) — without it the server never opens the metrics
+  listener and the 9464 port publish is inert.
+- Prometheus scrapes `temporal:9464` ([observability/prometheus.yml](../observability/prometheus.yml));
+  the `temporal-server` job shows **UP** at http://localhost:9090/targets.
+- Grafana auto-provisions the **Temporal Server** dashboard
+  ([observability/grafana/provisioning/dashboards/json/temporal-server.json](../observability/grafana/provisioning/dashboards/json/temporal-server.json))
+  into the "Temporal Commerce Demo" folder: request rate and errors by operation, service latency
+  p95, task schedule→start latency by task queue, persistence latency p95, and poll success
+  (worker liveness).
 
-**2. Prometheus scrapes the wrong port.**
-[observability/prometheus.yml:8](../observability/prometheus.yml#L8) targets `temporal:9090`. Port
-`9090` is Prometheus's own port, not Temporal's metrics port. Even once gap 1 is fixed, this
-target would need to be `temporal:9464`. Expect the `temporal-server` job to show as **DOWN** in
-http://localhost:9090/targets.
-
-**3. Grafana has no dashboards.**
-The provisioning path
-[observability/grafana/provisioning/dashboards/json/](../observability/grafana/provisioning/dashboards/json/)
-contains only a `.gitkeep`. Grafana starts with the Prometheus datasource wired up correctly and
-an empty "Temporal Commerce Demo" folder.
-
-**4. No application metrics at all.**
-Only the Temporal server is a scrape target. Worker metrics (task-queue latency, activity
-failures) and Next.js metrics are neither exported nor scraped.
-
-Fixing 1 and 2 is a two-line change and would make Grafana useful immediately with a community
-Temporal dashboard. Until then, treat Prometheus and Grafana as scaffolding.
+**Remaining gap — no application metrics.** Only the Temporal server is a scrape target. Worker
+SDK metrics (task-queue latency, activity failures — via `Runtime.install` `telemetryOptions`)
+and Next.js metrics are neither exported nor scraped. That is a separate, larger choice.
 
 ---
 
 ## Troubleshooting
 
-| Symptom                                    | Likely cause                                                                                                                                     |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Jaeger UI loads, no `demo-workers` service | `OTEL_ENABLED` not set in the **worker's** environment — containers are up but Node tracing is off. Restart workers after changing `.env.local`. |
-| No `temporal-server` service in Jaeger     | Stack started without the observability overlay, so the OTEL env override never applied to the `temporal` service.                               |
-| Spans stop at the activity boundary        | Expected — workflow spans are not instrumented. See [Coverage boundaries](#coverage-boundaries).                                                 |
-| Prometheus target DOWN                     | Expected — see [Known gaps](#known-gaps) 1 and 2.                                                                                                |
-| Partial traces after a crash               | `shutdownTracing()` never ran; spans buffered in the exporter were lost.                                                                         |
+| Symptom                                    | Likely cause                                                                                                                                                         |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Jaeger UI loads, no `demo-workers` service | `OTEL_ENABLED` not set in the **worker's** environment — containers are up but Node tracing is off. Restart workers after changing `.env.local`.                     |
+| No `temporal-server` service in Jaeger     | Stack started without the observability overlay, so the OTEL env override never applied to the `temporal` service.                                                   |
+| Spans stop at the activity boundary        | Expected — workflow spans are not instrumented. See [Coverage boundaries](#coverage-boundaries).                                                                     |
+| Prometheus target DOWN                     | Not expected anymore — check the stack was started with the observability overlay and `demo-temporal` is healthy (`PROMETHEUS_ENDPOINT` is set in the base compose). |
+| Partial traces after a crash               | `shutdownTracing()` never ran; spans buffered in the exporter were lost.                                                                                             |
 
 ```bash
 # Container logs for the observability services

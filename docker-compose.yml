@@ -114,6 +114,9 @@ services:
       - ES_VERSION=v8
       - BIND_ON_IP=0.0.0.0
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      # Without this the server never opens the metrics listener — the 9464 port
+      # publish above is inert. Prometheus scrapes temporal:9464.
+      - PROMETHEUS_ENDPOINT=0.0.0.0:9464
     volumes:
       - ./infra/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
     restart: unless-stopped
