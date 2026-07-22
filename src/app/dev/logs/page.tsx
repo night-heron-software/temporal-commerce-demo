@@ -117,6 +117,7 @@ export default function SystemLogsPage() {
   }, [debouncedQuery, level, service, since, page]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: loading/error reset before the async load is intentional
     void fetchLogs();
     return () => abortRef.current?.abort();
   }, [fetchLogs]);
@@ -276,9 +277,7 @@ function LogRow({
           {hit.level}
         </span>
 
-        <span className="shrink-0 mt-0.5 text-gray-400 w-44">
-          {formatTime(hit.timestamp)}
-        </span>
+        <span className="shrink-0 mt-0.5 text-gray-400 w-44">{formatTime(hit.timestamp)}</span>
 
         <span className="shrink-0 mt-0.5 text-purple-400 font-semibold px-1.5 py-0.5 rounded bg-purple-950/60 border border-purple-800/60 text-[10px]">
           {hit.service}
@@ -291,9 +290,7 @@ function LogRow({
         )}
 
         {hit.component && (
-          <span className="shrink-0 mt-0.5 text-blue-400 w-28 truncate">
-            {hit.component}
-          </span>
+          <span className="shrink-0 mt-0.5 text-blue-400 w-28 truncate">{hit.component}</span>
         )}
 
         <span className="flex-1 text-gray-200 truncate">{hit.message}</span>

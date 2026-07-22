@@ -35,6 +35,19 @@ export async function expireReservations(): Promise<number> {
 }
 
 // ============================================================
+// Drift Reconciliation
+// ============================================================
+
+/**
+ * Recompute reserved_stock from active reservations and CAS-correct drifted counters.
+ * The backstop for every non-atomic pair in the write path — see
+ * InventoryCommandRepository.reconcileStockCounters. Returns the number corrected.
+ */
+export async function reconcileStockCounters(): Promise<number> {
+  return InventoryCommandRepository.reconcileStockCounters();
+}
+
+// ============================================================
 // CQRS Projections: Write Tables → Read Tables
 // ============================================================
 

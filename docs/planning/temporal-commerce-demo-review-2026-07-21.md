@@ -10,8 +10,10 @@ The workflow layer is in excellent shape: zero TODO debt, every `condition()` bo
 intentionally terminal, `allHandlersFinished` guarded before every continue-as-new, a real
 cross-domain order-journey e2e running in CI without containers, and the diagrams ratchet
 enforced. The problems cluster in one place — **the inventory write path** — where the review
-found a likely live regression introduced by PR #17 plus four structural integrity holes shared
-with the nightheron-mono sibling. Second tier: three states files lack the tests the repo's own
+found a **confirmed live regression** introduced by PR #17 (fulfillment's inventory mutations
+silently no-oping; see finding 1's correction note) plus four structural integrity holes shared
+with the nightheron-mono sibling. The P0 tier was fixed and live-verified the same day on
+`fix/inventory-write-path`. Second tier: three states files lack the tests the repo's own
 policy requires, and CI never runs `next build`. Third tier: the observability metrics path is
 still wired wrong (documented in the observability guide as Known gaps), and a handful of docs
 drifted behind the code.
@@ -29,17 +31,28 @@ drifted behind the code.
 
 All in `src/temporal/inventory/db/inventory-command-repository.ts` unless noted.
 
-### 1. Likely live regression from PR #17: reconcile releases the wrong IDs
+### 1. Live regression from PR #17: fulfillment mutations derive IDs that no longer exist
 
-PR #17 changed `reserveAll` to reserve **once per unique `blank_sku`** (one LWT per partition),
-creating reservation IDs keyed `${cartId}-${blankSku}` (`:889`). But `reconcile()` still releases
-by `${cartId}-${variantId}` (`:970`) — and the cart flow's own IDs are also variant-keyed
-(`src/temporal/cart/activities-impl.ts:73`). Post-#17, reconcile's variant-keyed releases hit the
-not-found branch (`:508-511`) and **silently no-op**: editing a cart after checkout began leaves
-stale blankSku-keyed reservations and inflated `reserved_stock`. Cart and checkout now run two
-divergent ID schemes with `reconcile()` straddling both.
+> **Correction (same day):** the original draft named `reconcile()` as the likely live vehicle.
+> Implementation of the fix established that `reconcile()` (and `confirmAllForCart()`) have
+> **zero callers** — dead code — while the actually-live vehicle is worse: all three
+> fulfillment inventory activities.
 
-**Fix shape:** unify the reservation-ID scheme (regression test first — see runbook probe below).
+PR #17 changed `reserveAll` to reserve **once per unique `blank_sku`**, creating reservation IDs
+keyed `${cartId}-${blankSku}` (`:889`). But `src/temporal/fulfillment/activities-impl.ts` derives
+`${cartId}-${variantId}` in `transferInventoryReservations` (`:54`),
+`fulfillInventoryReservations` (`:73`), and `releaseInventoryReservations` (`:98`) — so post-#17
+every one of those lookups missed and **silently no-oped**: delivered orders never transferred,
+never decremented `total_stock`, and left their reservations CONFIRMED with `reserved_stock`
+inflated forever; fulfillment cancellations never freed holds. Confirmed in the live environment:
+a pre-fix delivered order left two CONFIRMED, unattributed reservation rows with
+`reserved_stock: 2` stuck and `total_stock: 100` undecremented. The dead `reconcile()` and cart
+flow (`cart/activities-impl.ts:73`) carry the same variant-keyed scheme, so the codebase ran two
+divergent schemes.
+
+**Fix shape:** one shared `buildReservationId(cartId, variantId)` in contracts used by every
+site; `reserveAll` keeps one LWT CAS per blank_sku but writes one reservation row per variant
+(regression-pinned in `inventory-command-repository.test.ts`).
 
 ### 2. Phantom-hold leak: LWT and registry batch are separate ops
 
@@ -183,18 +196,21 @@ npm run dev:status
 
 ### Targeted probes
 
-- **Reconcile regression repro (P0 finding 1):** add an item to a cart → begin checkout (fires
-  `reserveAll`) → edit the cart quantity → inspect state:
+- **ID-scheme regression repro (P0 finding 1):** run a full order to delivery
+  (`npx tsx --env-file=.env.local scripts/verify-checkout.ts`), then inspect state:
 
   ```bash
-  docker exec -i demo-cassandra cqlsh -e \
-    "SELECT reservation_id, status, quantity FROM demo.inventory_reservations_w;"
-  docker exec -i demo-cassandra cqlsh -e \
-    "SELECT blank_sku, reserved_stock FROM demo.inventory_stock_w;"
+  docker exec demo-cassandra cqlsh -e \
+    "SELECT reservation_id, status, quantity, fulfiller_id FROM catalog.inventory_reservations_w;"
+  docker exec demo-cassandra cqlsh -e \
+    "SELECT blank_sku, total_stock, reserved_stock FROM catalog.inventory_stock_w;"
   ```
 
-  Stale `${cartId}-${blankSku}` rows remain TEMPORARY and `reserved_stock` stays inflated. This
-  repro is the acceptance test for the fix.
+  Pre-fix: the order's reservations stay CONFIRMED with `fulfiller_id: null`, its SKU's
+  `reserved_stock` stays inflated and `total_stock` never decrements. Post-fix: reservations
+  are FULFILLED with an attributed fulfiller, `reserved_stock` returns to baseline, and
+  `total_stock` drops by the delivered quantity. (Verified live 2026-07-21 on
+  `fix/inventory-write-path`.)
 
 - **Drift probe:** after any e2e run, compare each SKU's `reserved_stock` against the sum of
   active (TEMPORARY/CONFIRMED) reservation quantities from the same tables — any mismatch is

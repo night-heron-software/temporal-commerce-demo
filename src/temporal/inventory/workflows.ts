@@ -29,6 +29,7 @@ import {
   projectReservationsForSkus,
   syncInventoryToESForSkus,
   expireReservations,
+  reconcileStockCounters,
   projectStockSummaries,
   projectReservationViews,
   projectLowStockAlerts,
@@ -112,6 +113,12 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput): P
         const expiredCount = await expireReservations();
         if (expiredCount > 0) {
           log.info(`Expired ${expiredCount} reservations`);
+        }
+
+        // Heal any counter drift (phantom holds, half-applied decrements/transfers)
+        const driftCorrections = await reconcileStockCounters();
+        if (driftCorrections > 0) {
+          log.warn(`Corrected ${driftCorrections} drifted stock counters`);
         }
 
         await projectStockSummaries();

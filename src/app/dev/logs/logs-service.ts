@@ -143,8 +143,10 @@ export async function querySystemLogs(params: LogQueryParams = {}): Promise<Syst
             const msg = raw.msg || raw.message || '';
             const component = raw.component || raw.name || undefined;
             const taskQueue = typeof raw.taskQueue === 'string' ? raw.taskQueue : undefined;
-            const workflowType = typeof raw.workflowType === 'string' ? raw.workflowType : undefined;
-            const activityType = typeof raw.activityType === 'string' ? raw.activityType : undefined;
+            const workflowType =
+              typeof raw.workflowType === 'string' ? raw.workflowType : undefined;
+            const activityType =
+              typeof raw.activityType === 'string' ? raw.activityType : undefined;
 
             // Free text matching
             if (queryText) {

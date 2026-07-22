@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  querySystemLogs,
-  DEFAULT_PAGE_SIZE,
-  type LogLevelName,
-} from '@/app/dev/logs/logs-service';
+import { querySystemLogs, DEFAULT_PAGE_SIZE, type LogLevelName } from '@/app/dev/logs/logs-service';
 
 /**
  * GET /api/dev/logs — query and page through structured log lines across log files

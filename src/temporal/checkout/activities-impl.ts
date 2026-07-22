@@ -13,7 +13,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { executeCql, logger as log, sendEmail, getElasticsearchClient } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
 
-import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
+import {
+  InventoryCommandRepository,
+  InventoryContentionError,
+} from '../inventory/db/inventory-command-repository';
 import { Elasticsearch } from '../contracts';
 const { ES_INDICES } = Elasticsearch;
 
@@ -275,6 +278,11 @@ export async function renewReservationsForCheckout(
   );
 
   if (!result.success) {
+    if (result.contention) {
+      // Transient LWT conflict — throw so Temporal's activity retry policy takes over,
+      // instead of failing the checkout entry outright.
+      throw new InventoryContentionError(result.error ?? 'Inventory counter contention');
+    }
     return {
       success: false,
       reservations: [],

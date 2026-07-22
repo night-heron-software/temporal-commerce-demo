@@ -128,7 +128,8 @@ export default function AdminDashboardPage() {
             System Logs
           </h2>
           <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
-            Live structured log lines across all services, searchable by log level, service, and free text.
+            Live structured log lines across all services, searchable by log level, service, and
+            free text.
           </p>
         </Link>
 
