@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { createLogger } from './logger';
 
 const log = createLogger('api');
@@ -18,7 +18,7 @@ export function createErrorResponse(
   error?: unknown,
   correlationId?: string,
 ): NextResponse {
-  const cid = correlationId || uuidv4();
+  const cid = correlationId || randomUUID();
 
   log.error({ correlationId: cid, status, err: error }, message);
 

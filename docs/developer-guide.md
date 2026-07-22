@@ -2,7 +2,7 @@
 
 A comprehensive guide for developers working on the Temporal Commerce Demo — an end-to-end e-commerce application that demonstrates Temporal durable execution patterns across six domain workflows.
 
-> *This document was drafted with AI assistance.*
+> _This document was drafted with AI assistance._
 
 ---
 
@@ -49,22 +49,22 @@ graph TB
 
 ### Infrastructure Components
 
-| Service | Port | Purpose |
-| --- | --- | --- |
-| **Cassandra** | 9042 | Primary data store (catalog, orders, inventory) |
-| **Elasticsearch** | 9200 | Search + read-side projections (all 11 domain indices) |
-| **Temporal Server** | 7233 | Workflow orchestration engine |
-| **Temporal UI** | 8233 | Workflow visualization and debugging |
-| **Temporal PostgreSQL** | 5432 | Temporal's internal persistence |
-| **Temporal Elasticsearch** | 9201 | Temporal's internal visibility (separate from app ES) |
+| Service                    | Port | Purpose                                                |
+| -------------------------- | ---- | ------------------------------------------------------ |
+| **Cassandra**              | 9042 | Primary data store (catalog, orders, inventory)        |
+| **Elasticsearch**          | 9200 | Search + read-side projections (all 11 domain indices) |
+| **Temporal Server**        | 7233 | Workflow orchestration engine                          |
+| **Temporal UI**            | 8233 | Workflow visualization and debugging                   |
+| **Temporal PostgreSQL**    | 5432 | Temporal's internal persistence                        |
+| **Temporal Elasticsearch** | 9201 | Temporal's internal visibility (separate from app ES)  |
 
 **Observability (opt-in — set `OTEL_ENABLED=true` or run `npm run infra:up:obs`):**
 
-| Service | Port | Purpose |
-| --- | --- | --- |
-| **Jaeger** | 16686 | Distributed tracing UI + OTLP collector |
-| **Prometheus** | 9090 | Metrics scraping |
-| **Grafana** | 3200 | Metrics dashboards (admin/admin) |
+| Service        | Port  | Purpose                                 |
+| -------------- | ----- | --------------------------------------- |
+| **Jaeger**     | 16686 | Distributed tracing UI + OTLP collector |
+| **Prometheus** | 9090  | Metrics scraping                        |
+| **Grafana**    | 3200  | Metrics dashboards (admin/admin)        |
 
 ### Request Flow
 
@@ -125,25 +125,25 @@ npm run dev:init         # Nuclear reset: wipe databases, recreate schema, start
 
 ### NPM Scripts
 
-| Script | Category | Description |
-| --- | --- | --- |
-| `npm run dev:start-all` | Developer | Start infrastructure (Docker) + storefront + workers |
-| `npm run dev:stop-all` | Developer | Stop everything (storefront, workers + infrastructure) |
-| `npm run dev:up` | Developer | Start storefront app (Next.js) + Temporal workers |
-| `npm run dev:down` | Developer | Stop storefront app and Temporal worker processes |
-| `npm run dev:init` | Developer | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
-| `npm run dev:status` | Developer | Check status of all backend databases, services, and apps |
-| `npm run dev:storefront` | Application | Start storefront app only |
-| `npm run dev:worker` | Application | Start Temporal workers only |
-| `npm run dev:seed` | Database | Populate catalog and inventory data manually |
-| `npm run db:init` | Database | Create Cassandra keyspace and tables |
-| `npm run db:verify` | Database | Verify Cassandra schema consistency |
-| `npm run infra:up` | Infrastructure | Start Docker infrastructure containers and verify health |
-| `npm run infra:up:obs` | Infrastructure | Start infrastructure + observability (Jaeger, Prometheus, Grafana) |
-| `npm run infra:down` | Infrastructure | Stop infrastructure containers |
-| `npm run infra:clean` | Infrastructure | Stop containers and wipe all persistent volumes |
-| `npm run infra:ps` | Infrastructure | List running infrastructure containers |
-| `npm run infra:ready` | Infrastructure | Ensure Docker Desktop is running (starts it if not) |
+| Script                   | Category       | Description                                                           |
+| ------------------------ | -------------- | --------------------------------------------------------------------- |
+| `npm run dev:start-all`  | Developer      | Start infrastructure (Docker) + storefront + workers                  |
+| `npm run dev:stop-all`   | Developer      | Stop everything (storefront, workers + infrastructure)                |
+| `npm run dev:up`         | Developer      | Start storefront app (Next.js) + Temporal workers                     |
+| `npm run dev:down`       | Developer      | Stop storefront app and Temporal worker processes                     |
+| `npm run dev:init`       | Developer      | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
+| `npm run dev:status`     | Developer      | Check status of all backend databases, services, and apps             |
+| `npm run dev:storefront` | Application    | Start storefront app only                                             |
+| `npm run dev:worker`     | Application    | Start Temporal workers only                                           |
+| `npm run dev:seed`       | Database       | Populate catalog and inventory data manually                          |
+| `npm run db:init`        | Database       | Create Cassandra keyspace and tables                                  |
+| `npm run db:verify`      | Database       | Verify Cassandra schema consistency                                   |
+| `npm run infra:up`       | Infrastructure | Start Docker infrastructure containers and verify health              |
+| `npm run infra:up:obs`   | Infrastructure | Start infrastructure + observability (Jaeger, Prometheus, Grafana)    |
+| `npm run infra:down`     | Infrastructure | Stop infrastructure containers                                        |
+| `npm run infra:clean`    | Infrastructure | Stop containers and wipe all persistent volumes                       |
+| `npm run infra:ps`       | Infrastructure | List running infrastructure containers                                |
+| `npm run infra:ready`    | Infrastructure | Ensure Docker Desktop is running (starts it if not)                   |
 
 ---
 
@@ -283,7 +283,7 @@ The checkout workflow orchestrates the multi-step checkout process as a child of
 
 **Key Patterns:**
 
-- **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → collecting → complete`). The UI steps (shipping → payment → review) are *derived* from which prerequisites are satisfied, not tracked as machine states; order processing runs inline within the `collecting` state's `submitOrder` handler.
+- **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → collecting → complete`). The UI steps (shipping → payment → review) are _derived_ from which prerequisites are satisfied, not tracked as machine states; order processing runs inline within the `collecting` state's `submitOrder` handler.
 - **Inventory Reservation Renewal** — At checkout start, existing cart reservations are renewed with a fresh TTL.
 - **Update Handlers as Events** — Custom update handlers map incoming signals/arguments (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events which trigger deterministic transitions.
 - **Back Navigation** — Users can go back: setting shipping from the payment/review step is allowed, which recalculates costs.
@@ -372,15 +372,15 @@ Stock reservations are the write-side mechanism that prevents oversell. They are
 
 **Lifecycle.** A reservation moves `TEMPORARY → CONFIRMED → FULFILLED`, or exits early via `RELEASED` / `CANCELLED`:
 
-| Operation | Repo method | Effect | Triggered by |
-| --- | --- | --- | --- |
-| Reserve | `reserve` / `reserveAll` | LWT-bump `reserved_stock`; insert `TEMPORARY` rows | cart add/update item (`reserveCartItem`); checkout start |
-| Confirm | `confirm` | `status = CONFIRMED`, `expires_at = null` (no longer expirable) | checkout after payment succeeds (`confirmReservations`) |
-| Release | `release` / `releaseAllForCart` | decrement `reserved_stock`; `status = RELEASED` | cart remove/cancel; checkout cancel/timeout; TTL sweep |
-| Cancel | `cancel` | decrement from the assigned fulfiller; `status = CANCELLED` | order cancelled post-confirm (fulfillment) |
-| Fulfill | `fulfill` | decrement **both** `total_stock` and `reserved_stock`; `status = FULFILLED` | fulfillment on delivery |
-| Transfer | `transferToFulfiller` | assign `fulfiller_id` for routing | fulfillment start |
-| Expire | `expireReservations` | release `TEMPORARY` rows past `expires_at` | inventory singleton's 5-minute sweep |
+| Operation | Repo method                     | Effect                                                                      | Triggered by                                             |
+| --------- | ------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Reserve   | `reserve` / `reserveAll`        | LWT-bump `reserved_stock`; insert `TEMPORARY` rows                          | cart add/update item (`reserveCartItem`); checkout start |
+| Confirm   | `confirm`                       | `status = CONFIRMED`, `expires_at = null` (no longer expirable)             | checkout after payment succeeds (`confirmReservations`)  |
+| Release   | `release` / `releaseAllForCart` | decrement `reserved_stock`; `status = RELEASED`                             | cart remove/cancel; checkout cancel/timeout; TTL sweep   |
+| Cancel    | `cancel`                        | decrement from the assigned fulfiller; `status = CANCELLED`                 | order cancelled post-confirm (fulfillment)               |
+| Fulfill   | `fulfill`                       | decrement **both** `total_stock` and `reserved_stock`; `status = FULFILLED` | fulfillment on delivery                                  |
+| Transfer  | `transferToFulfiller`           | assign `fulfiller_id` for routing                                           | fulfillment start                                        |
+| Expire    | `expireReservations`            | release `TEMPORARY` rows past `expires_at`                                  | inventory singleton's 5-minute sweep                     |
 
 **Oversell safety is a Cassandra lightweight transaction (LWT)**, not workflow serialization. `reserve()` reads current availability, then commits the new `reserved_stock` with a compare-and-set guard:
 
@@ -394,7 +394,7 @@ If `[applied]` comes back false, the reserve returns `{ success: false }` and th
 
 **Expiry runs on two independent clocks.** A reservation carries a 15-minute TTL in `expires_at`, swept by the inventory singleton every 5 minutes (`CONSISTENCY_SWEEP_INTERVAL`). That is separate from the cart workflow's 30-day and the checkout's 1-hour timeouts — so a long-idle cart's holds are reclaimed by the sweep (or by preemption) well before the cart itself is abandoned. `confirm()` sets `expires_at = null`, so a paid reservation never expires.
 
-**Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller *before* the single-row LWT, so only the `reserved_stock` bump is atomic — there is no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries and firmer per-SKU routing. Two artifacts hint at an earlier design and should not be taken as the live path: `renewReservation()` exists but is unused (checkout renews by release-then-reserve), and `reserveInventoryUpdate` — a Temporal Update definition in `contracts/inventory.ts` — is declared but never handled. Reserves do **not** flow through a workflow update.
+**Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller _before_ the single-row LWT, so only the `reserved_stock` bump is atomic — there is no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries and firmer per-SKU routing. Two artifacts hint at an earlier design and should not be taken as the live path: `renewReservation()` exists but is unused (checkout renews by release-then-reserve), and `reserveInventoryUpdate` — a Temporal Update definition in `contracts/inventory.ts` — is declared but never handled. Reserves do **not** flow through a workflow update.
 
 ### Inventory Service — Limitations & Production Gaps
 
@@ -427,12 +427,12 @@ The identity domain provides email-based shopper authentication and address pers
 
 **Auth API Routes:**
 
-| Route | Method | Purpose |
-| --- | --- | --- |
-| `/api/auth/shopper/login` | POST | Email-only sign-in (auto-creates account) |
-| `/api/auth/shopper/logout` | POST | Clear session cookie |
-| `/api/auth/shopper/me` | GET | Return current shopper profile + default address |
-| `/api/auth/shopper/address` | GET/POST | Retrieve or save shopper shipping addresses |
+| Route                       | Method   | Purpose                                          |
+| --------------------------- | -------- | ------------------------------------------------ |
+| `/api/auth/shopper/login`   | POST     | Email-only sign-in (auto-creates account)        |
+| `/api/auth/shopper/logout`  | POST     | Clear session cookie                             |
+| `/api/auth/shopper/me`      | GET      | Return current shopper profile + default address |
+| `/api/auth/shopper/address` | GET/POST | Retrieve or save shopper shipping addresses      |
 
 **Workflow Operations:**
 
@@ -458,18 +458,18 @@ The Cassandra schema is defined in `cassandra/schema.cql` and uses the `catalog`
 
 **Key Tables:**
 
-| Table | Partition Key | Purpose |
-| --- | --- | --- |
-| `products` | `id` | Product catalog (primary lookup) |
-| `products_by_collection` | `collection_id` | Products within a collection |
-| `variants` | `id` | Variant details (primary lookup) |
-| `variants_by_product` | `product_id` | Variants for a product |
-| `orders` | `order_id` | Order details |
-| `orders_by_customer` | `customer_email` | Customer order history |
-| `shoppers` | `email` | Shopper accounts (email-only auth) |
-| `shopper_shipping_addresses` | `user_id` | Saved shipping addresses |
-| `inventory_stock_w` | `blank_sku, fulfiller_id` | Write-side stock levels |
-| `inventory_reservations_w` | `reservation_id` | Active inventory reservations |
+| Table                        | Partition Key             | Purpose                            |
+| ---------------------------- | ------------------------- | ---------------------------------- |
+| `products`                   | `id`                      | Product catalog (primary lookup)   |
+| `products_by_collection`     | `collection_id`           | Products within a collection       |
+| `variants`                   | `id`                      | Variant details (primary lookup)   |
+| `variants_by_product`        | `product_id`              | Variants for a product             |
+| `orders`                     | `order_id`                | Order details                      |
+| `orders_by_customer`         | `customer_email`          | Customer order history             |
+| `shoppers`                   | `email`                   | Shopper accounts (email-only auth) |
+| `shopper_shipping_addresses` | `user_id`                 | Saved shipping addresses           |
+| `inventory_stock_w`          | `blank_sku, fulfiller_id` | Write-side stock levels            |
+| `inventory_reservations_w`   | `reservation_id`          | Active inventory reservations      |
 
 ### Elasticsearch (Read Side)
 
@@ -477,19 +477,19 @@ Elasticsearch serves as the read-side projection store and powers product search
 
 **Indices:**
 
-| Index | Document Type | Purpose |
-| --- | --- | --- |
-| `products` | `ProductDocument` | Product search with nested variants and options |
-| `collections` | `CollectionDocument` | Collection browsing |
-| `orders` | `OrderDocument` | Order search and admin views |
-| `customers` | `CustomerDocument` | Customer search |
-| `fulfillers` | `FulfillerDocument` | Fulfiller search |
-| `inventory` | `InventoryDocument` | Inventory read-side views |
-| `fulfiller_orders` | `FulfillerOrderDocument` | Fulfiller order tracking |
-| `carts` | `CartDocument` | Active cart visibility |
-| `reservations` | `ReservationDocument` | Reservation tracking |
-| `fulfillments` | `FulfillmentDocument` | Fulfillment workflow state |
-| `shipments` | `ShipmentDocument` | Shipment tracking |
+| Index              | Document Type            | Purpose                                         |
+| ------------------ | ------------------------ | ----------------------------------------------- |
+| `products`         | `ProductDocument`        | Product search with nested variants and options |
+| `collections`      | `CollectionDocument`     | Collection browsing                             |
+| `orders`           | `OrderDocument`          | Order search and admin views                    |
+| `customers`        | `CustomerDocument`       | Customer search                                 |
+| `fulfillers`       | `FulfillerDocument`      | Fulfiller search                                |
+| `inventory`        | `InventoryDocument`      | Inventory read-side views                       |
+| `fulfiller_orders` | `FulfillerOrderDocument` | Fulfiller order tracking                        |
+| `carts`            | `CartDocument`           | Active cart visibility                          |
+| `reservations`     | `ReservationDocument`    | Reservation tracking                            |
+| `fulfillments`     | `FulfillmentDocument`    | Fulfillment workflow state                      |
+| `shipments`        | `ShipmentDocument`       | Shipment tracking                               |
 
 All ES document types are defined in `src/temporal/contracts/elasticsearch.ts`.
 
@@ -501,15 +501,15 @@ All ES document types are defined in `src/temporal/contracts/elasticsearch.ts`.
 
 Routes follow the established convention:
 
-| Prefix | Purpose | Examples |
-| --- | --- | --- |
-| `/shop` | Customer-facing storefront | Product browsing, cart, checkout, order lookup |
-| `/admin` | Business management | Order management, feature flags |
-| `/api/auth/*` | Shopper authentication | Login, logout, session, address |
-| `/api/admin/*` | Admin management APIs | Feature flag CRUD |
-| `/api/dev/*` | Developer tools | ES index init, reindex |
-| `/api/search` | Product search | Elasticsearch-backed search |
-| `/api/product` | Product lookup | Cassandra-backed detail fetch |
+| Prefix         | Purpose                    | Examples                                                                                                                 |
+| -------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `/shop`        | Customer-facing storefront | Product browsing, cart, checkout, order lookup                                                                           |
+| `/admin`       | Business management        | Order management, feature flags                                                                                          |
+| `/api/auth/*`  | Shopper authentication     | Login, logout, session, address                                                                                          |
+| `/api/admin/*` | Admin management APIs      | Feature flag CRUD                                                                                                        |
+| `/api/dev/*`   | Developer tools            | ES index init, reindex, log viewer (`/dev/logs`), system errors (`/dev/system-errors`), order trace (`/dev/order-trace`) |
+| `/api/search`  | Product search             | Elasticsearch-backed search                                                                                              |
+| `/api/product` | Product lookup             | Cassandra-backed detail fetch                                                                                            |
 
 ### Server Actions
 
@@ -522,7 +522,7 @@ async function executeCartUpdate<TReturn, TArgs extends any[]>(
   cartId: string,
   updateDef: any,
   args: TArgs,
-  options: { createIfMissing?: boolean } = {}
+  options: { createIfMissing?: boolean } = {},
 ): Promise<TReturn | null> {
   // Uses updateWithStart for lazy creation
   // Handles WorkflowNotFoundError gracefully
@@ -569,14 +569,20 @@ Workflow IDs are parseable, dot-delimited `{storeId}.{domain}.{entityId}` string
 
 ```typescript
 // Convention: {storeId}.{domain}.{entityId}
-buildWorkflowId(DEMO_STORE_ID, 'cart', cartId)        // → 'demo.cart.<uuid>'
-buildWorkflowId(DEMO_STORE_ID, 'order', orderId)      // → 'demo.order.<uuid>'
-buildWorkflowId(DEMO_STORE_ID, 'inventory', 'service') // → 'demo.inventory.service'
+buildWorkflowId(DEMO_STORE_ID, 'cart', cartId); // → 'demo.cart.<uuid>'
+buildWorkflowId(DEMO_STORE_ID, 'order', orderId); // → 'demo.order.<uuid>'
+buildWorkflowId(DEMO_STORE_ID, 'inventory', 'service'); // → 'demo.inventory.service'
 
 // At workflow STARTS, spread buildWorkflowStartOptions() so the correlation
 // Search Attributes (CorrelationId, StoreId, Domain, OrderId, CartId) + memo are set:
 await client.workflow.start('orderWorkflow', {
-  ...buildWorkflowStartOptions({ storeId: DEMO_STORE_ID, domain: 'order', entityId: orderId, orderId, cartId }),
+  ...buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'order',
+    entityId: orderId,
+    orderId,
+    cartId,
+  }),
   taskQueue: OMS_TASK_QUEUE,
   args: [input],
 });
@@ -657,7 +663,7 @@ if (updateCount >= CONTINUE_AS_NEW_THRESHOLD) {
   await continueAsNew<typeof myWorkflow>({
     // Preserve all necessary state
     ...restoredState,
-    updateCount: 0  // Reset counter
+    updateCount: 0, // Reset counter
   });
 }
 ```
@@ -667,23 +673,29 @@ if (updateCount >= CONTINUE_AS_NEW_THRESHOLD) {
 A core architectural pattern introduced in `temporal-commerce-demo` (covering Cart, Checkout, and Fulfillment domains) is the custom, generic state machine framework located at `src/temporal/framework/`.
 
 Instead of writing custom event loops, signal handlers, and nested `if/else` checks for state transitions, workflows declare:
+
 1. A **Context type** representing the workflow's state/data.
 2. A list of **States** and their transition behavior.
 3. A set of **Update/Signal definitions** mapped to internal transition events.
 
 The driver (`runStateMachine`) handles:
+
 - **FIFO Queueing**: Incoming updates and signals are queued and processed sequentially. This eliminates race conditions and ensures state transitions run in a strict, predictable order.
 - **Unified Query/Update handling**: Exposes consistent methods for storefront UI updates and API calls.
 - **Lifecycle hooks**: `onStart`, `onTransition`, `onCancellation`, and `onTerminal` to orchestrate side-effects like inventory reservation releases or analytics tracking.
 
 Example structure of a state configuration:
+
 ```typescript
-export const CHECKOUT_STATES: Record<CheckoutStateName, StateConfig<CheckoutInput, CheckoutContext, CheckoutState | void>> = {
+export const CHECKOUT_STATES: Record<
+  CheckoutStateName,
+  StateConfig<CheckoutInput, CheckoutContext, CheckoutState | void>
+> = {
   validating: {
     fn: async (ctx, input) => {
       // Validate inventory, run activities
       return { next: 'shipping', context: updatedCtx };
-    }
+    },
   },
   // ...
 };
@@ -697,9 +709,9 @@ export const CHECKOUT_STATES: Record<CheckoutStateName, StateConfig<CheckoutInpu
 
 Each domain separates activity contracts from implementations:
 
-| File | Purpose |
-| --- | --- |
-| `activities.ts` | Activity function signatures (imported by workflows) |
+| File                 | Purpose                                                          |
+| -------------------- | ---------------------------------------------------------------- |
+| `activities.ts`      | Activity function signatures (imported by workflows)             |
 | `activities-impl.ts` | Activity implementations with real I/O (registered with workers) |
 
 Workflows import from `activities.ts`, which contains only the proxy signatures. Workers register from `activities-impl.ts`, which contains the actual database calls, API calls, etc.
@@ -712,7 +724,8 @@ Signal, query, and update definitions are centralized in a `definitions.ts` file
 // src/temporal/contracts/cart.ts — single source of truth
 export const cartUpdate = defineUpdate<CartUpdateResponse, [CartEvent]>('cartUpdate');
 export const getCartQuery = defineQuery<CartDetails>('getCart');
-export const checkoutCompletedSignal = defineSignal<[CheckoutCompletedPayload]>('checkoutCompleted');
+export const checkoutCompletedSignal =
+  defineSignal<[CheckoutCompletedPayload]>('checkoutCompleted');
 ```
 
 Each domain's `definitions.ts` re-exports these from the contracts file for worker registration compatibility. Note the cart exposes one consolidated `cartUpdate` taking a discriminated `CartEvent` (`{ type: 'addItem', … }`, `{ type: 'beginCheckout' }`, …) rather than one update per operation; checkout, by contrast, defines per-command updates (`setShippingUpdate`, `submitOrderUpdate`).
@@ -796,8 +809,8 @@ Feature flags are stored as a JSON file at `.data/feature-flags.json`:
 
 ```typescript
 const DEFAULTS: FeatureFlags = {
-  MANUAL_FULFILLMENT: false,   // Wait for explicit signals vs. auto-simulate
-  DATA_FLOW_LOGGING: false,    // Verbose data transformation logging
+  MANUAL_FULFILLMENT: false, // Wait for explicit signals vs. auto-simulate
+  DATA_FLOW_LOGGING: false, // Verbose data transformation logging
 };
 ```
 
@@ -849,11 +862,11 @@ The Temporal UI at `http://localhost:8233` is the primary debugging tool. Use it
 The storefront and the workers share one `pino` logger (`src/lib/logger.ts`), fanned out to three
 destinations via `pino.multistream`:
 
-| Stream | Destination | Notes |
-| --- | --- | --- |
-| stdout | terminal | `pino-pretty` colorized in dev, raw JSON in production |
-| file | `logs/demo-<service>-<date>.log` | Always on. Raw JSON, one file per process |
-| errors | `system_errors` Elasticsearch index | `level >= 50` only, fire-and-forget |
+| Stream | Destination                         | Notes                                                  |
+| ------ | ----------------------------------- | ------------------------------------------------------ |
+| stdout | terminal                            | `pino-pretty` colorized in dev, raw JSON in production |
+| file   | `logs/demo-<service>-<date>.log`    | Always on. Raw JSON, one file per process              |
+| errors | `system_errors` Elasticsearch index | `level >= 50` only, fire-and-forget                    |
 
 Because `npm run dev:up` runs both processes from the repo root, each one tags its own file via
 `LOG_SERVICE`, set inline by the npm scripts — `demo-web-<date>.log` and
@@ -873,6 +886,14 @@ Key log namespaces (the `component` binding):
 - `[OMS]` — Order management workflow events
 - `[DataFlow]` — Data transformation tracing (when `DATA_FLOW_LOGGING` is enabled)
 - `worker` — Worker lifecycle events
+
+#### System Logs viewer
+
+The file stream has its own browser UI at **`/dev/logs`** (API: `GET /api/dev/logs`). It reads
+the on-disk `logs/demo-<service>-<date>.log` files directly — no Elasticsearch involved — and
+supports filtering by level, service (derived from the filename, e.g. `web`, `workers`), a
+`since` time window, and free-text search, with paging. Lines that carry `taskQueue` /
+`workflowType` bindings (Temporal worker and workflow logs) show those as tags on the row.
 
 #### System Errors viewer
 
@@ -896,28 +917,28 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f
 
 ### Common Debugging Scenarios
 
-| Symptom | Investigation |
-| --- | --- |
-| "Workflow not found" in UI | Check if the cart cookie was cleared or the workflow timed out |
-| Items added but search empty | Check that ES indices exist (`/api/dev/init/es-indices`) and products are indexed |
-| Checkout stuck on "processing" | Check the checkout workflow in Temporal UI for failed activities |
-| Fulfillment not advancing | Check `MANUAL_FULFILLMENT` feature flag; if enabled, send manual signals |
-| Inventory reservation errors | Check the inventory service workflow is running (`demo.inventory.service` in Temporal UI) |
-| Worker crash on startup | Check Temporal server is healthy: `npm run infra:ps` |
+| Symptom                        | Investigation                                                                             |
+| ------------------------------ | ----------------------------------------------------------------------------------------- |
+| "Workflow not found" in UI     | Check if the cart cookie was cleared or the workflow timed out                            |
+| Items added but search empty   | Check that ES indices exist (`/api/dev/init/es-indices`) and products are indexed         |
+| Checkout stuck on "processing" | Check the checkout workflow in Temporal UI for failed activities                          |
+| Fulfillment not advancing      | Check `MANUAL_FULFILLMENT` feature flag; if enabled, send manual signals                  |
+| Inventory reservation errors   | Check the inventory service workflow is running (`demo.inventory.service` in Temporal UI) |
+| Worker crash on startup        | Check Temporal server is healthy: `npm run infra:ps`                                      |
 
 ### Port Conflicts
 
-| Port | Service | Check |
-| --- | --- | --- |
-| 3000 | Next.js | `lsof -i :3000` |
-| 7233 | Temporal | `docker ps` |
-| 8233 | Temporal UI | `docker ps` |
-| 9042 | Cassandra | `lsof -i :9042` |
-| 9200 | Elasticsearch | `lsof -i :9200` |
-| 5432 | Temporal PostgreSQL | `docker ps` |
-| 16686 | Jaeger (observability) | `docker ps` |
-| 9090 | Prometheus (observability) | `docker ps` |
-| 3200 | Grafana (observability) | `docker ps` |
+| Port  | Service                    | Check           |
+| ----- | -------------------------- | --------------- |
+| 3000  | Next.js                    | `lsof -i :3000` |
+| 7233  | Temporal                   | `docker ps`     |
+| 8233  | Temporal UI                | `docker ps`     |
+| 9042  | Cassandra                  | `lsof -i :9042` |
+| 9200  | Elasticsearch              | `lsof -i :9200` |
+| 5432  | Temporal PostgreSQL        | `docker ps`     |
+| 16686 | Jaeger (observability)     | `docker ps`     |
+| 9090  | Prometheus (observability) | `docker ps`     |
+| 3200  | Grafana (observability)    | `docker ps`     |
 
 ---
 
@@ -944,30 +965,30 @@ deployment change, not a code change.
 
 ## Environment Variables Reference
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `TEMPORAL_ADDRESS` | Yes | `localhost:7233` | Temporal server address |
-| `TEMPORAL_NAMESPACE` | Yes | `default` | Temporal namespace |
-| `TEMPORAL_TLS_CERT` | Cloud only | — | Base64-encoded mTLS client cert |
-| `TEMPORAL_TLS_KEY` | Cloud only | — | Base64-encoded mTLS client key |
-| `CASSANDRA_CONTACT_POINTS` | Yes | `localhost:9042` | Cassandra contact points (comma-separated) |
-| `CASSANDRA_KEYSPACE` | Yes | `catalog` | Cassandra keyspace name |
-| `CASSANDRA_DC` | No | `dc1` | Cassandra data center name |
-| `CASSANDRA_USE_TLS` | Cloud only | `false` | Enable TLS for Cassandra |
-| `CASSANDRA_SECURE_BUNDLE_PATH` | Astra only | — | Path to Astra secure connect bundle |
-| `CASSANDRA_USERNAME` | Cloud only | — | Cassandra authentication username |
-| `CASSANDRA_PASSWORD` | Cloud only | — | Cassandra authentication password |
-| `ELASTICSEARCH_URL` | Yes | `http://localhost:9200` | Elasticsearch endpoint |
-| `ELASTICSEARCH_API_KEY` | Cloud only | — | Elasticsearch API key |
-| `NEXT_PUBLIC_APP_URL` | Yes | `http://localhost:3000` | Public application URL |
-| `NEXT_PUBLIC_CHECKOUT_READY_TIMEOUT_MS` | No | `30000` | How long the checkout page waits for the checkout workflow before erroring |
-| `TEMPORAL_UI_URL` | No | `http://localhost:8233` | Temporal UI base URL used for links in the Order Trace tool |
-| `LOG_LEVEL` | No | `debug` (dev) / `info` | Pino log level |
-| `LOG_DIR` | No | `logs` | Directory for per-process JSON log files (gitignored) |
-| `LOG_SERVICE` | No | `app` | Log filename tag — set inline by the npm scripts (`web`/`workers`/`scripts`) |
-| `LOG_RETENTION_DAYS` | No | `7` | Log files older than this are pruned on first write |
-| `LOG_ES_ERRORS` | No | `true` | Set `false` to stop forwarding errors to the `system_errors` index |
-| `OTEL_ENABLED` | No | `false` | Enable OpenTelemetry tracing (requires observability stack) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OTLP HTTP endpoint for trace export |
+| Variable                                | Required   | Default                 | Description                                                                  |
+| --------------------------------------- | ---------- | ----------------------- | ---------------------------------------------------------------------------- |
+| `TEMPORAL_ADDRESS`                      | Yes        | `localhost:7233`        | Temporal server address                                                      |
+| `TEMPORAL_NAMESPACE`                    | Yes        | `default`               | Temporal namespace                                                           |
+| `TEMPORAL_TLS_CERT`                     | Cloud only | —                       | Base64-encoded mTLS client cert                                              |
+| `TEMPORAL_TLS_KEY`                      | Cloud only | —                       | Base64-encoded mTLS client key                                               |
+| `CASSANDRA_CONTACT_POINTS`              | Yes        | `localhost:9042`        | Cassandra contact points (comma-separated)                                   |
+| `CASSANDRA_KEYSPACE`                    | Yes        | `catalog`               | Cassandra keyspace name                                                      |
+| `CASSANDRA_DC`                          | No         | `dc1`                   | Cassandra data center name                                                   |
+| `CASSANDRA_USE_TLS`                     | Cloud only | `false`                 | Enable TLS for Cassandra                                                     |
+| `CASSANDRA_SECURE_BUNDLE_PATH`          | Astra only | —                       | Path to Astra secure connect bundle                                          |
+| `CASSANDRA_USERNAME`                    | Cloud only | —                       | Cassandra authentication username                                            |
+| `CASSANDRA_PASSWORD`                    | Cloud only | —                       | Cassandra authentication password                                            |
+| `ELASTICSEARCH_URL`                     | Yes        | `http://localhost:9200` | Elasticsearch endpoint                                                       |
+| `ELASTICSEARCH_API_KEY`                 | Cloud only | —                       | Elasticsearch API key                                                        |
+| `NEXT_PUBLIC_APP_URL`                   | Yes        | `http://localhost:3000` | Public application URL                                                       |
+| `NEXT_PUBLIC_CHECKOUT_READY_TIMEOUT_MS` | No         | `30000`                 | How long the checkout page waits for the checkout workflow before erroring   |
+| `TEMPORAL_UI_URL`                       | No         | `http://localhost:8233` | Temporal UI base URL used for links in the Order Trace tool                  |
+| `LOG_LEVEL`                             | No         | `debug` (dev) / `info`  | Pino log level                                                               |
+| `LOG_DIR`                               | No         | `logs`                  | Directory for per-process JSON log files (gitignored)                        |
+| `LOG_SERVICE`                           | No         | `app`                   | Log filename tag — set inline by the npm scripts (`web`/`workers`/`scripts`) |
+| `LOG_RETENTION_DAYS`                    | No         | `7`                     | Log files older than this are pruned on first write                          |
+| `LOG_ES_ERRORS`                         | No         | `true`                  | Set `false` to stop forwarding errors to the `system_errors` index           |
+| `OTEL_ENABLED`                          | No         | `false`                 | Enable OpenTelemetry tracing (requires observability stack)                  |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`           | No         | `http://localhost:4318` | OTLP HTTP endpoint for trace export                                          |
 
 Copy `.env.example` to `.env.local` for local development. Default values are configured for the Docker Compose environment.

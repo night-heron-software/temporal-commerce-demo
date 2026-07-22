@@ -8,7 +8,7 @@
  */
 
 import { cookies } from 'next/headers';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { createLogger } from '@/lib/logger';
 import { getTemporalClient } from '@/lib/temporal-client';
 import { Cart, Checkout, Constants } from '@/temporal/contracts';
@@ -34,7 +34,7 @@ export async function getOrCreateCartId(): Promise<string> {
   const existing = cookieStore.get(CART_ID_COOKIE)?.value;
   if (existing) return existing;
 
-  const cartId = uuidv4();
+  const cartId = randomUUID();
   cookieStore.set(CART_ID_COOKIE, cartId, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

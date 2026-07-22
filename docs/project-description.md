@@ -1,6 +1,6 @@
 # Temporal Commerce Demo — Project Description
 
-A full-stack e-commerce application built entirely on [Temporal](https://temporal.io) durable execution. Every state transition — from adding an item to a cart through order fulfillment and delivery — is a Temporal workflow. No message queues, no cron jobs, no saga orchestrators. The business logic *is* the infrastructure.
+A full-stack e-commerce application built entirely on [Temporal](https://temporal.io) durable execution. Every state transition — from adding an item to a cart through order fulfillment and delivery — is a Temporal workflow. No message queues, no cron jobs, no saga orchestrators. The business logic _is_ the infrastructure.
 
 **Stack:** Next.js 16 · Temporal TypeScript SDK · Apache Cassandra · Elasticsearch
 **Scale:** 157 source files · ~25,700 LOC · 6 Temporal workflow domains · 260 products · 10,411 variants
@@ -24,7 +24,7 @@ This project demonstrates that Temporal eliminates that entire infrastructure la
 - **No message queue** — no Kafka, no RabbitMQ, no SQS. Workflow signals replace all async messaging.
 - **No cron jobs** — scheduled behavior is a workflow timer: cart expiry and checkout timeouts are declarations in the state machine, not jobs scanning for stale rows.
 - **No dead-letter queues** — Temporal's retry policies and activity timeouts handle all transient failures.
-- **No saga orchestrator** — the checkout workflow *is* the saga. Steps, compensations, and timeouts are just workflow code.
+- **No saga orchestrator** — the checkout workflow _is_ the saga. Steps, compensations, and timeouts are just workflow code.
 - **No distributed transaction coordinator** — `updateWithStart` gives atomic create-or-update. `allHandlersFinished` gives graceful shutdown.
 
 ---
@@ -67,78 +67,78 @@ The Next.js server actions layer is the sole bridge between the browser and the 
 
 ### Cart — Declarative State Machine (Durable Entity Pattern)
 
-The cart is a long-running Temporal workflow that acts as a live, queryable entity orchestrated by the declarative `runStateMachine` driver. There are no database reads for cart state — the workflow *is* the cart.
+The cart is a long-running Temporal workflow that acts as a live, queryable entity orchestrated by the declarative `runStateMachine` driver. There are no database reads for cart state — the workflow _is_ the cart.
 
-| Pattern | Implementation |
-| --- | --- |
-| **State machine driver** | Managed via `runStateMachine` to handle all mutations sequentially via a FIFO update queue, preventing write race conditions |
-| **Lazy creation** | `updateWithStart` atomically creates-or-updates the cart workflow on the first "Add to Cart" click |
-| **Live state** | React UI reads cart state via Temporal queries; mutations are Temporal updates with synchronous return values |
-| **Infinite lifetime** | `continueAsNew` after 100 updates resets the event history while preserving full cart state |
-| **Graceful shutdown** | `await condition(allHandlersFinished)` ensures in-flight update handlers complete before `continueAsNew` |
-| **Child orchestration** | Checkout is started as a child workflow with `REQUEST_CANCEL` parent close policy — cart closure cancels an in-flight checkout so it releases its reservations |
+| Pattern                  | Implementation                                                                                                                                                 |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **State machine driver** | Managed via `runStateMachine` to handle all mutations sequentially via a FIFO update queue, preventing write race conditions                                   |
+| **Lazy creation**        | `updateWithStart` atomically creates-or-updates the cart workflow on the first "Add to Cart" click                                                             |
+| **Live state**           | React UI reads cart state via Temporal queries; mutations are Temporal updates with synchronous return values                                                  |
+| **Infinite lifetime**    | `continueAsNew` after 100 updates resets the event history while preserving full cart state                                                                    |
+| **Graceful shutdown**    | `await condition(allHandlersFinished)` ensures in-flight update handlers complete before `continueAsNew`                                                       |
+| **Child orchestration**  | Checkout is started as a child workflow with `REQUEST_CANCEL` parent close policy — cart closure cancels an in-flight checkout so it releases its reservations |
 
 ### Checkout — Declarative Step-based State Machine
 
-Checkout is a state machine managed by the `runStateMachine` driver with two working states — `validating → collecting` — plus a terminal `complete`. The UI's shipping → payment → review steps are *derived* from which prerequisites are satisfied in `collecting`, not modeled as machine states, and order processing runs inline within the `collecting` state's `submitOrder` handler.
+Checkout is a state machine managed by the `runStateMachine` driver with two working states — `validating → collecting` — plus a terminal `complete`. The UI's shipping → payment → review steps are _derived_ from which prerequisites are satisfied in `collecting`, not modeled as machine states, and order processing runs inline within the `collecting` state's `submitOrder` handler.
 
-| Pattern | Implementation |
-| --- | --- |
-| **State configuration** | Transitions and guards are defined declaratively in states config; `collecting` declares every command it accepts (`setShipping`, `setPayment`, `submitOrder`, …) |
-| **Update event mapping** | Custom update handlers map incoming signals/payloads (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events |
-| **Reservation management** | Inventory reservations are renewed at checkout start, released on timeout/cancellation, confirmed on success |
-| **Timeout** | `condition(() => complete, '1 hour')` auto-cancels stale checkouts and releases inventory |
-| **Cross-workflow signaling** | Checkout signals the parent cart workflow with the result via `getExternalWorkflowHandle` |
-| **Activity-driven spawning** | On order submission, an activity starts the OMS workflow — fully decoupling checkout from order management |
+| Pattern                      | Implementation                                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **State configuration**      | Transitions and guards are defined declaratively in states config; `collecting` declares every command it accepts (`setShipping`, `setPayment`, `submitOrder`, …) |
+| **Update event mapping**     | Custom update handlers map incoming signals/payloads (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events                                      |
+| **Reservation management**   | Inventory reservations are renewed at checkout start, released on timeout/cancellation, confirmed on success                                                      |
+| **Timeout**                  | `condition(() => complete, '1 hour')` auto-cancels stale checkouts and releases inventory                                                                         |
+| **Cross-workflow signaling** | Checkout signals the parent cart workflow with the result via `getExternalWorkflowHandle`                                                                         |
+| **Activity-driven spawning** | On order submission, an activity starts the OMS workflow — fully decoupling checkout from order management                                                        |
 
 ### Order Management (OMS) — Lifecycle Orchestration
 
 The OMS workflow manages an order from placement through delivery. It coordinates fulfiller assignments, tracks fulfillment status, and maintains audit history.
 
-| Pattern | Implementation |
-| --- | --- |
-| **Fulfiller routing** | `resolveFulfillerAssignments` activity decides which fulfiller handles each line item |
+| Pattern                   | Implementation                                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Fulfiller routing**     | `resolveFulfillerAssignments` activity decides which fulfiller handles each line item                                                                        |
 | **Decoupled fulfillment** | Fulfillment is started with `startChild` under `ABANDON` parent close policy — an independent lifecycle that survives OMS closure, with the parent link kept |
-| **Signal-driven updates** | Fulfillment status flows upward via signals — the OMS aggregates across all fulfiller orders to derive order-level status |
-| **Status projections** | Every status change is indexed to Elasticsearch for real-time admin panel updates |
-| **Audit trail** | Every status transition is recorded in the `order_status_history` Cassandra table |
+| **Signal-driven updates** | Fulfillment status flows upward via signals — the OMS aggregates across all fulfiller orders to derive order-level status                                    |
+| **Status projections**    | Every status change is indexed to Elasticsearch for real-time admin panel updates                                                                            |
+| **Audit trail**           | Every status transition is recorded in the `order_status_history` Cassandra table                                                                            |
 
 ### Fulfillment — Strategy-Based State Machine
 
 The fulfillment workflow receives pre-decided fulfiller orders and executes the appropriate fulfillment strategy for each, powered by the declarative `runStateMachine` driver.
 
-| Pattern | Implementation |
-| --- | --- |
+| Pattern                 | Implementation                                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | **State orchestration** | Transitions simulated orders through states (`processing`, `shipped`, `delivered`, etc.) using the state machine loop |
-| **Automatic mode** | `wf.sleep()` timers simulate processing (15s) → shipping (15s) → delivery (15s) |
-| **Manual mode** | Feature flag `MANUAL_FULFILLMENT=true` pauses at each stage, waiting for Temporal signals to advance |
-| **Simulated strategy** | Simulated fulfillment strategy (multi-supplier routing available in the full platform) |
-| **Inventory lifecycle** | Reservations are transferred to fulfiller on start, fulfilled on delivery, released on rejection |
-| **Email notifications** | Shipped and delivered emails are sent via activity stubs |
+| **Automatic mode**      | `wf.sleep()` timers simulate processing (15s) → shipping (15s) → delivery (15s)                                       |
+| **Manual mode**         | Feature flag `MANUAL_FULFILLMENT=true` pauses at each stage, waiting for Temporal signals to advance                  |
+| **Simulated strategy**  | Simulated fulfillment strategy (multi-supplier routing available in the full platform)                                |
+| **Inventory lifecycle** | Reservations are transferred to fulfiller on start, fulfilled on delivery, released on rejection                      |
+| **Email notifications** | Shipped and delivered emails are sent via activity stubs                                                              |
 
 ### Inventory — CQRS Event Processor
 
 The inventory service is a single long-running workflow that replaces an entire message queue consumer + cron job infrastructure.
 
-| Pattern | Implementation |
-| --- | --- |
+| Pattern                       | Implementation                                                                                              |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | **Signal-driven projections** | Write-side mutations signal the inventory service with changed SKUs; it runs targeted read-side projections |
-| **Dirty-flag batching** | Rapid-fire mutations result in a single projection pass, not one per mutation |
-| **Dual-trigger** | `condition(() => dirtySkus.size > 0, '5m')` gives both event-driven and time-driven behavior |
-| **Lazy start** | `signalWithStart` creates the inventory service on the first inventory mutation |
-| **Reservation lifecycle** | Temporary → Confirmed → Fulfilled/Released, with TTL-based expiration |
+| **Dirty-flag batching**       | Rapid-fire mutations result in a single projection pass, not one per mutation                               |
+| **Dual-trigger**              | `condition(() => dirtySkus.size > 0, '5m')` gives both event-driven and time-driven behavior                |
+| **Lazy start**                | `signalWithStart` creates the inventory service on the first inventory mutation                             |
+| **Reservation lifecycle**     | Temporary → Confirmed → Fulfilled/Released, with TTL-based expiration                                       |
 
 ### Identity — Shopper Authentication and Address Persistence
 
 The identity domain provides email-based shopper authentication and saved shipping addresses. This is a password-less, demo-focused system — shoppers sign in with just an email address, and accounts are auto-created on first login.
 
-| Pattern | Implementation |
-| --- | --- |
-| **Email-only auth** | No passwords — `POST /api/auth/shopper/login` auto-creates accounts on first login |
-| **Cookie sessions** | `shopperId` cookie persists the session across page loads (30-day TTL) |
+| Pattern                       | Implementation                                                                                              |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Email-only auth**           | No passwords — `POST /api/auth/shopper/login` auto-creates accounts on first login                          |
+| **Cookie sessions**           | `shopperId` cookie persists the session across page loads (30-day TTL)                                      |
 | **Guest-to-member promotion** | Guest shoppers who complete checkout are automatically promoted to members using the shipping address email |
-| **Address pre-fill** | Returning shoppers have their checkout shipping form pre-populated from saved default addresses |
-| **Order lookup** | `/shop/orders` page allows signed-in shoppers to view order history with full shipping details |
+| **Address pre-fill**          | Returning shoppers have their checkout shipping form pre-populated from saved default addresses             |
+| **Order lookup**              | `/shop/orders` page allows signed-in shoppers to view order history with full shipping details              |
 
 ---
 
@@ -148,32 +148,32 @@ The identity domain provides email-based shopper authentication and saved shippi
 
 Cassandra serves as the durable write store with partition-key isolation:
 
-| Table Family | Purpose |
-| --- | --- |
-| `products`, `variants`, `collections` | Product catalog |
-| `orders`, `orders_by_customer`, `orders_by_confirmation` | Order persistence (3 denormalized views) |
-| `order_status_history` | Audit trail (TimeUUID clustering) |
-| `inventory_stock_w`, `inventory_reservations_w` | Inventory state |
-| `shoppers` | Shopper accounts (email-keyed, no password) |
-| `shopper_shipping_addresses` | Saved shipping addresses (user_id partition) |
+| Table Family                                             | Purpose                                      |
+| -------------------------------------------------------- | -------------------------------------------- |
+| `products`, `variants`, `collections`                    | Product catalog                              |
+| `orders`, `orders_by_customer`, `orders_by_confirmation` | Order persistence (3 denormalized views)     |
+| `order_status_history`                                   | Audit trail (TimeUUID clustering)            |
+| `inventory_stock_w`, `inventory_reservations_w`          | Inventory state                              |
+| `shoppers`                                               | Shopper accounts (email-keyed, no password)  |
+| `shopper_shipping_addresses`                             | Saved shipping addresses (user_id partition) |
 
 ### Read Side — Elasticsearch
 
 Elasticsearch serves as the read projection layer with full-text search and faceted filtering:
 
-| Index | Projected By | Consumer |
-| --- | --- | --- |
-| `products` | Reindex API (bulk) | Storefront search, product detail |
-| `collections` | Reindex API (bulk) | Collection navigation |
-| `orders` | OMS workflow activities | Admin order list, search |
-| `customers` | OMS workflow activities | Admin search |
-| `fulfillers` | Reindex API (bulk) | Admin search |
-| `inventory` | Inventory service workflow | Admin inventory, search |
-| `fulfiller_orders` | OMS workflow activities | Admin order detail, search |
-| `carts` | Cart workflow activities | Admin carts, search |
-| `reservations` | Cart + checkout activities | Admin search |
-| `fulfillments` | Fulfillment workflow activities | Admin search |
-| `shipments` | Fulfillment workflow activities | Admin search |
+| Index              | Projected By                    | Consumer                          |
+| ------------------ | ------------------------------- | --------------------------------- |
+| `products`         | Reindex API (bulk)              | Storefront search, product detail |
+| `collections`      | Reindex API (bulk)              | Collection navigation             |
+| `orders`           | OMS workflow activities         | Admin order list, search          |
+| `customers`        | OMS workflow activities         | Admin search                      |
+| `fulfillers`       | Reindex API (bulk)              | Admin search                      |
+| `inventory`        | Inventory service workflow      | Admin inventory, search           |
+| `fulfiller_orders` | OMS workflow activities         | Admin order detail, search        |
+| `carts`            | Cart workflow activities        | Admin carts, search               |
+| `reservations`     | Cart + checkout activities      | Admin search                      |
+| `fulfillments`     | Fulfillment workflow activities | Admin search                      |
+| `shipments`        | Fulfillment workflow activities | Admin search                      |
 
 ### CQRS Flow
 
@@ -229,22 +229,45 @@ Task queue isolation means a slow fulfillment activity cannot block cart operati
 
 ## Key Temporal Patterns Demonstrated
 
-| # | Pattern | Where Used |
-| --- | --- | --- |
-| 1 | `updateWithStart` — atomic lazy entity creation | Cart |
-| 2 | Query/Update handlers — workflow as live entity | Cart, Checkout, OMS |
-| 3 | `continueAsNew` — infinite entity lifetime | Cart, Inventory Service |
-| 4 | Parent-child with `REQUEST_CANCEL` policy | Cart → Checkout |
-| 5 | Declarative state machine (`runStateMachine`) | Cart, Checkout, Fulfillment |
-| 6 | `condition()` with timeout — reservation TTL | Checkout, Inventory |
-| 7 | Cross-workflow signaling via `getExternalWorkflowHandle` | Checkout → Cart, Fulfillment → OMS |
-| 8 | Activity-driven workflow spawning (no parent link) | Checkout → OMS |
-| 8b | `startChild` + `ABANDON` — independent child lifecycle | OMS → Fulfillment |
-| 9 | Multi-fulfiller strategy routing | Fulfillment |
-| 10 | Signal-driven status propagation | Fulfillment → OMS → Elasticsearch |
-| 11 | Workflow as CQRS event processor | Inventory Service |
-| 12 | Shared connection, isolated task queues | Unified Worker |
-| 13 | Dirty-flag projection batching | OMS, Fulfillment |
+Grouped the same way as the admin dashboard's "Patterns Demonstrated" card (`/admin`).
+
+### Entity lifetime
+
+| Pattern                                                    | Where Used      |
+| ---------------------------------------------------------- | --------------- |
+| Long-running entity workflows                              | Cart, Inventory |
+| `updateWithStart` — atomic lazy entity creation            | Cart            |
+| `signalWithStart` — singleton auto-start                   | Inventory       |
+| Continue-as-New with handler drain (`allHandlersFinished`) | Cart, Inventory |
+
+### Interaction
+
+| Pattern                                     | Where Used                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------------- |
+| Updates — synchronous request-response      | Cart, Checkout, OMS                                                        |
+| Signals & Queries as live read models       | All domains                                                                |
+| `condition()` timers — TTL and idle timeout | Cart, Checkout, Fulfillment                                                |
+| Standalone activities, no wrapper workflow  | Identity ([ADR-0006](adr/0006-standalone-activities-for-thin-wrappers.md)) |
+
+### Topology
+
+| Pattern                                                | Where Used         |
+| ------------------------------------------------------ | ------------------ |
+| `startChild` + `REQUEST_CANCEL` parent-close policy    | Cart → Checkout    |
+| `startChild` + `ABANDON` — independent child lifecycle | OMS → Fulfillment  |
+| Activity-spawned peer workflow, no parent link         | Checkout → OMS     |
+| `getExternalWorkflowHandle` signaling                  | Every reverse edge |
+| Isolated task queues, shared connection                | 6 workers          |
+
+### Architecture
+
+| Pattern                                         | Where Used                                                                                                       |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| prepare → decide → finalize with a pure decider | [ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md) / [ADR-0009](adr/0009-chassaing-decider-split.md) |
+| Saga compensation on terminal states            | Checkout, Cart                                                                                                   |
+| Async transition-recording projection           | [ADR-0010](adr/0010-async-transition-recording-projection.md)                                                    |
+| Search Attribute + memo correlation             | [ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md)                                                      |
+| CQRS event processor with dirty-flag batching   | Inventory, OMS                                                                                                   |
 
 ---
 
@@ -306,24 +329,24 @@ npm run dev:init     # Wipe volumes, start Docker infrastructure, initialize Cas
 npm run dev:up       # Start storefront app (Next.js) + Temporal workers concurrently
 ```
 
-| Resource | URL |
-| --- | --- |
-| Storefront | [http://localhost:3000/shop](http://localhost:3000/shop) |
+| Resource    | URL                                                        |
+| ----------- | ---------------------------------------------------------- |
+| Storefront  | [http://localhost:3000/shop](http://localhost:3000/shop)   |
 | Admin Panel | [http://localhost:3000/admin](http://localhost:3000/admin) |
-| Temporal UI | [http://localhost:8233](http://localhost:8233) |
+| Temporal UI | [http://localhost:8233](http://localhost:8233)             |
 
 ---
 
 ## Technology Stack
 
-| Layer | Technology | Purpose |
-| --- | --- | --- |
-| Frontend | Next.js 16 (App Router), React | Server-rendered storefront and admin panel |
-| Server | Next.js Server Actions + API Routes | Bridge between browser and Temporal cluster |
-| Orchestration | Temporal TypeScript SDK | Durable workflow execution for all state transitions |
-| Write Store | Apache Cassandra | Partition-key-isolated persistence for catalog, orders, inventory |
-| Read Store | Elasticsearch | Full-text search, faceted filtering, CQRS read projections |
-| Infrastructure | Docker Compose | Local development; compatible with Temporal Cloud + managed databases |
+| Layer          | Technology                          | Purpose                                                               |
+| -------------- | ----------------------------------- | --------------------------------------------------------------------- |
+| Frontend       | Next.js 16 (App Router), React      | Server-rendered storefront and admin panel                            |
+| Server         | Next.js Server Actions + API Routes | Bridge between browser and Temporal cluster                           |
+| Orchestration  | Temporal TypeScript SDK             | Durable workflow execution for all state transitions                  |
+| Write Store    | Apache Cassandra                    | Partition-key-isolated persistence for catalog, orders, inventory     |
+| Read Store     | Elasticsearch                       | Full-text search, faceted filtering, CQRS read projections            |
+| Infrastructure | Docker Compose                      | Local development; compatible with Temporal Cloud + managed databases |
 
 ---
 
@@ -333,5 +356,5 @@ npm run dev:up       # Start storefront app (Next.js) + Temporal workers concurr
 - [Presentation Script](presentation-script.md) — 30–40 minute talk with code excerpts and live demo instructions
 - [Demo Instructions](demo-instructions.md) — Streamlined 4–5 minute live demo walkthrough
 - [Developer Guide](developer-guide.md) — Local development setup and debugging
-- [Deployment Options](cloud-deployment.md) — Survey of hosted options, biased toward serverless push *(exploratory)*
+- [Deployment Options](cloud-deployment.md) — Survey of hosted options, biased toward serverless push _(exploratory)_
 - [Temporal Lessons Learned](temporal-lessons-learned.md) — 26 hard-won lessons from building on Temporal durable execution
