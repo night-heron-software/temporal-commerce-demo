@@ -131,6 +131,17 @@ describe('submitting', () => {
     expect(out.error).toMatch(/fulfiller down/);
     expect(out.context.so.fulfillerExternalId).toBeUndefined();
   });
+
+  it('a resolved success:false result stays in submitting with the error surfaced', async () => {
+    vi.mocked(submitFulfillerOrder).mockResolvedValueOnce({
+      success: false,
+      errorMessage: 'fulfiller rejected the order',
+    });
+    const out = await FULFILLER_ORDER_STATES.submitting.fn(makeCtx(), timeout);
+    expect(out.next).toBe('submitting');
+    expect(out.error).toMatch(/fulfiller rejected the order/);
+    expect(out.context.so.fulfillerExternalId).toBeUndefined();
+  });
 });
 
 // ── in_production: auto-ship timer vs manual mode vs fulfiller updates ────────
