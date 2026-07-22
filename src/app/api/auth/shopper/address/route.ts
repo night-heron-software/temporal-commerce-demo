@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
 import { cookies } from 'next/headers';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { AddressRepository } from '@/temporal/identity';
 import { executeStandaloneActivity } from '@/lib/temporal-client';
 import { IDENTITY_TASK_QUEUE, DEMO_STORE_ID } from '@/temporal/contracts/constants';
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
   const defaultAddr = existing.find((a) => a.isDefault);
 
   const address = {
-    addressId: defaultAddr?.addressId || uuidv4(),
+    addressId: defaultAddr?.addressId || randomUUID(),
     label: body.label || 'Default',
     firstName: body.firstName,
     lastName: body.lastName,

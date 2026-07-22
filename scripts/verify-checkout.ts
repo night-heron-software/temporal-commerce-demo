@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { getTemporalClient } from '../src/lib/temporal-client';
 import { getCassandraClient, executeCql } from '../src/lib/cassandra-client';
 import { Cart, Checkout, OMS, Constants } from '../src/temporal/contracts';
@@ -29,7 +29,7 @@ async function run() {
 
     // 2. Connect to Temporal
     const client = await getTemporalClient();
-    const cartId = uuidv4();
+    const cartId = randomUUID();
     const cartStart = buildWorkflowStartOptions({
       storeId: DEMO_STORE_ID,
       domain: 'cart',

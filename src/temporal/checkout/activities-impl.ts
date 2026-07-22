@@ -8,7 +8,7 @@ type CartItem = Cart.CartItem;
 type Order = Cart.Order;
 type PaymentMethod = Cart.PaymentMethod;
 export type ShippingAddress = Cart.ShippingAddress;
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 import { executeCql, logger as log, sendEmail, getElasticsearchClient } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
@@ -121,7 +121,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     throw new Error('Shipping address email is required');
   }
 
-  const orderId = uuidv4();
+  const orderId = randomUUID();
   const confirmationNumber = generateConfirmationNumber();
 
   const order: Order = {

@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
 import { createLogger } from '@/lib/logger';
 import { cookies } from 'next/headers';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { ShopperRepository, AddressRepository } from '@/temporal/identity';
 import { executeStandaloneActivity } from '@/lib/temporal-client';
 import { IDENTITY_TASK_QUEUE, DEMO_STORE_ID } from '@/temporal/contracts/constants';
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     // Auto-create shopper (email-only, no password for demo) — a STANDALONE activity
     // on identity-queue (ADR-0006): the write runs on the worker with Temporal retries
     // and its own execution history; no wrapper workflow needed for a single write.
-    const id = uuidv4();
+    const id = randomUUID();
     const name = email.split('@')[0]; // derive display name from email
     await executeStandaloneActivity(CREATE_SHOPPER_ACTIVITY, {
       taskQueue: IDENTITY_TASK_QUEUE,

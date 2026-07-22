@@ -1,3 +1,5 @@
+import { defineSignal } from '@temporalio/workflow';
+
 /**
  * Deterministic reservation id — the single source of truth for the scheme.
  *
@@ -71,120 +73,8 @@ export interface StockLevel {
   available: number;
 }
 
-// Updates
-export const reserveInventoryUpdate = 'reserveInventory';
-export interface ReserveInventoryArgs {
-  reservationId: string;
-  cartId: string;
-  variantId: string;
-  quantity: number;
-  referenceId: string;
-  ttlSeconds: number;
-}
-
-export type ReserveInventoryResult =
-  | { success: true; reservation: Reservation }
-  | { success: false; error: string };
-
-// Update: Set fulfiller location stock (replaces adminSetStock)
-export const setFulfillerStockUpdate = 'setFulfillerStock';
-export interface SetFulfillerStockArgs {
-  fulfillerId: string;
-  fulfillerName: string;
-  cost: number;
-  totalStock: number;
-  orderedStock?: number;
-  address1: string;
-  address2?: string;
-  city: string;
-  state: string;
-  postalCode: string;
-  country: string;
-}
-export type SetFulfillerStockResult = {
-  fulfillerId: string;
-  previousStock: number;
-  newStock: number;
-  available: number;
-};
-
-// Signal: Transfer reservation to fulfiller location
-export const transferReservationSignal = 'transferReservation';
-export interface TransferReservationArgs {
-  reservationId: string;
-  fulfillerId: string;
-  quantity: number; // Allows partial transfers for splitting
-}
-
-// Signals
-export const updateReservationSignal = 'updateReservation';
-export interface UpdateReservationArgs {
-  reservationId: string;
-  newQuantity: number;
-}
-
-export const releaseReservationSignal = 'releaseReservation';
-export interface ReleaseReservationArgs {
-  reservationId: string;
-}
-
-export const confirmReservationSignal = 'confirmReservation';
-export interface ConfirmReservationArgs {
-  reservationId: string;
-}
-
-export const fulfillReservationSignal = 'fulfillReservation';
-export interface FulfillReservationArgs {
-  reservationId: string;
-}
-
-export const cancelReservationSignal = 'cancelReservation';
-export interface CancelReservationArgs {
-  reservationId: string;
-}
-
-// Queries
-export const getStockLevelQuery = 'getStockLevel';
-export const getFullStateQuery = 'getFullState';
-
-import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
-
-// ==================
-// Inventory Workflow Definitions
-// ==================
-
-// Queries
-export const getStockLevelQueryDef = defineQuery<StockLevel>(getStockLevelQuery);
-export const getFullStateQueryDef = defineQuery<InventoryItem>(getFullStateQuery);
-
-// Updates
-export const setFulfillerStockUpdateDef = defineUpdate<
-  SetFulfillerStockResult,
-  [SetFulfillerStockArgs]
->(setFulfillerStockUpdate);
-export const reserveInventoryUpdateDef = defineUpdate<
-  ReserveInventoryResult,
-  [ReserveInventoryArgs]
->(reserveInventoryUpdate);
-
-// Signals
-export const transferReservationSignalDef =
-  defineSignal<[TransferReservationArgs]>(transferReservationSignal);
-export const updateReservationSignalDef =
-  defineSignal<[UpdateReservationArgs]>(updateReservationSignal);
-export const releaseReservationSignalDef =
-  defineSignal<[ReleaseReservationArgs]>(releaseReservationSignal);
-export const confirmReservationSignalDef =
-  defineSignal<[ConfirmReservationArgs]>(confirmReservationSignal);
-export const fulfillReservationSignalDef =
-  defineSignal<[FulfillReservationArgs]>(fulfillReservationSignal);
-export const cancelReservationSignalDef =
-  defineSignal<[CancelReservationArgs]>(cancelReservationSignal);
-
 // Service-level signal for the inventoryServiceWorkflow
 export interface InventoryChangedPayload {
   blankSkus: string[];
 }
 export const inventoryChangedSignal = defineSignal<[InventoryChangedPayload]>('inventoryChanged');
-
-// Re-export the string names for external consumers that need them
