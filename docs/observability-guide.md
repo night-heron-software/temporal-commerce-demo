@@ -111,12 +111,13 @@ that object rather than spreading a second one into `Worker.create`.
   though a Server Action that starts a workflow _will_ propagate context onward through the client
   interceptor.
 - **Temporal server traces are separate.** The server container exports its own spans under
-  `service.name=temporal-server`. They appear alongside your application traces in Jaeger but are
+  `io.temporal.frontend` / `io.temporal.history` / `io.temporal.matching` (the server overrides the
+  compose file's `OTEL_RESOURCE_ATTRIBUTES` per component). They appear alongside your application traces in Jaeger but are
   produced by an entirely different pipeline.
 
 ### Reading a trace
 
-In Jaeger, select service **`demo-workers`** (application spans) or **`temporal-server`**. A
+In Jaeger, select service **`demo-workers`** (application spans) or one of the **`io.temporal.*`** server components. A
 typical order-placement trace shows the activity spans fanned out under the client-initiated
 parent, with Cassandra and Elasticsearch calls nested beneath each activity — which makes it a
 good tool for the specific question _"which activity is slow, and is it slow because of the

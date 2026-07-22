@@ -45,3 +45,6 @@ next-env.d.ts
 
 # mirrored product images
 /public/images/
+
+# private planning / session docs (local-only)
+/docs/private/

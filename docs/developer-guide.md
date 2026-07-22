@@ -284,7 +284,7 @@ The checkout workflow orchestrates the multi-step checkout process as a child of
 **Key Patterns:**
 
 - **Declarative State Machine** — Uses the `runStateMachine` framework driven by state definitions (`validating → collecting → complete`). The UI steps (shipping → payment → review) are _derived_ from which prerequisites are satisfied, not tracked as machine states; order processing runs inline within the `collecting` state's `submitOrder` handler.
-- **Inventory Reservation Renewal** — At checkout start, existing cart reservations are renewed with a fresh TTL.
+- **Inventory Reservation Renewal** — At checkout start, existing cart reservations are renewed **in place** with a fresh TTL (`renewAllForCheckout`) — there is no release/re-reserve window in which a concurrent cart could steal the stock. Quantity changes become in-place counter deltas; items whose hold has gone missing (e.g. swept by TTL expiry) log a warning and are reserved fresh.
 - **Update Handlers as Events** — Custom update handlers map incoming signals/arguments (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events which trigger deterministic transitions.
 - **Back Navigation** — Users can go back: setting shipping from the payment/review step is allowed, which recalculates costs.
 - **Parent Signaling** — On completion, the checkout workflow signals the parent cart workflow with a `CheckoutWorkflowResult` via `checkoutCompletedSignal`.
@@ -372,15 +372,16 @@ Stock reservations are the write-side mechanism that prevents oversell. They are
 
 **Lifecycle.** A reservation moves `TEMPORARY → CONFIRMED → FULFILLED`, or exits early via `RELEASED` / `CANCELLED`:
 
-| Operation | Repo method                     | Effect                                                                      | Triggered by                                             |
-| --------- | ------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Reserve   | `reserve` / `reserveAll`        | LWT-bump `reserved_stock`; insert `TEMPORARY` rows                          | cart add/update item (`reserveCartItem`); checkout start |
-| Confirm   | `confirm`                       | `status = CONFIRMED`, `expires_at = null` (no longer expirable)             | checkout after payment succeeds (`confirmReservations`)  |
-| Release   | `release` / `releaseAllForCart` | decrement `reserved_stock`; `status = RELEASED`                             | cart remove/cancel; checkout cancel/timeout; TTL sweep   |
-| Cancel    | `cancel`                        | decrement from the assigned fulfiller; `status = CANCELLED`                 | order cancelled post-confirm (fulfillment)               |
-| Fulfill   | `fulfill`                       | decrement **both** `total_stock` and `reserved_stock`; `status = FULFILLED` | fulfillment on delivery                                  |
-| Transfer  | `transferToFulfiller`           | assign `fulfiller_id` for routing                                           | fulfillment start                                        |
-| Expire    | `expireReservations`            | release `TEMPORARY` rows past `expires_at`                                  | inventory singleton's 5-minute sweep                     |
+| Operation | Repo method                     | Effect                                                                                                                         | Triggered by                                            |
+| --------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Reserve   | `reserve` / `reserveAll`        | LWT-bump `reserved_stock`; insert `TEMPORARY` rows                                                                             | cart add/update item (`reserveCartItem`)                |
+| Renew     | `renewAllForCheckout`           | extend `expires_at` in place; adjust counters for quantity changes; reserve fresh (with a warning) only when a hold is missing | checkout start (`renewReservationsForCheckout`)         |
+| Confirm   | `confirm`                       | `status = CONFIRMED`, `expires_at = null` (no longer expirable)                                                                | checkout after payment succeeds (`confirmReservations`) |
+| Release   | `release` / `releaseAllForCart` | decrement `reserved_stock`; `status = RELEASED`                                                                                | cart remove/cancel; checkout cancel/timeout; TTL sweep  |
+| Cancel    | `cancel`                        | decrement from the assigned fulfiller; `status = CANCELLED`                                                                    | order cancelled post-confirm (fulfillment)              |
+| Fulfill   | `fulfill`                       | decrement **both** `total_stock` and `reserved_stock`; `status = FULFILLED`                                                    | fulfillment on delivery                                 |
+| Transfer  | `transferToFulfiller`           | assign `fulfiller_id` for routing                                                                                              | fulfillment start                                       |
+| Expire    | `expireReservations`            | release `TEMPORARY` rows past `expires_at`                                                                                     | inventory singleton's 5-minute sweep                    |
 
 **Oversell safety is a Cassandra lightweight transaction (LWT)**, not workflow serialization. `reserve()` reads current availability, then commits the new `reserved_stock` with a compare-and-set guard:
 
@@ -394,7 +395,7 @@ If `[applied]` comes back false, the reserve returns `{ success: false }` and th
 
 **Expiry runs on two independent clocks.** A reservation carries a 15-minute TTL in `expires_at`, swept by the inventory singleton every 5 minutes (`CONSISTENCY_SWEEP_INTERVAL`). That is separate from the cart workflow's 30-day and the checkout's 1-hour timeouts — so a long-idle cart's holds are reclaimed by the sweep (or by preemption) well before the cart itself is abandoned. `confirm()` sets `expires_at = null`, so a paid reservation never expires.
 
-**Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller _before_ the single-row LWT, so only the `reserved_stock` bump is atomic — there is no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries and firmer per-SKU routing. Two artifacts hint at an earlier design and should not be taken as the live path: `renewReservation()` exists but is unused (checkout renews by release-then-reserve), and `reserveInventoryUpdate` — a Temporal Update definition in `contracts/inventory.ts` — is declared but never handled. Reserves do **not** flow through a workflow update.
+**Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller _before_ the single-row LWT, so only the `reserved_stock` bump is atomic — there is no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries and firmer per-SKU routing. Two artifacts hint at an earlier design and should not be taken as the live path: the single-item `renewReservation()` exists but is unused (checkout renews in bulk via `renewAllForCheckout`), and `reserveInventoryUpdate` — a Temporal Update definition in `contracts/inventory.ts` — is declared but never handled. Reserves do **not** flow through a workflow update.
 
 ### Inventory Service — Limitations & Production Gaps
 

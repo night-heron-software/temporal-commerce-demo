@@ -206,11 +206,6 @@ export async function startOrderManagementWorkflow(
 }
 
 /**
- * Renew (or re-reserve) inventory for checkout.
- * Releases any existing cart reservations and re-reserves all items
- * with fresh TTLs via the real InventoryCommandRepository.
- */
-/**
  * Live view of the parent cart's contents via the Temporal client (a workflow can't
  * query a peer directly, so this activity bridges). Used at `validating` and on each
  * recompute nudge so checkout never prices against a stale item snapshot.
@@ -234,6 +229,14 @@ export async function queryCart(parentCartWorkflowId: string): Promise<{
   };
 }
 
+/**
+ * Renew inventory holds for checkout — TRUE IN-PLACE, no release/reacquire gap.
+ * Existing TEMPORARY cart holds get their TTL extended (and quantity adjusted) in place
+ * via `renewAllForCheckout`, so a concurrent cart can never steal the stock between a
+ * release and a re-reserve. Items whose hold is missing (or already terminal, e.g. swept
+ * by TTL expiry) log a warning and are reserved fresh; holds for variants no longer in
+ * the cart are released.
+ */
 export async function renewReservationsForCheckout(
   cartId: string,
   items: CartItem[],
@@ -243,10 +246,7 @@ export async function renewReservationsForCheckout(
   unavailableItems?: Array<{ variantId: string; error: string }>;
   error?: string;
 }> {
-  log.info({ cartId, itemCount: items.length }, 'Renewing reservations for checkout');
-
-  // Release any stale reservations from the cart phase first
-  await InventoryCommandRepository.releaseAllForCart(cartId);
+  log.info({ cartId, itemCount: items.length }, 'Renewing reservations for checkout (in-place)');
 
   // Resolve blank SKUs for all items
   const resolvedItems: Array<{ variantId: string; blankSku: string; quantity: number }> = [];
@@ -270,11 +270,12 @@ export async function renewReservationsForCheckout(
     };
   }
 
-  // Reserve all items atomically (with rollback on any failure)
-  const result = await InventoryCommandRepository.reserveAll(
+  // Renew existing holds in place; reserve fresh only where no live hold exists.
+  const result = await InventoryCommandRepository.renewAllForCheckout(
     cartId,
     resolvedItems,
     `checkout-${cartId}`,
+    15 * 60, // 15-minute checkout TTL — matches reserveAll's hold window
   );
 
   if (!result.success) {
