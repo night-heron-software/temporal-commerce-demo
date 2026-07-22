@@ -101,6 +101,100 @@ export function groupItemsByBlankSku(
   return groups;
 }
 
+/** A cart hold as seen by the renewal planner (subset of ReservationRecord). */
+export interface RenewalExistingHold {
+  reservationId: string;
+  variantId: string;
+  blankSku: string;
+  quantity: number;
+  status: string;
+}
+
+/** Classified work for an in-place checkout renew — see planRenewal(). */
+export interface RenewalPlan {
+  /** Live TEMPORARY holds matching the item quantity — TTL extension only, no counter change. */
+  renew: Array<{ reservationId: string; variantId: string; blankSku: string; quantity: number }>;
+  /** Live TEMPORARY holds whose quantity changed — in-place counter delta + row updates. */
+  adjust: Array<{
+    reservationId: string;
+    variantId: string;
+    blankSku: string;
+    quantity: number;
+    quantityDelta: number;
+  }>;
+  /** Items with no live hold (missing or terminal status) — reserved fresh, with a warning. */
+  reserveFresh: Array<{
+    reservationId: string;
+    variantId: string;
+    blankSku: string;
+    quantity: number;
+    priorStatus: string | null;
+  }>;
+  /** Live TEMPORARY holds for variants no longer in the cart — released. */
+  releaseExtras: string[];
+}
+
+/**
+ * Classify a cart's existing reservations against its current items for an IN-PLACE
+ * checkout renew — the replacement for the old release-all-then-reserve-all gap, during
+ * which a concurrent cart could steal the freed stock.
+ *
+ * Buckets: existing TEMPORARY hold with the same quantity → `renew` (extend TTL only);
+ * existing TEMPORARY hold with a different quantity → `adjust` (counter delta, no
+ * release); hold missing or in a non-TEMPORARY status → `reserveFresh` (callers warn —
+ * checkout expects a live hold here); TEMPORARY holds for variants no longer in the cart
+ * → `releaseExtras`.
+ *
+ * `renew`/`adjust` carry the EXISTING hold's blankSku (where its counter attribution
+ * lives); `reserveFresh` carries the item's. Pure — exported for unit tests.
+ */
+export function planRenewal(
+  existing: RenewalExistingHold[],
+  items: Array<{ variantId: string; blankSku: string; quantity: number }>,
+  cartId: string,
+): RenewalPlan {
+  const holdByVariant = new Map(existing.map((r) => [r.variantId, r]));
+  const itemVariants = new Set(items.map((i) => i.variantId));
+
+  const plan: RenewalPlan = { renew: [], adjust: [], reserveFresh: [], releaseExtras: [] };
+
+  for (const item of items) {
+    const hold = holdByVariant.get(item.variantId);
+    if (!hold || hold.status !== 'TEMPORARY') {
+      plan.reserveFresh.push({
+        reservationId: buildReservationId(cartId, item.variantId),
+        variantId: item.variantId,
+        blankSku: item.blankSku,
+        quantity: item.quantity,
+        priorStatus: hold ? hold.status : null,
+      });
+    } else if (hold.quantity === item.quantity) {
+      plan.renew.push({
+        reservationId: hold.reservationId,
+        variantId: item.variantId,
+        blankSku: hold.blankSku,
+        quantity: item.quantity,
+      });
+    } else {
+      plan.adjust.push({
+        reservationId: hold.reservationId,
+        variantId: item.variantId,
+        blankSku: hold.blankSku,
+        quantity: item.quantity,
+        quantityDelta: item.quantity - hold.quantity,
+      });
+    }
+  }
+
+  for (const hold of existing) {
+    if (hold.status === 'TEMPORARY' && !itemVariants.has(hold.variantId)) {
+      plan.releaseExtras.push(hold.reservationId);
+    }
+  }
+
+  return plan;
+}
+
 /**
  * Recompute what reserved_stock SHOULD be per (blank_sku, fulfiller_id) from the active
  * reservation rows. Pure — the drift reconciler compares this against inventory_stock_w and
@@ -1380,6 +1474,194 @@ export const InventoryCommandRepository = {
         error: failures[0].result.error,
         contention: failures.some((r) => r.result.contention),
       };
+    }
+
+    return {
+      success: true,
+      reservations: items.map((item) => ({
+        variantId: item.variantId,
+        reservationId: buildReservationId(cartId, item.variantId),
+      })),
+    };
+  },
+
+  /**
+   * TRUE IN-PLACE batch renew of a cart's holds at checkout entry.
+   *
+   * Replaces the old releaseAllForCart + reserveAll sequence, whose release→reacquire
+   * window let a concurrent cart steal the freed stock. Existing live holds are never
+   * released here: matching TEMPORARY holds get a TTL extension in place (no counter
+   * change), quantity changes become an in-place counter delta on the hold's own
+   * attributed fulfiller, and only items with NO live hold (missing or terminal —
+   * e.g. swept by TTL expiry) are reserved fresh, with a warning. TEMPORARY holds for
+   * variants no longer in the cart are released.
+   *
+   * Failure contract: if any fresh reserve group fails, only the holds THIS CALL created
+   * (the fresh ones) are rolled back — renewed/adjusted holds stay intact, which is
+   * harmless because they are TTL-bound and still back the cart's items.
+   */
+  async renewAllForCheckout(
+    cartId: string,
+    items: Array<{ variantId: string; blankSku: string; quantity: number }>,
+    referenceId: string,
+    ttlSeconds: number,
+  ): Promise<BatchReserveResult> {
+    const existing = await this.getReservationsByCart(cartId);
+    const plan = planRenewal(
+      existing.map((r) => ({
+        reservationId: r.reservationId,
+        variantId: r.variantId,
+        blankSku: r.blankSku,
+        quantity: r.quantity,
+        status: r.status,
+      })),
+      items,
+      cartId,
+    );
+    const holdById = new Map(existing.map((r) => [r.reservationId, r]));
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+    const touchedSkus = new Set<string>();
+
+    // ADJUST entries whose hold has no attributed fulfiller cannot move a counter —
+    // warn and demote them to the fresh-reserve path (post-#20 rows always have one).
+    const adjustable: typeof plan.adjust = [];
+    const reserveFresh = [...plan.reserveFresh];
+    for (const entry of plan.adjust) {
+      const hold = holdById.get(entry.reservationId);
+      if (hold?.fulfillerId) {
+        adjustable.push(entry);
+      } else {
+        logger.warn(
+          { cartId, variantId: entry.variantId, reservationId: entry.reservationId },
+          'Hold has no attributed fulfiller at checkout renew — reserving fresh instead',
+        );
+        reserveFresh.push({
+          reservationId: entry.reservationId,
+          variantId: entry.variantId,
+          blankSku: entry.blankSku,
+          quantity: entry.quantity,
+          priorStatus: 'TEMPORARY',
+        });
+      }
+    }
+
+    // RENEW: batched in-place TTL extension (main row + by_status mirror). No counter change.
+    if (plan.renew.length > 0) {
+      const statements = plan.renew.flatMap((entry) => {
+        const hold = holdById.get(entry.reservationId)!;
+        touchedSkus.add(entry.blankSku);
+        return [
+          {
+            query: `UPDATE inventory_reservations_w
+                    SET expires_at = ?, reference_id = ?, updated_at = ?
+                    WHERE reservation_id = ?`,
+            params: [expiresAt, referenceId, now, entry.reservationId] as unknown[],
+          },
+          {
+            query: `UPDATE inventory_reservations_by_status_w
+                    SET expires_at = ?, reference_id = ?, updated_at = ?
+                    WHERE status = 'TEMPORARY' AND reservation_id = ?`,
+            params: [expiresAt, referenceId, now, entry.reservationId] as unknown[],
+          },
+          historyInsert({
+            cartId,
+            operation: 'RENEW',
+            reservationId: entry.reservationId,
+            blankSku: entry.blankSku,
+            variantId: entry.variantId,
+            fulfillerId: hold.fulfillerId,
+            quantity: entry.quantity,
+            priorStatus: 'TEMPORARY',
+            newStatus: 'TEMPORARY',
+            referenceId,
+            details: { newExpiresAt: expiresAt.toISOString(), ttlSeconds },
+            at: now,
+          }),
+        ];
+      });
+      await executeBatch(statements);
+    }
+
+    // ADJUST: per hold — counter delta on its own attributed fulfiller, then row updates.
+    for (const entry of adjustable) {
+      const hold = holdById.get(entry.reservationId)!;
+      touchedSkus.add(entry.blankSku);
+      await casAdjustStock(entry.blankSku, hold.fulfillerId!, entry.quantityDelta);
+      await executeBatch([
+        {
+          query: `UPDATE inventory_reservations_w
+                  SET quantity = ?, expires_at = ?, reference_id = ?, updated_at = ?
+                  WHERE reservation_id = ?`,
+          params: [entry.quantity, expiresAt, referenceId, now, entry.reservationId] as unknown[],
+        },
+        {
+          query: `UPDATE inventory_reservations_by_cart_w
+                  SET quantity = ?
+                  WHERE cart_id = ? AND reservation_id = ?`,
+          params: [entry.quantity, cartId, entry.reservationId] as unknown[],
+        },
+        {
+          query: `UPDATE inventory_reservations_by_status_w
+                  SET quantity = ?, expires_at = ?, reference_id = ?, updated_at = ?
+                  WHERE status = 'TEMPORARY' AND reservation_id = ?`,
+          params: [entry.quantity, expiresAt, referenceId, now, entry.reservationId] as unknown[],
+        },
+        historyInsert({
+          cartId,
+          operation: 'RENEW',
+          reservationId: entry.reservationId,
+          blankSku: entry.blankSku,
+          variantId: entry.variantId,
+          fulfillerId: hold.fulfillerId,
+          quantity: entry.quantity,
+          priorStatus: 'TEMPORARY',
+          newStatus: 'TEMPORARY',
+          referenceId,
+          details: { quantityDelta: entry.quantityDelta },
+          at: now,
+        }),
+      ]);
+    }
+
+    // RESERVE_FRESH: items with no live hold — warn (checkout expected one) and reserve.
+    if (reserveFresh.length > 0) {
+      for (const entry of plan.reserveFresh) {
+        logger.warn(
+          { cartId, variantId: entry.variantId, priorStatus: entry.priorStatus },
+          'Reservation missing at checkout renew — reserving fresh',
+        );
+      }
+      const groups = groupItemsByBlankSku(cartId, reserveFresh);
+      const skuResults = await Promise.all(
+        Array.from(groups.entries()).map(async ([blankSku, entries]) => ({
+          entries,
+          result: await this.reserveGroup(blankSku, cartId, entries, referenceId, ttlSeconds),
+        })),
+      );
+
+      const failures = skuResults.filter((r) => !r.result.success);
+      if (failures.length > 0) {
+        // Roll back ONLY the holds this call created; renewed/adjusted holds stay.
+        const freshIds = skuResults
+          .filter((r) => r.result.success)
+          .flatMap((r) => r.entries.map((e) => e.reservationId));
+        await Promise.all(freshIds.map((id) => this.release(id, 'checkout-renew-rollback')));
+
+        return {
+          success: false,
+          error: failures[0].result.error,
+          contention: failures.some((r) => r.result.contention),
+        };
+      }
+    }
+
+    // RELEASE_EXTRAS: live holds for variants no longer in the cart.
+    await Promise.all(plan.releaseExtras.map((id) => this.release(id, 'checkout-renew-extra')));
+
+    if (touchedSkus.size > 0) {
+      await signalInventoryChanged([...touchedSkus]);
     }
 
     return {
