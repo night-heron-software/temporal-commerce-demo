@@ -31,6 +31,12 @@ const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || 'default';
 type PinoLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 Runtime.install({
+  // Worker/client SDK metrics (schedule-to-start latency, activity failures, poll counts)
+  // exposed for Prometheus. Workers run on the HOST, so the in-container Prometheus scrapes
+  // this via host.docker.internal:9466 (see observability/prometheus.yml).
+  telemetryOptions: {
+    metrics: { prometheus: { bindAddress: '0.0.0.0:9466' } },
+  },
   logger: {
     log: (level, message, meta) => {
       const pinoLevel = String(level).toLowerCase() as PinoLevel;

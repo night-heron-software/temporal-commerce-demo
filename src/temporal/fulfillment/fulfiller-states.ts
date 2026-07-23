@@ -65,7 +65,15 @@ async function indexNewestShipment(ctx: FulfillerOrderWorkflowContext): Promise<
   });
 }
 
-/** Route a fulfiller-status decision by the resulting status. */
+/**
+ * Route a fulfiller-status decision by the resulting status.
+ *
+ * By design: `partially_shipped` routes into the `shipped` state, whose simulation
+ * timer auto-delivers the whole order — partials intentionally auto-complete so the
+ * demo keeps moving instead of waiting on outstanding items. `manualMode`
+ * (MANUAL_FULFILLMENT) is the escape hatch for demos that want to hold partials and
+ * drive the remaining updates manually.
+ */
 function routeByStatus(
   context: FulfillerOrderWorkflowContext,
 ): FulfillerOrderStateName | `__terminal:${string}` {
@@ -148,6 +156,13 @@ const submitting = fulfiller.transitions(
           },
           shippingMethod: ctx.shippingMethod ?? 'standard',
         });
+        // A resolved-but-failed submit must not advance the order (and a missing
+        // fulfillerOrderId can't fill the required external id). Throwing here reuses
+        // the prepare-throw path: stay in `submitting`, surface the error, let the
+        // timeout retry.
+        if (!result.success || !result.fulfillerOrderId) {
+          throw new Error(result.errorMessage ?? 'fulfiller submit failed');
+        }
         return { fulfillerExternalId: result.fulfillerOrderId };
       },
       decide(ctx, meta, prepared: { fulfillerExternalId: string }) {
@@ -191,6 +206,10 @@ const shipped = fulfiller.transitions(
   {},
   {
     onTimeout: {
+      // By design: this timer fires for partially-shipped orders too (routeByStatus sends
+      // `partially_shipped` here), so partials auto-complete on the simulation timer —
+      // the demo favors forward motion over blocking on unshipped items. Set `manualMode`
+      // (MANUAL_FULFILLMENT) to suppress the timer and drive delivery manually.
       decide(ctx, meta) {
         if (ctx.manualMode) {
           return { context: ctx as FulfillerOrderWorkflowContext, next: SELF };

@@ -1,7 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { getActiveCarts, getCartDetails, type CartSummary } from '../admin-cart-actions';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  searchCarts,
+  getCartDetails,
+  type CartSummary,
+  type CartSearchStatus,
+} from '../admin-cart-actions';
 import type { CartDetails } from '@/app/shop/cart-actions';
 import EntityIds from '@/components/EntityIds';
 
@@ -12,32 +17,30 @@ export default function AdminCartsPage() {
   const [expandedCart, setExpandedCart] = useState<string | null>(null);
   const [cartDetails, setCartDetails] = useState<Record<string, CartDetails>>({});
   const [loadingDetails, setLoadingDetails] = useState<string | null>(null);
+  // Default 'all': carts are ephemeral, so the index usually holds mostly closed
+  // carts — an Active-only default would render empty most of the time.
+  const [statusFilter, setStatusFilter] = useState<CartSearchStatus>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const fetchCarts = async () => {
+  const fetchCarts = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    const result = await getActiveCarts();
+    const result = await searchCarts({ status: statusFilter, q: searchQuery });
     if (result.success) {
       setCarts(result.data);
     } else {
       setError(result.error);
     }
     setIsLoading(false);
-  };
+  }, [statusFilter, searchQuery]);
 
-  // Initial load: isLoading starts true, so we only need the async resolution
+  // Fetch on mount and whenever the filter/search changes; debounce keystrokes lightly.
   useEffect(() => {
-    let active = true;
-    getActiveCarts().then((result) => {
-      if (!active) return;
-      if (result.success) setCarts(result.data);
-      else setError(result.error);
-      setIsLoading(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
+    const timer = setTimeout(() => {
+      fetchCarts();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [fetchCarts]);
 
   const toggleCartDetails = async (cartId: string) => {
     if (expandedCart === cartId) {
@@ -94,7 +97,7 @@ export default function AdminCartsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Active Carts</h1>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Carts</h1>
           <button
             onClick={fetchCarts}
             disabled={isLoading}
@@ -113,14 +116,45 @@ export default function AdminCartsPage() {
         </a>
       </div>
 
-      {/* Summary */}
+      {/* Toolbar: search + status scope */}
+      <div className="flex items-center gap-3 mb-4">
+        <input
+          type="text"
+          placeholder="Search by cart ID or email..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="flex-1 max-w-sm px-3 py-2 text-sm rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <div className="flex gap-1">
+          <FilterPill active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>
+            All
+          </FilterPill>
+          <FilterPill active={statusFilter === 'active'} onClick={() => setStatusFilter('active')}>
+            Active
+          </FilterPill>
+          <FilterPill
+            active={statusFilter === 'completed'}
+            onClick={() => setStatusFilter('completed')}
+          >
+            Completed
+          </FilterPill>
+          <FilterPill
+            active={statusFilter === 'abandoned'}
+            onClick={() => setStatusFilter('abandoned')}
+          >
+            Abandoned
+          </FilterPill>
+        </div>
+      </div>
+
+      {/* Summary (reflects the filtered set) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
           <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">
-            Active Carts
+            Carts
           </div>
           <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 tabular-nums">
-            {carts.filter((c) => c.status === 'active').length}
+            {carts.length}
           </div>
         </div>
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
@@ -159,11 +193,19 @@ export default function AdminCartsPage() {
       )}
 
       {isLoading ? (
-        <div className="text-center py-16 text-zinc-500">Loading active carts...</div>
+        <div className="text-center py-16 text-zinc-500">Loading carts...</div>
       ) : carts.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-zinc-800 rounded-lg text-zinc-500">
-          <p className="text-lg mb-2">No active carts</p>
+          <p className="text-lg mb-2">
+            {statusFilter === 'all' && !searchQuery
+              ? 'No carts'
+              : 'No carts match the current filter'}
+          </p>
           <p className="text-sm">Add an item from the storefront to create a cart workflow.</p>
+          <p className="text-xs mt-2 text-zinc-400">
+            Note: the carts index is rebuilt empty by reindex-all — cart history is ephemeral by
+            design.
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -362,5 +404,30 @@ export default function AdminCartsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Sub-components ───
+
+function FilterPill({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+        active
+          ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900'
+          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-300 dark:hover:bg-zinc-600'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
