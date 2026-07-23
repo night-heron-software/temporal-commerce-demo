@@ -23,7 +23,11 @@ export function createErrorResponse(
 ): NextResponse {
   const cid = correlationId || randomUUID();
 
-  log.error({ ...context, correlationId: cid, status, err: error }, message);
+  // 4xx responses are user-input/informational (bad lookups, unknown indices, guard
+  // rejections) — warn keeps them out of the system_errors index, which is reserved for
+  // genuine server-side failures (5xx stays error).
+  const logFn = status >= 500 ? log.error : log.warn;
+  logFn.call(log, { ...context, correlationId: cid, status, err: error }, message);
 
   const payload: ApiErrorResponse = {
     error: message,

@@ -53,6 +53,9 @@ export async function GET(request: NextRequest) {
     const trace = await buildOrderTrace(resolved.storeId, resolved.orderId);
     return NextResponse.json({ trace });
   } catch (error) {
-    return createErrorResponse(500, 'Failed to build order trace', error);
+    // Deliberately 400/warn, not 500/error: this catch is dominated by malformed lookups
+    // (e.g. a non-UUID orderId pasted into the URL throws in Uuid.fromString), which are
+    // user-input problems — informational, not system_errors material.
+    return createErrorResponse(400, 'Failed to build order trace', error);
   }
 }
