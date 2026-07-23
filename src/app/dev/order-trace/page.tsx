@@ -3,14 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { RefreshButton } from '@/components/RefreshButton';
-import {
-  computeGanttWindow,
-  deriveTransitions,
-  diffSnapshots,
-  type SnapshotChange,
-  type TransitionKind,
-  type TransitionStep,
-} from './history-decode';
+import { computeGanttWindow, diffSnapshots, type SnapshotChange } from './history-decode';
 import type {
   OrderTrace,
   TraceNode,
@@ -19,7 +12,6 @@ import type {
   TraceInventoryEvent,
   OrderCandidate,
   TraceDomain,
-  TraceStatusHistoryRow,
 } from './trace-service';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,11 +62,6 @@ const DOMAIN_ACCENT: Record<TraceDomain, { border: string; badge: string; bar: s
   },
 };
 
-const STATUS_AUDIT_ACCENT = {
-  border: 'border-emerald-700',
-  badge: 'bg-emerald-900 text-emerald-200 border-emerald-700',
-};
-
 // Inventory is not a TraceDomain (its journal is correlation-keyed, not a workflow node),
 // so it gets its own accent rather than widening DOMAIN_ACCENT.
 const INVENTORY_ACCENT = {
@@ -82,7 +69,7 @@ const INVENTORY_ACCENT = {
   badge: 'bg-teal-900 text-teal-200 border-teal-700',
 };
 
-type TraceTab = 'event-history' | 'state-machines' | 'status-history';
+type TraceTab = 'state-machines' | 'status-history';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -398,92 +385,6 @@ function StateRow({
         </tr>
       )}
     </>
-  );
-}
-
-// Domain workflows that expose a real state-name history in their queried state.
-function extractStateHistory(
-  state: unknown,
-): { status: string; timestamp?: string; note?: string | null }[] | undefined {
-  const sh = (state as { statusHistory?: unknown } | null)?.statusHistory;
-  if (!Array.isArray(sh)) return undefined;
-  return sh.filter(
-    (e): e is { status: string; timestamp?: string; note?: string | null } =>
-      Boolean(e) && typeof (e as { status?: unknown }).status === 'string',
-  );
-}
-
-const TRANSITION_STYLE: Record<TransitionKind, { dot: string; tag: string; label: string }> = {
-  start: { dot: 'bg-gray-400', tag: 'text-gray-400', label: 'start' },
-  state: { dot: 'bg-cyan-400', tag: 'text-cyan-300', label: 'state' },
-  update: { dot: 'bg-blue-400', tag: 'text-blue-300', label: 'update' },
-  signal: { dot: 'bg-amber-400', tag: 'text-amber-300', label: 'signal' },
-  child: { dot: 'bg-orange-400', tag: 'text-orange-300', label: 'child' },
-  terminal: { dot: 'bg-emerald-400', tag: 'text-emerald-300', label: 'end' },
-};
-
-function TransitionRow({ step }: { step: TransitionStep }) {
-  const [showPayload, setShowPayload] = useState(false);
-  const [showResult, setShowResult] = useState(false);
-  const style = TRANSITION_STYLE[step.kind];
-  const hasPayload = step.payload !== undefined && step.payload !== null;
-  const hasResult = step.result !== undefined && step.result !== null;
-
-  return (
-    <li className="relative pl-4">
-      <span
-        className={`absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${style.dot} ring-2 ring-gray-950`}
-      />
-      <div className="flex items-baseline gap-2 flex-wrap">
-        <span
-          className={`text-[10px] uppercase tracking-wide font-semibold w-12 shrink-0 ${style.tag}`}
-        >
-          {style.label}
-        </span>
-        <span className="text-xs font-mono text-gray-200">
-          {step.kind === 'state' ? (step.delta ?? `→ ${step.label}`) : step.label}
-        </span>
-        <span className="text-[10px] text-gray-600 font-mono">{fmtTime(step.at)}</span>
-        {step.kind === 'state' && step.cause && (
-          <span className="text-[10px] text-gray-500">
-            caused by <span className="text-gray-400 font-mono">{step.cause}</span>
-          </span>
-        )}
-        {step.note && <span className="text-[10px] text-gray-500">· {step.note}</span>}
-        {hasPayload && (
-          <button
-            onClick={() => setShowPayload((v) => !v)}
-            className="text-[10px] text-blue-400 hover:underline"
-          >
-            {showPayload ? '▾ payload' : '▸ payload'}
-          </button>
-        )}
-        {hasResult && (
-          <button
-            onClick={() => setShowResult((v) => !v)}
-            className="text-[10px] text-emerald-400 hover:underline"
-          >
-            {showResult ? '▾ result' : '▸ result'}
-          </button>
-        )}
-      </div>
-      {hasPayload && showPayload && (
-        <div className="mt-1 mb-1">
-          <CodeBlock
-            text={JSON.stringify(step.payload, null, 2)}
-            className="text-[11px] text-gray-300 max-h-64"
-          />
-        </div>
-      )}
-      {hasResult && showResult && (
-        <div className="mt-1 mb-1">
-          <CodeBlock
-            text={JSON.stringify(step.result, null, 2)}
-            className="text-[11px] text-emerald-300 max-h-64"
-          />
-        </div>
-      )}
-    </li>
   );
 }
 
@@ -898,34 +799,25 @@ function TransitionsTimeline({
   forceOpen: boolean;
   full: boolean;
 }) {
-  // Prefer the persisted projection (real from→to + snapshot diffs, ADR-0010); fall back to the
-  // Temporal-history-derived timeline for workflows recorded before the projection existed.
-  if (node.transitions.length > 0) {
-    // Re-key on forceOpen so a tab-level Expand/Collapse-all resets any per-row overrides.
-    return (
-      <PersistedTimeline
-        key={forceOpen ? 'all-open' : 'all-closed'}
-        transitions={node.transitions}
-        forceOpen={forceOpen}
-        full={full}
-      />
-    );
-  }
-
-  const steps: TransitionStep[] = deriveTransitions(node.events, extractStateHistory(node.state));
-  if (steps.length === 0) {
+  // The persisted projection (real from→to + snapshot diffs, ADR-0010) is the only transition
+  // source; workflows recorded before the projection existed simply have none. Raw Temporal
+  // history is available via the node's Temporal UI link.
+  if (node.transitions.length === 0) {
     return (
       <div className="text-xs text-gray-600 italic">
-        No transitions recorded (no history events for this workflow).
+        No transitions recorded (workflow predates the projection) — see the Temporal UI link for
+        raw history.
       </div>
     );
   }
+  // Re-key on forceOpen so a tab-level Expand/Collapse-all resets any per-row overrides.
   return (
-    <ol className="relative border-l border-gray-800 ml-1.5 space-y-1.5">
-      {steps.map((s, i) => (
-        <TransitionRow key={i} step={s} />
-      ))}
-    </ol>
+    <PersistedTimeline
+      key={forceOpen ? 'all-open' : 'all-closed'}
+      transitions={node.transitions}
+      forceOpen={forceOpen}
+      full={full}
+    />
   );
 }
 
@@ -1151,233 +1043,6 @@ function StateMachinesTab({ trace }: { trace: OrderTrace }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Event History Tab — grouped by workflow, each collapsible
-// ─────────────────────────────────────────────────────────────────────────────
-
-function WorkflowEventTable({ node }: { node: TraceNode }) {
-  if (node.events.length === 0) {
-    return <div className="px-4 py-2 text-xs text-gray-600 italic">No history events fetched.</div>;
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs font-mono">
-        <thead>
-          <tr className="text-gray-600 uppercase text-[10px] tracking-wide font-sans border-b border-gray-800">
-            <th className="px-3 py-1.5 text-left w-10">#</th>
-            <th className="px-3 py-1.5 text-left whitespace-nowrap">Time</th>
-            <th className="px-3 py-1.5 text-left">Event Type</th>
-            <th className="px-3 py-1.5 text-left">Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {node.events.map((ev, i) => (
-            <tr
-              key={`${ev.eventId}-${i}`}
-              className="border-t border-gray-800/60 hover:bg-gray-800/30"
-            >
-              <td className="px-3 py-1 text-gray-600">{ev.eventId}</td>
-              <td className="px-3 py-1 text-gray-500 whitespace-nowrap">{fmtTime(ev.timestamp)}</td>
-              <td className="px-3 py-1 text-gray-200">{ev.eventType}</td>
-              <td className="px-3 py-1 text-gray-400 max-w-sm">
-                <ExpandableCell text={ev.detail ?? ''} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function StatusAuditTable({ rows }: { rows: TraceStatusHistoryRow[] }) {
-  if (rows.length === 0) {
-    return (
-      <div className="px-4 py-2 text-xs text-gray-600 italic">No status history in Cassandra.</div>
-    );
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs font-mono">
-        <thead>
-          <tr className="text-gray-600 uppercase text-[10px] tracking-wide font-sans border-b border-gray-800">
-            <th className="px-3 py-1.5 text-left whitespace-nowrap">Time</th>
-            <th className="px-3 py-1.5 text-left">Status</th>
-            <th className="px-3 py-1.5 text-left">Updated By</th>
-            <th className="px-3 py-1.5 text-left">Note</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((h, i) => (
-            <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30">
-              <td className="px-3 py-1 text-gray-500 whitespace-nowrap">{fmt(h.eventTime)}</td>
-              <td className="px-3 py-1">
-                <span
-                  className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] ${statusBadge(h.status)}`}
-                >
-                  {h.status}
-                </span>
-              </td>
-              <td className="px-3 py-1 text-gray-400">{h.updatedBy}</td>
-              <td className="px-3 py-1 text-gray-400">{h.note ?? ''}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// Group header for a workflow — shows parallel peers prominently
-function WorkflowGroupHeader({
-  node,
-  open,
-  onToggle,
-  parallelPeers,
-}: {
-  node: TraceNode;
-  open: boolean;
-  onToggle: () => void;
-  parallelPeers: TraceNode[];
-}) {
-  const accent = DOMAIN_ACCENT[node.domain];
-  const now = useRenderNow();
-  const start = node.startTime ? new Date(node.startTime).getTime() : now;
-  const end = node.closeTime ? new Date(node.closeTime).getTime() : now;
-
-  return (
-    <button
-      onClick={onToggle}
-      className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-800/50 text-left select-none"
-    >
-      <span className="text-gray-400 text-xs w-4 shrink-0">{open ? '▾' : '▸'}</span>
-
-      <span
-        className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${accent.badge}`}
-      >
-        {DOMAIN_LABELS[node.domain]}
-      </span>
-
-      <span
-        className={`inline-block px-1.5 py-0.5 rounded-full text-[10px] shrink-0 ${statusBadge(node.status)}`}
-      >
-        {node.status}
-      </span>
-
-      {/* Parallel indicator */}
-      {parallelPeers.length > 0 && (
-        <span className="inline-flex items-center gap-1 text-[10px] text-yellow-400 bg-yellow-950/50 border border-yellow-800/50 rounded-full px-2 py-0.5 shrink-0">
-          ⟷ concurrent with {parallelPeers.map((p) => DOMAIN_LABELS[p.domain]).join(' + ')}
-        </span>
-      )}
-
-      <code className="text-[10px] text-gray-600 truncate hidden sm:inline min-w-0">
-        {node.workflowId}
-      </code>
-
-      <span className="ml-auto text-[10px] text-gray-600 shrink-0 whitespace-nowrap font-mono">
-        {fmtDuration(end - start)} · {node.events.length} events
-      </span>
-
-      <a
-        href={node.temporalUiUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-500 hover:text-blue-400 text-[11px] ml-2 shrink-0 whitespace-nowrap"
-        onClick={(e) => e.stopPropagation()}
-      >
-        Temporal UI →
-      </a>
-    </button>
-  );
-}
-
-function EventHistoryTab({ trace }: { trace: OrderTrace }) {
-  const parallelMap = useMemo(() => detectParallel(trace.nodes), [trace.nodes]);
-  const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
-  const [globalOpen, setGlobalOpen] = useState(true);
-
-  const isOpen = (id: string) => openMap[id] ?? globalOpen;
-  const toggle = (id: string) => setOpenMap((prev) => ({ ...prev, [id]: !isOpen(id) }));
-  const expandAll = () => {
-    setGlobalOpen(true);
-    setOpenMap({});
-  };
-  const collapseAll = () => {
-    setGlobalOpen(false);
-    setOpenMap({});
-  };
-
-  const totalEvents = trace.nodes.reduce((s, n) => s + n.events.length, 0);
-
-  return (
-    <div>
-      {/* Gantt mini-view */}
-      <GanttChart nodes={trace.nodes} />
-
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-700 bg-gray-800/30">
-        <button
-          onClick={expandAll}
-          className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
-        >
-          Expand All
-        </button>
-        <span className="text-gray-700 text-xs">|</span>
-        <button
-          onClick={collapseAll}
-          className="text-xs text-blue-400 hover:text-blue-300 hover:underline"
-        >
-          Collapse All
-        </button>
-        <span className="ml-auto text-xs text-gray-600">
-          {totalEvents} Temporal events · {trace.statusHistory.length} audit entries ·{' '}
-          {trace.nodes.length} workflows
-        </span>
-      </div>
-
-      {/* Workflow sections */}
-      <div className="divide-y divide-gray-800">
-        {trace.nodes.map((node) => (
-          <div key={node.workflowId} className={`border-l-2 ${DOMAIN_ACCENT[node.domain].border}`}>
-            <WorkflowGroupHeader
-              node={node}
-              open={isOpen(node.workflowId)}
-              onToggle={() => toggle(node.workflowId)}
-              parallelPeers={parallelMap.get(node.workflowId) ?? []}
-            />
-            {isOpen(node.workflowId) && <WorkflowEventTable node={node} />}
-          </div>
-        ))}
-
-        {/* OMS Audit Trail */}
-        {trace.statusHistory.length > 0 && (
-          <div className={`border-l-2 ${STATUS_AUDIT_ACCENT.border}`}>
-            <button
-              onClick={() => toggle('__audit__')}
-              className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-800/50 text-left select-none"
-            >
-              <span className="text-gray-400 text-xs w-4 shrink-0">
-                {isOpen('__audit__') ? '▾' : '▸'}
-              </span>
-              <span
-                className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${STATUS_AUDIT_ACCENT.badge}`}
-              >
-                OMS Audit
-              </span>
-              <span className="text-xs text-gray-500 ml-2">Cassandra status history</span>
-              <span className="ml-auto text-[10px] text-gray-600 shrink-0">
-                {trace.statusHistory.length} entries
-              </span>
-            </button>
-            {isOpen('__audit__') && <StatusAuditTable rows={trace.statusHistory} />}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Status History Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1427,15 +1092,9 @@ function StatusHistoryTab({ trace }: { trace: OrderTrace }) {
 
 function TraceTabs({ trace }: { trace: OrderTrace }) {
   const [tab, setTab] = useState<TraceTab>('state-machines');
-  const totalEvents = trace.nodes.reduce((s, n) => s + n.events.length, 0);
 
   const tabs: { key: TraceTab; label: string; count?: number }[] = [
     { key: 'state-machines', label: 'State Machines', count: trace.nodes.length },
-    {
-      key: 'event-history',
-      label: 'Event History',
-      count: totalEvents + trace.statusHistory.length,
-    },
     { key: 'status-history', label: 'Status History', count: trace.statusHistory.length },
   ];
 
@@ -1499,7 +1158,6 @@ function TraceTabs({ trace }: { trace: OrderTrace }) {
 
       {/* Panel */}
       <div className="bg-gray-800 rounded-b-lg rounded-tr-lg border border-gray-700 border-t-0 min-h-[300px] overflow-hidden">
-        {tab === 'event-history' && <EventHistoryTab trace={trace} />}
         {tab === 'state-machines' && <StateMachinesTab trace={trace} />}
         {tab === 'status-history' && <StatusHistoryTab trace={trace} />}
       </div>

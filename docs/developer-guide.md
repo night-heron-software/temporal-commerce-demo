@@ -603,7 +603,10 @@ workflow hot path, with a 90-day TTL. The **order-trace dev tool** at
 [`/dev/order-trace`](http://localhost:3000/dev/order-trace) (API:
 `GET /api/dev/order-trace?orderId=…|confirmation=…|email=…`) assembles the full
 cross-domain journey from the CorrelationId visibility query plus those persisted
-transitions.
+transitions, presented in two tabs: **State Machines** (Gantt timeline, per-workflow
+transition timelines, inventory journal) and **Status History** (the Cassandra audit
+trail). Raw Temporal execution history is not rendered in the tool — each workflow row
+deep-links to the Temporal Web UI for that.
 
 ### Unified Worker
 
