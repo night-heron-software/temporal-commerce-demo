@@ -9,3 +9,10 @@ scrape_configs:
       # scraping it here was the original misconfiguration).
       - targets: ['temporal:9464']
     metrics_path: /metrics
+
+  - job_name: 'temporal-worker'
+    static_configs:
+      # The demo workers run on the HOST (npm run dev:up), not in a container; the SDK
+      # exposes metrics on :9466 (Runtime.install telemetryOptions in src/temporal/worker.ts).
+      - targets: ['host.docker.internal:9466']
+    metrics_path: /metrics

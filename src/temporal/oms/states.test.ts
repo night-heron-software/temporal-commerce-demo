@@ -172,7 +172,9 @@ describe('assigning_fulfillers (transitional)', () => {
       status: 'assigned',
       sku: 'SKU-1',
     });
-    expect(out.context.assignments[0].assignmentId).toMatch(/^asg-/);
+    // IDs come from the prepared payload (generated in prepare, not decide) — with the
+    // sandbox uuid4 mocked, the assert is deterministic.
+    expect(out.context.assignments[0].assignmentId).toBe('asg-uuid-fix');
     // The prepare adapter snapshots line items with display-field fallbacks (bare CartItems).
     const [lineItems] = vi.mocked(resolveFulfillerAssignments).mock.calls[0];
     expect(lineItems[0]).toMatchObject({
@@ -233,7 +235,9 @@ describe('requesting_fulfillment (transitional)', () => {
     expect(out.context.fulfillerOrders).toHaveLength(2);
     expect(out.context.fulfillerOrders.map((so) => so.status)).toEqual(['pending', 'pending']);
     for (const a of out.context.assignments) {
-      expect(a.fulfillerOrderId).toMatch(/^so-/);
+      // IDs come from the prepared payload (generated per fulfiller in prepare, not
+      // decide) — deterministic under the mocked sandbox uuid4.
+      expect(a.fulfillerOrderId).toBe('so-uuid-fix');
       expect(a.status).toBe('fulfilled');
     }
     // finalize: index each fulfiller order, then start the child (ABANDON so OMS closing
@@ -262,6 +266,48 @@ describe('requesting_fulfillment (transitional)', () => {
     expect(request.fulfillerOrders).toHaveLength(2);
     expect(request.fulfillerOrders[0].items[0]).toMatchObject({ sku: 'SKU-1', unitPrice: 10 });
     expect(request.fulfillerOrders[1].items[0]).toMatchObject({ sku: 'v2', unitPrice: 5 });
+  });
+
+  it('prices each fulfillment item from its own line when a variant repeats across lines', async () => {
+    // Two lines share variantId v1 but differ in lineItemId/price/title — items must be
+    // matched by the assignment's lineItemId, not by variantId (which would price both
+    // from the first line).
+    const ctx = makeCtx({
+      status: 'requesting_fulfillment',
+      order: makeOrder({
+        items: [
+          { lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10, title: 'Small Print' },
+          { lineItemId: 'li-2', variantId: 'v1', quantity: 1, price: 25, title: 'Large Print' },
+          // (Cast: `title` lives on the states layer's OrderCartItem view of CartItem.)
+        ] as unknown as Order['items'],
+      }),
+      assignments: [
+        makeAssignment({ assignmentId: 'a-1', lineItemId: 'li-1' }),
+        makeAssignment({ assignmentId: 'a-2', lineItemId: 'li-2' }),
+      ],
+    });
+    const out = await OMS_STATES.requesting_fulfillment.fn(ctx, timeout);
+    expect(out.next).toBe('processing');
+    const [, startOptions] = vi.mocked(startChild).mock.calls[0] as unknown as [
+      string,
+      {
+        args: [
+          {
+            fulfillerOrders: Array<{
+              items: Array<{ sku: string; unitPrice: number; title: string }>;
+            }>;
+          },
+        ];
+      },
+    ];
+    const request = startOptions.args[0];
+    // Same fulfiller → one fulfiller order with both items, each priced from its own line.
+    expect(request.fulfillerOrders).toHaveLength(1);
+    expect(request.fulfillerOrders[0].items.map((i) => i.unitPrice)).toEqual([10, 25]);
+    expect(request.fulfillerOrders[0].items.map((i) => i.title)).toEqual([
+      'Small Print',
+      'Large Print',
+    ]);
   });
 
   it('zero-price items log the manipulation warning but do not block fulfillment', async () => {

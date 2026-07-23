@@ -340,6 +340,7 @@ Manages the fulfillment lifecycle for all fulfiller orders in a single order usi
 - **Simulated Strategy** — Executes the simulated fulfillment strategy for each fulfiller order using the state machine driver.
 - **Simulated Fulfillment** — Timer-based simulation with configurable delays via workflow memo (`processingDelayMs`, `shippingDelayMs`, `deliveryDelayMs`). Defaults to 15 seconds per phase.
 - **Manual Fulfillment Mode** — When `MANUAL_FULFILLMENT` feature flag is enabled, the simulated strategy waits for explicit signals to advance through shipped → delivered.
+- **Partial Shipments Auto-Complete (by design)** — `partially_shipped` fulfiller orders ride the same simulation timer to auto-delivery so the demo keeps moving; enable `MANUAL_FULFILLMENT` to hold partials and drive the remaining updates manually.
 - **Inventory Lifecycle** — Transfers reservations to fulfillers at start. Fulfills inventory on delivery, releases on rejection/cancellation.
 - **OMS Signaling** — Signals the parent OMS workflow with `FulfillmentStatusUpdate` on each status transition.
 

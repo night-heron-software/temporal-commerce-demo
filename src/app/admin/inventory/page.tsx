@@ -21,6 +21,7 @@ export default function AdminInventoryPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stockFilter, setStockFilter] = useState<'all' | 'reserved' | 'low'>('all');
+  const [reservationScope, setReservationScope] = useState<'active' | 'all'>('active');
   const [searchQuery, setSearchQuery] = useState('');
 
   const fetchData = useCallback(async () => {
@@ -28,7 +29,7 @@ export default function AdminInventoryPage() {
     setError(null);
     const [stockResult, reservationResult, statsResult] = await Promise.all([
       getInventoryStock(),
-      getInventoryReservations(),
+      getInventoryReservations(reservationScope),
       getInventoryStats(),
     ]);
 
@@ -41,7 +42,7 @@ export default function AdminInventoryPage() {
       setError(reservationResult.error ?? 'Failed to load reservations');
 
     setIsLoading(false);
-  }, []);
+  }, [reservationScope]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount: loading/error reset before the async load is intentional
@@ -183,6 +184,22 @@ export default function AdminInventoryPage() {
             </FilterPill>
           </div>
         )}
+        {tab === 'reservations' && (
+          <div className="flex gap-1">
+            <FilterPill
+              active={reservationScope === 'active'}
+              onClick={() => setReservationScope('active')}
+            >
+              Active
+            </FilterPill>
+            <FilterPill
+              active={reservationScope === 'all'}
+              onClick={() => setReservationScope('all')}
+            >
+              All
+            </FilterPill>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -294,7 +311,9 @@ export default function AdminInventoryPage() {
       filteredReservations.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-zinc-800 rounded-lg text-zinc-500">
           {reservations.length === 0
-            ? 'No reservations. Add an item to a cart to create one.'
+            ? reservationScope === 'active'
+              ? 'No active reservations. Add an item to a cart to create one, or switch to All for history.'
+              : 'No reservations. Add an item to a cart to create one.'
             : 'No reservations match the current filter.'}
         </div>
       ) : (
