@@ -6,8 +6,9 @@
  *
  * Given a way to identify an order, stitches together the full lifecycle across the
  * cart → checkout → OMS → fulfillment → fulfiller-order workflows: each workflow's
- * live queried state PLUS its raw Temporal execution-history events, alongside the
- * Cassandra `order_status_history` audit trail.
+ * live queried state plus its persisted transitions (ADR-0010), alongside the
+ * Cassandra `order_status_history` audit trail. Raw Temporal execution history is
+ * not fetched — each node carries a Temporal Web UI deep link for that.
  *
  * Read-only. Imported only by the /api/dev/order-trace route (never a client bundle).
  */
@@ -24,10 +25,6 @@ import {
 } from '@/temporal/contracts/constants';
 import { Cart, Checkout, OMS, Fulfillment, Elasticsearch } from '@/temporal/contracts';
 import { InventoryCommandRepository } from '@/temporal/inventory/db/inventory-command-repository';
-import { defaultPayloadConverter } from '@temporalio/common';
-import { decodeHistoryEvents, type PayloadDecoder, type TraceEvent } from './history-decode';
-
-export type { TraceEvent } from './history-decode';
 
 // ============================================================================
 // Types
@@ -76,7 +73,6 @@ export interface TraceNode {
   historyLength?: number;
   /** Queried state snapshot; null when the workflow is closed (query no longer serviceable). */
   state: unknown;
-  events: TraceEvent[];
   /** Persisted transitions (ADR-0010); empty for workflows recorded before the projection existed. */
   transitions: TraceTransition[];
   /** Deep link to this workflow in the Temporal Web UI. */
@@ -167,36 +163,6 @@ type TraceQuery =
   | typeof Fulfillment.getStatusQuery
   | string;
 
-/** Decode a Temporal `Payloads` proto (from raw history) into plain JS via the default converter. */
-function decodePayloads(payloads: unknown): unknown {
-  const list = (payloads as { payloads?: unknown[] } | undefined)?.payloads;
-  if (!Array.isArray(list) || list.length === 0) return undefined;
-  try {
-    const values = list.map((p) => defaultPayloadConverter.fromPayload(p as never));
-    return values.length === 1 ? values[0] : values;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Extract the input payload of a signal / accepted-update history event (the transition driver),
- * or the result payload of an update-completed event (the Update handler's return value). */
-const decodeEventPayload: PayloadDecoder = (attrsKey, attrs) => {
-  if (attrsKey === 'workflowExecutionSignaledEventAttributes') {
-    return decodePayloads(attrs.input);
-  }
-  if (attrsKey === 'workflowExecutionUpdateAcceptedEventAttributes') {
-    const acceptedRequest = attrs.acceptedRequest as { input?: { args?: unknown } } | undefined;
-    return decodePayloads(acceptedRequest?.input?.args);
-  }
-  if (attrsKey === 'workflowExecutionUpdateCompletedEventAttributes') {
-    const outcome = attrs.outcome as { success?: unknown; failure?: unknown } | undefined;
-    if (outcome?.failure) return { _error: outcome.failure };
-    return decodePayloads(outcome?.success);
-  }
-  return undefined;
-};
-
 /**
  * Build a single trace node for a workflow. Returns null when the workflow does not
  * exist. A closed workflow still yields a node (state may be null if its query is no
@@ -225,14 +191,6 @@ async function fetchNode(
     state = await handle.query(query as Parameters<typeof handle.query>[0]);
   } catch {
     state = null; // Closed workflow / query unavailable — still render the node.
-  }
-
-  let events: TraceEvent[] = [];
-  try {
-    const history = await handle.fetchHistory();
-    events = decodeHistoryEvents((history?.events ?? []) as unknown[], decodeEventPayload);
-  } catch {
-    events = [];
   }
 
   // Persisted transition projection (ADR-0010) — the authoritative from→to timeline with
@@ -265,7 +223,6 @@ async function fetchNode(
     closeTime: desc.closeTime?.toISOString(),
     historyLength: desc.historyLength,
     state,
-    events,
     transitions,
     temporalUiUrl: temporalUiUrl(workflowId),
   };
