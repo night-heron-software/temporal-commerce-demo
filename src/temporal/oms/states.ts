@@ -126,7 +126,7 @@ async function omsFinalize(_ctx: Readonly<OrderState>, decision: OmsDecision): P
       const order = fin.order;
       // Index the newly-created fulfiller orders so the admin sees them immediately.
       for (const so of fin.fulfillerOrders) {
-        await indexFulfillerOrder(buildFulfillerOrderDocument(so));
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so, order.cartId));
       }
       // Price validation — warn on $0 items to catch cart manipulation.
       const zeroItems = fin.fulfillmentInputs

@@ -199,6 +199,7 @@ CREATE TABLE IF NOT EXISTS order_status_history (
     status TEXT,
     note TEXT,
     updated_by TEXT,
+    correlation_id TEXT,      -- correlationId (ADR-0011); value sourced from the order's cart linkage
     PRIMARY KEY (order_id, event_time, id)
 ) WITH CLUSTERING ORDER BY (event_time DESC, id DESC);
 
@@ -440,7 +441,7 @@ CREATE TABLE IF NOT EXISTS workflow_state_transitions (
 -- It has no ES index (not in INDEX_MAPPINGS), so /api/dev/reindex can never touch it —
 -- nothing to guard. Same 90-day TTL as workflow_state_transitions.
 CREATE TABLE IF NOT EXISTS inventory_history (
-    cart_id TEXT,             -- the correlationId (ADR-0011); '__platform__' for cart-less ops
+    correlation_id TEXT,      -- the correlationId (ADR-0011); '__platform__' for correlation-less ops
     at TIMESTAMP,
     seq INT,                  -- per-process monotonic tiebreak within a timestamp
     operation TEXT,           -- RESERVE | RESERVE_FAILED | RENEW | CONFIRM | RELEASE | CANCEL
@@ -456,6 +457,6 @@ CREATE TABLE IF NOT EXISTS inventory_history (
     actor TEXT,               -- acting workflowId, or 'api' | 'expiry-sweep' | 'preemption'
                               --   | 'reconciler'
     details TEXT,             -- JSON: error, contention, counter before/after, forCart, etc.
-    PRIMARY KEY ((cart_id), at, seq)
+    PRIMARY KEY ((correlation_id), at, seq)
 ) WITH CLUSTERING ORDER BY (at ASC, seq ASC)
   AND default_time_to_live = 7776000;  -- 90 days, matching workflow_state_transitions

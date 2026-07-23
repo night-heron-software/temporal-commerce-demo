@@ -261,6 +261,8 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
       const doc = {
         orderId,
         cartId: row.cart_id,
+        // Correlation-named join field (ADR-0011), sourced from the order's cart linkage.
+        correlationId: row.cart_id,
         confirmationNumber: row.confirmation_number,
         customerEmail: row.customer_email,
         customerName: row.shipping_address
@@ -529,11 +531,12 @@ async function reindexInventory(esClient: EsClient, errors: string[]): Promise<n
 async function reindexFulfillerOrders(esClient: EsClient, errors: string[]): Promise<number> {
   interface OrderRow {
     order_id: CqlUuid;
+    cart_id: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fulfiller_orders: any[] | null;
   }
 
-  const rows = await executeCql<OrderRow>('SELECT order_id, fulfiller_orders FROM orders');
+  const rows = await executeCql<OrderRow>('SELECT order_id, cart_id, fulfiller_orders FROM orders');
   let indexed = 0;
 
   for (const row of rows) {
@@ -543,6 +546,8 @@ async function reindexFulfillerOrders(esClient: EsClient, errors: string[]): Pro
         const doc = {
           fulfillerOrderId: so.fulfiller_order_id,
           orderId,
+          // Correlation join via the parent order's cart linkage (ADR-0011).
+          correlationId: row.cart_id,
           fulfillerId: so.fulfiller_id,
           fulfillerName: so.fulfiller_name,
           status: so.status,

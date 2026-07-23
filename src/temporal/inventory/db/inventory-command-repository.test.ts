@@ -6,7 +6,7 @@ import {
   historyInsert,
   planRenewal,
   selectPreemptibleReservations,
-  PLATFORM_CART_ID,
+  PLATFORM_CORRELATION_ID,
   UNLIMITED_STOCK,
   type HistoryEvent,
   type HistoryOperation,
@@ -321,7 +321,7 @@ describe('historyInsert', () => {
 
   // Param positions in the built INSERT (columns in declaration order).
   const P = {
-    cartId: 0,
+    correlationId: 0,
     at: 1,
     seq: 2,
     operation: 3,
@@ -338,7 +338,7 @@ describe('historyInsert', () => {
   } as const;
 
   const event = (over: Partial<HistoryEvent> = {}): HistoryEvent => ({
-    cartId: 'cart-1',
+    correlationId: 'cart-1',
     operation: 'RESERVE',
     reservationId: 'cart-1-v1',
     blankSku: 'TEE',
@@ -357,7 +357,7 @@ describe('historyInsert', () => {
     const stmt = historyInsert(event());
     expect(stmt.query).toContain('INSERT INTO inventory_history');
     expect(stmt.params).toHaveLength(14);
-    expect(stmt.params[P.cartId]).toBe('cart-1');
+    expect(stmt.params[P.correlationId]).toBe('cart-1');
     expect(stmt.params[P.at]).toBe(AT);
     expect(stmt.params[P.operation]).toBe('RESERVE');
     expect(stmt.params[P.reservationId]).toBe('cart-1-v1');
@@ -393,11 +393,11 @@ describe('historyInsert', () => {
 
   it('null-fills every omitted optional column (a DRIFT_CORRECTION-shaped minimal event)', () => {
     const stmt = historyInsert({
-      cartId: PLATFORM_CART_ID,
+      correlationId: PLATFORM_CORRELATION_ID,
       operation: 'DRIFT_CORRECTION',
       actor: 'reconciler',
     });
-    expect(stmt.params[P.cartId]).toBe(PLATFORM_CART_ID);
+    expect(stmt.params[P.correlationId]).toBe(PLATFORM_CORRELATION_ID);
     for (const idx of [
       P.reservationId,
       P.blankSku,

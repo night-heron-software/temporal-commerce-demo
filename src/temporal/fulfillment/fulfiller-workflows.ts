@@ -163,6 +163,7 @@ export async function fulfillerOrderWorkflow(
           await indexShipment({
             shipmentId: shipment.shipmentId,
             orderId: currentCtx.orderId,
+            correlationId: currentCtx.cartId,
             carrier: shipment.carrier,
             trackingNumber: shipment.trackingNumber,
             trackingUrl: shipment.trackingUrl,

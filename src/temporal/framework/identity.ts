@@ -34,8 +34,11 @@ function parseDotDelimitedWorkflowId(workflowId: string): TransitionIdentity | u
   return { tenantId: parts[0], tags: { Domain: parts[1] } };
 }
 
-/** First value of a keyword Search Attribute, when it is a string. */
-function keywordValue(values: unknown): string | undefined {
+/**
+ * First value of a keyword Search Attribute, when it is a string. Exported for the
+ * correlation-header injector in `activity-capture.ts` (same tag-reading convention).
+ */
+export function keywordValue(values: unknown): string | undefined {
   return Array.isArray(values) && typeof values[0] === 'string' ? values[0] : undefined;
 }
 

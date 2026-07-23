@@ -1063,6 +1063,7 @@ function StatusHistoryTab({ trace }: { trace: OrderTrace }) {
             <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2">Updated By</th>
             <th className="px-3 py-2">Note</th>
+            <th className="px-3 py-2">Correlation</th>
           </tr>
         </thead>
         <tbody>
@@ -1078,6 +1079,7 @@ function StatusHistoryTab({ trace }: { trace: OrderTrace }) {
               </td>
               <td className="px-3 py-2 text-gray-400 font-mono text-xs">{h.updatedBy}</td>
               <td className="px-3 py-2 text-gray-400">{h.note ?? ''}</td>
+              <td className="px-3 py-2 text-gray-500 font-mono text-xs">{h.correlationId ?? ''}</td>
             </tr>
           ))}
         </tbody>

@@ -22,6 +22,8 @@ export function buildOrderDocument(
   return {
     orderId: order.orderId,
     cartId: order.cartId,
+    // Correlation-named join field (ADR-0011); the value is sourced from the cart linkage.
+    correlationId: order.cartId,
     confirmationNumber: order.confirmationNumber,
     customerEmail,
     customerName: `${order.shippingAddress.firstName} ${order.shippingAddress.lastName}`,
@@ -101,13 +103,18 @@ export function buildOrderDocument(
 /**
  * Builds an ES FulfillerOrderDocument from a FulfillerOrder.
  * Pure function - no side effects.
+ *
+ * `correlationId` (ADR-0011) is passed by the caller — the FulfillerOrder domain object
+ * does not carry it; the order state does (its cart linkage supplies the value).
  */
 export function buildFulfillerOrderDocument(
   fulfillerOrder: FulfillerOrder,
+  correlationId: string,
 ): FulfillerOrderDocument {
   return {
     fulfillerOrderId: fulfillerOrder.fulfillerOrderId,
     orderId: fulfillerOrder.orderId,
+    correlationId,
     fulfillerId: fulfillerOrder.fulfillerId,
     fulfillerName: fulfillerOrder.fulfillerName,
     status: fulfillerOrder.status,

@@ -397,14 +397,15 @@ function readActiveStatusPartition(status: 'TEMPORARY' | 'CONFIRMED'): Promise<R
 // ============================================================
 // Inventory history journal (inventory_history)
 // ============================================================
-// Append-only, correlation-keyed (cart_id = correlationId, ADR-0011) record of every
-// inventory mutation — the order-trace tool reads it to show inventory operations
-// alongside the workflows that performed them. History statements ride inside each
-// operation's existing batch where one exists (atomic with the mutation); everything
-// else (failed reserves, drift corrections) is written best-effort.
+// Append-only, correlation-keyed (correlation_id, ADR-0011 — the value is sourced from
+// the owning cart) record of every inventory mutation — the order-trace tool reads it to
+// show inventory operations alongside the workflows that performed them. History
+// statements ride inside each operation's existing batch where one exists (atomic with
+// the mutation); everything else (failed reserves, drift corrections) is written
+// best-effort.
 
-/** Partition key used for operations that have no owning cart (drift corrections). */
-export const PLATFORM_CART_ID = '__platform__';
+/** Partition key used for operations that have no owning correlation (drift corrections). */
+export const PLATFORM_CORRELATION_ID = '__platform__';
 
 export type HistoryOperation =
   | 'RESERVE'
@@ -419,7 +420,8 @@ export type HistoryOperation =
 
 /** One inventory-history event to journal. `actor`/`at` default at statement-build time. */
 export interface HistoryEvent {
-  cartId: string;
+  /** Correlation ID (ADR-0011) — the journal's partition key; sourced from the owning cart. */
+  correlationId: string;
   operation: HistoryOperation;
   reservationId?: string;
   blankSku?: string;
@@ -438,7 +440,7 @@ export interface HistoryEvent {
 
 /** An inventory_history row read back, camelCased with `details` JSON-parsed. */
 export interface InventoryHistoryRecord {
-  cartId: string;
+  correlationId: string;
   at: Date;
   seq: number;
   operation: string;
@@ -455,7 +457,7 @@ export interface InventoryHistoryRecord {
 }
 
 interface InventoryHistoryRow {
-  cart_id: string;
+  correlation_id: string;
   at: Date;
   seq: number;
   operation: string;
@@ -505,11 +507,11 @@ function resolveActor(): string {
 export function historyInsert(event: HistoryEvent): { query: string; params: unknown[] } {
   return {
     query: `INSERT INTO inventory_history (
-      cart_id, at, seq, operation, reservation_id, blank_sku, variant_id,
+      correlation_id, at, seq, operation, reservation_id, blank_sku, variant_id,
       fulfiller_id, quantity, prior_status, new_status, reference_id, actor, details
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: [
-      event.cartId,
+      event.correlationId,
       event.at ?? new Date(),
       historySeq++,
       event.operation,
@@ -538,7 +540,7 @@ async function recordHistoryBestEffort(event: HistoryEvent): Promise<void> {
     await executeCql(stmt.query, stmt.params);
   } catch (err) {
     logger.error(
-      { err, operation: event.operation, cartId: event.cartId },
+      { err, operation: event.operation, correlationId: event.correlationId },
       'Inventory history write failed (best-effort — mutation unaffected)',
     );
   }
@@ -554,7 +556,7 @@ function rowToHistoryRecord(row: InventoryHistoryRow): InventoryHistoryRecord {
     }
   }
   return {
-    cartId: row.cart_id,
+    correlationId: row.correlation_id,
     at: row.at,
     seq: row.seq,
     operation: row.operation,
@@ -843,7 +845,7 @@ export const InventoryCommandRepository = {
       const error = `Insufficient stock. Requested: ${quantity}, Available: ${totalAvailable}`;
       // Failed reserves are exactly what you want visible when debugging an order.
       await recordHistoryBestEffort({
-        cartId,
+        correlationId: cartId,
         operation: 'RESERVE_FAILED',
         blankSku,
         quantity,
@@ -873,7 +875,7 @@ export const InventoryCommandRepository = {
       );
       const error = 'Concurrent modification, retry needed';
       await recordHistoryBestEffort({
-        cartId,
+        correlationId: cartId,
         operation: 'RESERVE_FAILED',
         blankSku,
         fulfillerId: fulfiller.fulfiller_id,
@@ -929,7 +931,7 @@ export const InventoryCommandRepository = {
       }),
       // History rides in the record batch — atomic with the reservation rows.
       historyInsert({
-        cartId,
+        correlationId: cartId,
         operation: 'RESERVE',
         reservationId: entry.reservationId,
         blankSku,
@@ -1052,7 +1054,7 @@ export const InventoryCommandRepository = {
       },
       activeRegistryDelete(reservation.status, reservationId),
       historyInsert({
-        cartId: reservation.cart_id,
+        correlationId: reservation.cart_id,
         operation: 'RELEASE',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1115,7 +1117,7 @@ export const InventoryCommandRepository = {
         params: [newExpiresAt, reservation.status, reservationId],
       },
       historyInsert({
-        cartId: reservation.cart_id,
+        correlationId: reservation.cart_id,
         operation: 'RENEW',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1178,7 +1180,7 @@ export const InventoryCommandRepository = {
       },
       activeRegistryDelete(reservation.status, reservationId),
       historyInsert({
-        cartId: reservation.cart_id,
+        correlationId: reservation.cart_id,
         operation: 'CANCEL',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1258,7 +1260,7 @@ export const InventoryCommandRepository = {
         updated_at: new Date(),
       }),
       historyInsert({
-        cartId: rows[0].cart_id,
+        correlationId: rows[0].cart_id,
         operation: 'CONFIRM',
         reservationId,
         blankSku: rows[0].blank_sku,
@@ -1321,7 +1323,7 @@ export const InventoryCommandRepository = {
       },
       activeRegistryDelete(reservation.status, reservationId),
       historyInsert({
-        cartId: reservation.cart_id,
+        correlationId: reservation.cart_id,
         operation: 'FULFILL',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1391,7 +1393,7 @@ export const InventoryCommandRepository = {
     }
     statements.push(
       historyInsert({
-        cartId: current.cart_id,
+        correlationId: current.cart_id,
         operation: 'TRANSFER',
         reservationId,
         blankSku: current.blank_sku,
@@ -1573,7 +1575,7 @@ export const InventoryCommandRepository = {
             params: [expiresAt, referenceId, now, entry.reservationId] as unknown[],
           },
           historyInsert({
-            cartId,
+            correlationId: cartId,
             operation: 'RENEW',
             reservationId: entry.reservationId,
             blankSku: entry.blankSku,
@@ -1616,7 +1618,7 @@ export const InventoryCommandRepository = {
           params: [entry.quantity, expiresAt, referenceId, now, entry.reservationId] as unknown[],
         },
         historyInsert({
-          cartId,
+          correlationId: cartId,
           operation: 'RENEW',
           reservationId: entry.reservationId,
           blankSku: entry.blankSku,
@@ -1754,13 +1756,13 @@ export const InventoryCommandRepository = {
   },
 
   /**
-   * Read a cart's full inventory history — single-partition read, already clustered
-   * chronologically by (at, seq). Powers the order-trace Inventory section.
+   * Read a correlation's full inventory history — single-partition read, already
+   * clustered chronologically by (at, seq). Powers the order-trace Inventory section.
    */
-  async getHistoryByCart(cartId: string): Promise<InventoryHistoryRecord[]> {
+  async getHistoryByCorrelation(correlationId: string): Promise<InventoryHistoryRecord[]> {
     const rows = await executeCql<InventoryHistoryRow>(
-      `SELECT * FROM inventory_history WHERE cart_id = ?`,
-      [cartId],
+      `SELECT * FROM inventory_history WHERE correlation_id = ?`,
+      [correlationId],
     );
     return rows.map(rowToHistoryRecord);
   },
@@ -1894,7 +1896,7 @@ export const InventoryCommandRepository = {
         corrections++;
         // Journal under the platform partition — a correction has no owning cart.
         await recordHistoryBestEffort({
-          cartId: PLATFORM_CART_ID,
+          correlationId: PLATFORM_CORRELATION_ID,
           operation: 'DRIFT_CORRECTION',
           blankSku: stock.blank_sku,
           fulfillerId: stock.fulfiller_id,
