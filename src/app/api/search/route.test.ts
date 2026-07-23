@@ -9,9 +9,13 @@ const es = vi.hoisted(() => ({
   search: vi.fn(),
 }));
 
-vi.mock('@/lib/es-client', () => ({
-  getElasticsearchClient: () => ({ search: es.search }),
-}));
+vi.mock('@/lib/es-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/es-client')>();
+  return {
+    ...actual, // keep the real isIndexNotFoundError
+    getElasticsearchClient: () => ({ search: es.search }),
+  };
+});
 
 import { GET } from './route';
 
@@ -199,6 +203,22 @@ describe('GET /api/search', () => {
 
     const body = await res.json();
     expect(body.error).toBe('Search failed');
+    expect(body.correlationId).toBeTypeOf('string');
+  });
+
+  it('returns a clean 400 when the products index does not exist (rebuild window)', async () => {
+    // Shape of an @elastic/elasticsearch ResponseError for a missing index.
+    es.search.mockRejectedValue(
+      Object.assign(new Error('index_not_found_exception'), {
+        meta: { body: { error: { type: 'index_not_found_exception' } } },
+      }),
+    );
+
+    const res = await GET(request('?q=shirt'));
+    expect(res.status).toBe(400);
+
+    const body = await res.json();
+    expect(body.error).toBe("index 'products' does not exist (it may be rebuilding)");
     expect(body.correlationId).toBeTypeOf('string');
   });
 });

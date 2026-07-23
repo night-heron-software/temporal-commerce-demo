@@ -660,6 +660,13 @@ async function casAdjustStock(
 // Repository
 // ============================================================
 
+/**
+ * Dedupe key for the reconciler's unattributed-reservations warning: the sorted id set
+ * from the previous sweep. Process-scoped, resets on worker restart — this is noise
+ * control (log once per distinct set, not once per 5-minute sweep), not state.
+ */
+let lastUnattributedKey = '';
+
 export const InventoryCommandRepository = {
   // --- Stock Operations ---
 
@@ -1838,10 +1845,19 @@ export const InventoryCommandRepository = {
 
     const unattributed = activeRows.filter((r) => !r.fulfiller_id);
     if (unattributed.length > 0) {
-      logger.error(
-        { reservationIds: unattributed.map((r) => r.reservation_id) },
-        'Active reservations without fulfiller attribution — cannot reconcile these',
-      );
+      const ids = unattributed.map((r) => r.reservation_id).sort();
+      const key = ids.join(',');
+      // Only log when the offending set changes between sweeps (see lastUnattributedKey) —
+      // the same debris rows would otherwise re-flag every sweep, forever.
+      if (key !== lastUnattributedKey) {
+        lastUnattributedKey = key;
+        logger.warn(
+          { count: ids.length, sampleIds: ids.slice(0, 3) },
+          'Active reservations without fulfiller attribution — cannot reconcile these',
+        );
+      }
+    } else {
+      lastUnattributedKey = '';
     }
 
     const expected = computeExpectedReserved(activeRows);

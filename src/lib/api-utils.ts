@@ -11,16 +11,19 @@ export interface ApiErrorResponse {
 
 /**
  * Creates a standardized error response object with a correlationId for tracing.
+ * `context` is merged into the error log line (e.g. the target ES index) — it is never
+ * sent to the client.
  */
 export function createErrorResponse(
   status: number,
   message: string,
   error?: unknown,
   correlationId?: string,
+  context?: Record<string, unknown>,
 ): NextResponse {
   const cid = correlationId || randomUUID();
 
-  log.error({ correlationId: cid, status, err: error }, message);
+  log.error({ ...context, correlationId: cid, status, err: error }, message);
 
   const payload: ApiErrorResponse = {
     error: message,

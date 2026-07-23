@@ -1,6 +1,13 @@
+import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
-import { getElasticsearchClient } from '@/lib/es-client';
+import { getElasticsearchClient, isIndexNotFoundError } from '@/lib/es-client';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('api-search');
+
+/** The single index this storefront route queries. */
+const SEARCH_INDEX = 'products';
 
 // Option type names can be inconsistent across fulfillers.
 // Group them by semantic category for search/faceting.
@@ -236,7 +243,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const client = getElasticsearchClient();
 
     const response = await client.search({
-      index: 'products',
+      index: SEARCH_INDEX,
       from,
       size: params.pageSize || 24,
       query: {
@@ -339,6 +346,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       facets,
     });
   } catch (error) {
-    return createErrorResponse(500, 'Search failed', error);
+    if (isIndexNotFoundError(error)) {
+      // Missing index is a transient rebuild window (reindexing deletes + recreates the
+      // index) — return a clean client-facing failure and log at warn so it does not land
+      // in system_errors.
+      const correlationId = randomUUID();
+      log.warn(
+        { index: SEARCH_INDEX, correlationId, err: error },
+        'Search index missing — it may be rebuilding',
+      );
+      return NextResponse.json(
+        {
+          error: `index '${SEARCH_INDEX}' does not exist (it may be rebuilding)`,
+          correlationId,
+        },
+        { status: 400 },
+      );
+    }
+    return createErrorResponse(500, 'Search failed', error, undefined, { index: SEARCH_INDEX });
   }
 }
