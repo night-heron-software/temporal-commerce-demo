@@ -277,7 +277,8 @@ export default function AdminCartsPage() {
                 </a>
               </button>
 
-              {/* Correlation / order IDs (cartId IS the CorrelationId, ADR-0011) */}
+              {/* cartId as a stand-in corr chip: the carts projection doesn't carry the
+                  journey correlationId yet (backlog) — since #33 they are distinct UUIDs. */}
               <div className="px-5 pb-2 -mt-1 pl-14">
                 <EntityIds correlationId={cart.cartId} orderId={cart.orderId} />
               </div>

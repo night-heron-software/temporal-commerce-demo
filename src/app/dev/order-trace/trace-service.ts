@@ -413,26 +413,33 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
 
   // Inventory operation journal for the journey (correlation-keyed). Guarded: the trace
   // must never 500 because the journal is unavailable (or the table predates this deploy).
+  // System actors (expiry-sweep, preemption) journal under the reservation's cartId —
+  // they have no access to the minted journey UUID — so read both partitions and merge.
   let inventoryHistory: TraceInventoryEvent[] = [];
   if (correlationId) {
     try {
-      inventoryHistory = (
-        await InventoryCommandRepository.getHistoryByCorrelation(correlationId)
-      ).map((r) => ({
-        at: r.at.toISOString(),
-        seq: r.seq,
-        operation: r.operation,
-        reservationId: r.reservationId,
-        blankSku: r.blankSku,
-        variantId: r.variantId,
-        fulfillerId: r.fulfillerId,
-        quantity: r.quantity,
-        priorStatus: r.priorStatus,
-        newStatus: r.newStatus,
-        referenceId: r.referenceId,
-        actor: r.actor,
-        details: r.details,
-      }));
+      const keys = [...new Set([correlationId, cartId].filter((k): k is string => !!k))];
+      const partitions = await Promise.all(
+        keys.map((k) => InventoryCommandRepository.getHistoryByCorrelation(k)),
+      );
+      inventoryHistory = partitions
+        .flat()
+        .sort((a, b) => a.at.getTime() - b.at.getTime() || a.seq - b.seq)
+        .map((r) => ({
+          at: r.at.toISOString(),
+          seq: r.seq,
+          operation: r.operation,
+          reservationId: r.reservationId,
+          blankSku: r.blankSku,
+          variantId: r.variantId,
+          fulfillerId: r.fulfillerId,
+          quantity: r.quantity,
+          priorStatus: r.priorStatus,
+          newStatus: r.newStatus,
+          referenceId: r.referenceId,
+          actor: r.actor,
+          details: r.details,
+        }));
     } catch {
       inventoryHistory = [];
     }

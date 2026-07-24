@@ -3,9 +3,10 @@
 /**
  * EntityIds — compact, copyable correlation/order ID chips for admin & devtools views.
  *
- * Every entity in the system is correlated by CorrelationId (= cartId, ADR-0011) and,
- * once an order exists, by orderId. These chips make both visible wherever an entity
- * or projection is rendered: truncated for scanning, click-to-copy for the full value.
+ * Every entity in the system is correlated by CorrelationId (the journey UUID minted at
+ * cart creation, ADR-0011) and, once an order exists, by orderId. These chips make both
+ * visible wherever an entity or projection is rendered: truncated for scanning,
+ * click-to-copy for the full value.
  */
 
 import { useState } from 'react';
@@ -44,7 +45,7 @@ function IdChip({ label, value, className }: { label: string; value: string; cla
 
 /**
  * Renders `corr:` and `order:` chips for whichever IDs are present.
- * `correlationId` is the cart ID; pass `orderId` when the entity has one.
+ * `correlationId` is the journey UUID; pass `orderId` when the entity has one.
  */
 export default function EntityIds({
   correlationId,

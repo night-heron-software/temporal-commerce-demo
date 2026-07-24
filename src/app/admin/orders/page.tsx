@@ -200,7 +200,7 @@ export default function AdminOrdersPage() {
                       {order.confirmationNumber || order.orderId.substring(0, 8)}
                     </code>
                     <div className="mt-1">
-                      <EntityIds correlationId={order.cartId} orderId={order.orderId} />
+                      <EntityIds correlationId={order.correlationId} orderId={order.orderId} />
                     </div>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400 text-sm">
