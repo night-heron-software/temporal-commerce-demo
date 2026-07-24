@@ -23,6 +23,8 @@ const INVENTORY_SERVICE_START = buildWorkflowStartOptions({
   storeId: DEMO_STORE_ID,
   domain: 'inventory',
   entityId: WORKFLOW_ENTITY_SLUGS.inventoryService,
+  // Explicit opt-out: the long-lived service singleton belongs to no customer journey.
+  correlationId: undefined,
 });
 const WORKFLOW_ID = INVENTORY_SERVICE_START.workflowId;
 const SIGNAL_NAME = 'inventoryChanged';

@@ -17,7 +17,6 @@
  * (Temporal isolates workflow module state), and is only mutated around the awaited prepare/finalize
  * phases — so capture is deterministic and replay-safe (activity results are replayed from history).
  */
-import { workflowInfo } from '@temporalio/workflow';
 import type {
   ActivityInput,
   LocalActivityInput,
@@ -28,7 +27,7 @@ import type {
 import type { ActivityCall } from './types';
 import { PERSIST_TRANSITIONS_ACTIVITY } from './types';
 import { CORRELATION_ID_HEADER, encodeCorrelationHeader } from './correlation-header';
-import { keywordValue } from './identity';
+import { workflowCorrelationId } from './identity';
 
 /**
  * The transition recorder's own activity — excluded from phase capture so the background flusher's
@@ -81,22 +80,6 @@ function capture<T>(activityType: string, args: unknown, run: () => Promise<T>):
       throw err;
     },
   );
-}
-
-/** Search Attribute carrying the correlationId (ADR-0011 tagging convention). */
-const CORRELATION_ATTRIBUTE = 'CorrelationId';
-
-/**
- * The workflow's correlationId from its `CorrelationId` Search Attribute, or undefined
- * when untagged (inventory singleton, service workflows) or outside workflow context
- * (direct interceptor unit tests).
- */
-function workflowCorrelationId(): string | undefined {
-  try {
-    return keywordValue(workflowInfo().searchAttributes?.[CORRELATION_ATTRIBUTE]);
-  } catch {
-    return undefined;
-  }
 }
 
 /** Stamp the correlation header onto a schedule input; pass through unchanged when untagged. */

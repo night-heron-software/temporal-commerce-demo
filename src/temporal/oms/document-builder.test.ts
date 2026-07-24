@@ -1,7 +1,8 @@
 /**
  * OMS document-builder tests — the ES projection carries the correlation-named join
  * field (`correlationId`, ADR-0011) on order and fulfiller-order docs, sourced from the
- * order's cart linkage (domain `cartId` stays a separate field).
+ * order record's journey correlationId (its own UUID; domain `cartId` stays a separate
+ * field).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -11,6 +12,7 @@ import type { FulfillerOrder, Order, OrderState } from './types';
 const order: Order = {
   orderId: 'o-1',
   cartId: 'cart-1',
+  correlationId: 'corr-1',
   customerEmail: 'jane@example.com',
   items: [{ lineItemId: 'li-1', variantId: 'v-1', quantity: 2, price: 1500 }],
   shippingAddress: {
@@ -56,9 +58,9 @@ const state: OrderState = {
 };
 
 describe('buildOrderDocument', () => {
-  it('carries correlationId (sourced from the cart linkage) alongside the domain cartId', () => {
+  it("carries the order record's journey correlationId (its own UUID, not the cartId)", () => {
     const doc = buildOrderDocument(order, state, order.customerEmail);
-    expect(doc.correlationId).toBe('cart-1');
+    expect(doc.correlationId).toBe('corr-1');
     expect(doc.cartId).toBe('cart-1');
     expect(doc.orderId).toBe('o-1');
   });
@@ -66,8 +68,8 @@ describe('buildOrderDocument', () => {
 
 describe('buildFulfillerOrderDocument', () => {
   it('carries the caller-supplied correlationId', () => {
-    const doc = buildFulfillerOrderDocument(fulfillerOrder, order.cartId);
-    expect(doc.correlationId).toBe('cart-1');
+    const doc = buildFulfillerOrderDocument(fulfillerOrder, order.correlationId);
+    expect(doc.correlationId).toBe('corr-1');
     expect(doc.fulfillerOrderId).toBe('fo-1');
     expect(doc.orderId).toBe('o-1');
   });

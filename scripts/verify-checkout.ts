@@ -30,10 +30,13 @@ async function run() {
     // 2. Connect to Temporal
     const client = await getTemporalClient();
     const cartId = randomUUID();
+    // The journey correlationId is its own UUID minted at cart creation (ADR-0011).
+    const correlationId = randomUUID();
     const cartStart = buildWorkflowStartOptions({
       storeId: DEMO_STORE_ID,
       domain: 'cart',
       entityId: cartId,
+      correlationId,
       cartId,
     });
     const cartWorkflowId = cartStart.workflowId;

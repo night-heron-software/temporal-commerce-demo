@@ -115,8 +115,14 @@ export interface OrderTrace {
   orderId: string;
   storeId: string;
   confirmationNumber?: string;
-  /** Correlation ID (= cart ID, ADR-0011) — ties every workflow in the journey together. */
+  /** The order's cart linkage (kept for the deterministic-ID safety net + display). */
   cartId?: string;
+  /**
+   * The journey's correlationId (ADR-0011) — its own UUID minted at cart creation; ties
+   * every workflow in the journey together. Falls back to cartId for orders written
+   * before the `orders.correlation_id` column existed (correlationId used to = cartId).
+   */
+  correlationId?: string;
   nodes: TraceNode[];
   statusHistory: TraceStatusHistoryRow[];
   /** Correlation-keyed inventory operation journal (inventory_history) for the order's cart. */
@@ -356,10 +362,10 @@ const DOMAIN_ORDER: TraceDomain[] = ['cart', 'checkout', 'oms', 'fulfillment', '
  * Assemble the full cross-domain trace for one order.
  *
  * The whole related graph is found with a single Temporal visibility query on the
- * `CorrelationId` search attribute (the order's cartId), rather than re-deriving each
- * domain's workflow-ID formula and walking state. Deterministic IDs for the core order
- * workflows are still probed as a safety net (e.g. a workflow started before its search
- * attributes were indexed).
+ * `CorrelationId` search attribute (the journey UUID stored on the orders row; cartId
+ * for legacy orders), rather than re-deriving each domain's workflow-ID formula and
+ * walking state. Deterministic IDs for the core order workflows are still probed as a
+ * safety net (e.g. a workflow started before its search attributes were indexed).
  *
  * Each workflow fetch is isolated, so a missing/closed workflow degrades gracefully.
  */
@@ -368,21 +374,25 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
   const nodes: TraceNode[] = [];
   const seen = new Set<string>();
 
-  // Resolve cartId + confirmation from Cassandra (reliable even after workflows close).
-  // cartId is the CorrelationId threaded through the whole journey.
+  // Resolve cartId + the journey correlationId + confirmation from Cassandra (reliable
+  // even after workflows close). The correlationId is its own UUID minted at cart
+  // creation; legacy orders predate the column, where correlationId equalled cartId.
   let cartId: string | undefined;
+  let correlationId: string | undefined;
   let confirmationNumber: string | undefined;
   try {
     interface OrderRow {
       cart_id: string;
+      correlation_id: string | null;
       confirmation_number: string;
     }
     const rows = await executeCql<OrderRow>(
-      `SELECT cart_id, confirmation_number FROM orders WHERE order_id = ?`,
+      `SELECT cart_id, correlation_id, confirmation_number FROM orders WHERE order_id = ?`,
       [types.Uuid.fromString(orderId)],
     );
     if (rows[0]) {
       cartId = rows[0].cart_id;
+      correlationId = rows[0].correlation_id ?? rows[0].cart_id;
       confirmationNumber = rows[0].confirmation_number;
     }
   } catch {
@@ -401,28 +411,28 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
     if (node) nodes.push(node);
   }
 
-  // Inventory operation journal for the cart (correlation-keyed). Guarded: the trace must
-  // never 500 because the journal is unavailable (or the table predates this deploy).
+  // Inventory operation journal for the journey (correlation-keyed). Guarded: the trace
+  // must never 500 because the journal is unavailable (or the table predates this deploy).
   let inventoryHistory: TraceInventoryEvent[] = [];
-  if (cartId) {
+  if (correlationId) {
     try {
-      inventoryHistory = (await InventoryCommandRepository.getHistoryByCorrelation(cartId)).map(
-        (r) => ({
-          at: r.at.toISOString(),
-          seq: r.seq,
-          operation: r.operation,
-          reservationId: r.reservationId,
-          blankSku: r.blankSku,
-          variantId: r.variantId,
-          fulfillerId: r.fulfillerId,
-          quantity: r.quantity,
-          priorStatus: r.priorStatus,
-          newStatus: r.newStatus,
-          referenceId: r.referenceId,
-          actor: r.actor,
-          details: r.details,
-        }),
-      );
+      inventoryHistory = (
+        await InventoryCommandRepository.getHistoryByCorrelation(correlationId)
+      ).map((r) => ({
+        at: r.at.toISOString(),
+        seq: r.seq,
+        operation: r.operation,
+        reservationId: r.reservationId,
+        blankSku: r.blankSku,
+        variantId: r.variantId,
+        fulfillerId: r.fulfillerId,
+        quantity: r.quantity,
+        priorStatus: r.priorStatus,
+        newStatus: r.newStatus,
+        referenceId: r.referenceId,
+        actor: r.actor,
+        details: r.details,
+      }));
     } catch {
       inventoryHistory = [];
     }
@@ -430,7 +440,6 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
 
   // Primary: one visibility query returns every workflow in the journey — including the
   // checkout and per-fulfiller children that previously required state hops to discover.
-  const correlationId = cartId;
   const listQuery = correlationId
     ? `${SEARCH_ATTRIBUTE_KEYS.correlationId} = '${correlationId}'`
     : `${SEARCH_ATTRIBUTE_KEYS.orderId} = '${orderId}'`;
@@ -456,6 +465,7 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
     storeId,
     confirmationNumber,
     cartId,
+    correlationId,
     nodes,
     statusHistory,
     inventory: { history: inventoryHistory },

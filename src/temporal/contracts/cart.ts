@@ -28,6 +28,11 @@ export interface PaymentMethod {
 export interface Order {
   orderId: string;
   cartId: string;
+  /**
+   * The journey's correlationId (ADR-0011) — its own UUID minted at cart creation,
+   * captured from the ambient correlation context when the order is created.
+   */
+  correlationId: string;
   customerEmail: string;
   items: CartItem[];
   shippingAddress: ShippingAddress;

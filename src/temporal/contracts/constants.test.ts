@@ -13,6 +13,8 @@ import {
 const STORE = DEMO_STORE_ID;
 const CART = 'a1b20000-0000-4000-8000-000000000002';
 const ORDER = 'c3d40000-0000-4000-8000-000000000003';
+// The journey correlationId is its own UUID (minted at cart creation) — deliberately ≠ CART.
+const CORRELATION = 'e5f60000-0000-4000-8000-000000000004';
 
 describe('buildWorkflowId', () => {
   it('joins components with the dot delimiter', () => {
@@ -49,39 +51,51 @@ describe('parseWorkflowId', () => {
 
 describe('buildWorkflowStartOptions', () => {
   it('builds the workflowId and always tags storeId + domain', () => {
-    const opts = buildWorkflowStartOptions({ storeId: STORE, domain: 'cart', entityId: CART });
+    const opts = buildWorkflowStartOptions({
+      storeId: STORE,
+      domain: 'cart',
+      entityId: CART,
+      correlationId: CORRELATION,
+    });
     expect(opts.workflowId).toBe(buildWorkflowId(STORE, 'cart', CART));
     expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.storeId]).toEqual([STORE]);
     expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.domain]).toEqual(['cart']);
     expect(opts.memo.domain).toBe('cart');
   });
 
-  it('defaults correlationId to cartId when not given', () => {
+  it('carries the caller-minted correlationId — its own UUID, never defaulted from cartId', () => {
     const opts = buildWorkflowStartOptions({
       storeId: STORE,
       domain: 'checkout',
       entityId: CART,
+      correlationId: CORRELATION,
       cartId: CART,
     });
-    expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.correlationId]).toEqual([CART]);
+    expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.correlationId]).toEqual([CORRELATION]);
     expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.cartId]).toEqual([CART]);
   });
 
-  it('prefers an explicit correlationId over cartId and includes orderId', () => {
+  it('does NOT fall back to cartId when correlationId is explicitly opted out', () => {
     const opts = buildWorkflowStartOptions({
       storeId: STORE,
       domain: 'fulfillment',
       entityId: ORDER,
-      correlationId: CART,
+      correlationId: undefined,
       cartId: CART,
       orderId: ORDER,
     });
-    expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.correlationId]).toEqual([CART]);
+    expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.correlationId]).toBeUndefined();
+    expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.cartId]).toEqual([CART]);
     expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.orderId]).toEqual([ORDER]);
   });
 
-  it('omits correlation keys when there is nothing to correlate on', () => {
-    const opts = buildWorkflowStartOptions({ storeId: STORE, domain: 'identity', entityId: CART });
+  it('omits correlation keys when there is nothing to correlate on (service singletons)', () => {
+    const opts = buildWorkflowStartOptions({
+      storeId: STORE,
+      domain: 'identity',
+      entityId: CART,
+      correlationId: undefined,
+    });
     expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.correlationId]).toBeUndefined();
     expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.orderId]).toBeUndefined();
     expect(opts.searchAttributes[SEARCH_ATTRIBUTE_KEYS.cartId]).toBeUndefined();
@@ -92,6 +106,7 @@ describe('buildWorkflowStartOptions', () => {
       storeId: STORE,
       domain: 'order',
       entityId: ORDER,
+      correlationId: CORRELATION,
       memo: { confirmationNumber: 'DEMO-123' },
     });
     expect(opts.memo).toEqual({ domain: 'order', confirmationNumber: 'DEMO-123' });

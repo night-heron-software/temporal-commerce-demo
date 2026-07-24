@@ -108,7 +108,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       await insertStatusHistoryEntry(
         input.order.orderId,
         startCtx.statusHistory[0],
-        input.order.cartId,
+        input.order.correlationId,
       );
       await indexOrder(buildOrderDocument(input.order, startCtx, input.customerEmail));
 
@@ -145,7 +145,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
           updatedBy,
         };
         state.statusHistory.push(entry);
-        await insertStatusHistoryEntry(input.order.orderId, entry, input.order.cartId);
+        await insertStatusHistoryEntry(input.order.orderId, entry, input.order.correlationId);
       }
 
       await updateOrderInDatabase(input.order.orderId, {
@@ -160,7 +160,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       await indexOrder(getOrderDocument());
 
       for (const so of state.fulfillerOrders) {
-        await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.cartId));
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.correlationId));
       }
     },
     continueAsNewThreshold: 200,
@@ -203,7 +203,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         status: cancelCtx.status,
         statusHistory: cancelCtx.statusHistory,
       });
-      await insertStatusHistoryEntry(input.order.orderId, cancelEntry, input.order.cartId);
+      await insertStatusHistoryEntry(input.order.orderId, cancelEntry, input.order.correlationId);
       await indexOrder(getOrderDocument());
     },
     onTerminal: async (finalCtx, terminalState) => {
@@ -214,7 +214,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       // Final projection sync to ensure ES is consistent
       await indexOrder(getOrderDocument());
       for (const so of finalCtx.fulfillerOrders) {
-        await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.cartId));
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.correlationId));
       }
     },
   };

@@ -35,6 +35,8 @@ const startOpts = (cartId: string) => ({
     storeId: DEMO_STORE_ID,
     domain: 'cart',
     entityId: cartId,
+    // Its own UUID-per-journey in production; a derived marker keeps tests readable.
+    correlationId: `corr-${cartId}`,
     cartId,
   }),
   args: [{ cartId }] as [{ cartId: string }],

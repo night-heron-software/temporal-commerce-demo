@@ -42,6 +42,23 @@ export function keywordValue(values: unknown): string | undefined {
   return Array.isArray(values) && typeof values[0] === 'string' ? values[0] : undefined;
 }
 
+/** Search Attribute carrying the correlationId (ADR-0011 tagging convention). */
+const CORRELATION_ATTRIBUTE = 'CorrelationId';
+
+/**
+ * The current workflow's correlationId from its own `CorrelationId` Search Attribute, or
+ * undefined when untagged (inventory singleton, service workflows) or outside workflow
+ * context (direct unit tests). Downstream `startChild` sites read this and pass it on so
+ * the whole journey carries the one correlationId minted at cart creation.
+ */
+export function workflowCorrelationId(): string | undefined {
+  try {
+    return keywordValue(workflowInfo().searchAttributes?.[CORRELATION_ATTRIBUTE]);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Build the convention resolver: tenant id from the tenant Search Attribute (falling back to
  * the workflow-ID parse); tags = every other custom keyword Search Attribute, excluding

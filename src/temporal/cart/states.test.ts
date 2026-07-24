@@ -14,7 +14,9 @@ vi.mock('@temporalio/workflow', () => ({
   workflowInfo: vi.fn(() => ({
     workflowId: 'demo.cart.cart-1',
     runId: 'run-1',
-    searchAttributes: {},
+    // The journey correlationId minted at cart creation (ADR-0011) — beginCheckout
+    // reads this Search Attribute and passes it to the checkout child.
+    searchAttributes: { CorrelationId: ['corr-1'] },
     workflowType: 'cartWorkflow',
   })),
   condition: vi.fn(async () => true),
@@ -195,7 +197,9 @@ describe('active — beginCheckout', () => {
         taskQueue: 'checkout-queue',
         searchAttributes: expect.objectContaining({
           CartId: ['cart-1'],
-          CorrelationId: ['cart-1'],
+          // Read from the cart workflow's own CorrelationId Search Attribute — the
+          // journey UUID minted at cart creation, no longer the cartId.
+          CorrelationId: ['corr-1'],
         }),
       }),
     );

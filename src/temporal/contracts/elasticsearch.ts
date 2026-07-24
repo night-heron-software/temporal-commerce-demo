@@ -65,8 +65,8 @@ export interface OrderDocument {
   cartId: string;
   /**
    * Correlation ID (ADR-0011) — the join field shared by every order-flow index
-   * (orders, fulfiller_orders, fulfillments, shipments). The value happens to be the
-   * cartId, but the field is correlation-named; never join on `cartId`.
+   * (orders, fulfiller_orders, fulfillments, shipments). Its own UUID minted at cart
+   * creation (cartId only for legacy pre-tagging data); never join on `cartId`.
    */
   correlationId: string;
   confirmationNumber: string;

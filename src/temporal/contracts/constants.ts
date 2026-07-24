@@ -132,7 +132,7 @@ export function parseWorkflowId(
  * `scripts/register-search-attributes.sh`.
  */
 export const SEARCH_ATTRIBUTE_KEYS = {
-  /** Root id tying the whole journey graph together (defaults to cartId). */
+  /** Root id tying the whole journey graph together — its own UUID minted at cart creation. */
   correlationId: 'CorrelationId',
   storeId: 'StoreId',
   domain: 'Domain',
@@ -147,8 +147,13 @@ export interface BuildWorkflowStartOptionsInput {
   storeId: string;
   domain: WorkflowDomain;
   entityId: string;
-  /** Root id tying the journey graph together. Defaults to `cartId` when present. */
-  correlationId?: string;
+  /**
+   * Root id tying the journey graph together — its own UUID minted at cart creation
+   * (never defaulted from `cartId`). Required so no caller silently falls back;
+   * correlation-less singletons (e.g. the inventory service workflow) opt out by
+   * passing `undefined` explicitly.
+   */
+  correlationId: string | undefined;
   orderId?: string;
   cartId?: string;
   /** Display-only, non-indexed metadata. Safe for PII (email, confirmation number). */
@@ -167,19 +172,20 @@ export interface WorkflowStartTagging {
  * options object so every workflow in a journey carries consistent, queryable tags:
  *
  *   await startChild('checkoutWorkflow', {
- *     ...buildWorkflowStartOptions({ storeId, domain: 'checkout', entityId: checkoutId, cartId }),
+ *     ...buildWorkflowStartOptions({
+ *       storeId, domain: 'checkout', entityId: checkoutId, correlationId, cartId,
+ *     }),
  *     taskQueue: CHECKOUT_TASK_QUEUE,
  *     args: [input],
  *   });
  *
  * With these tags set, the full graph is one visibility query away
- * (`CorrelationId = '<cartId>'`) instead of a hand-rolled per-domain ID walk.
+ * (`CorrelationId = '<correlationId>'`) instead of a hand-rolled per-domain ID walk.
  */
 export function buildWorkflowStartOptions(
   input: BuildWorkflowStartOptionsInput,
 ): WorkflowStartTagging {
-  const { storeId, domain, entityId, orderId, cartId, memo } = input;
-  const correlationId = input.correlationId ?? cartId;
+  const { storeId, domain, entityId, correlationId, orderId, cartId, memo } = input;
 
   const searchAttributes: WorkflowSearchAttributes = {
     [SEARCH_ATTRIBUTE_KEYS.storeId]: [storeId],
