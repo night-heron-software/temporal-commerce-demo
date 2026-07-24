@@ -85,6 +85,8 @@ export interface TraceStatusHistoryRow {
   status: string;
   note: string | null;
   updatedBy: string;
+  /** Correlation ID (ADR-0011); null for rows written before the column existed. */
+  correlationId: string | null;
 }
 
 /**
@@ -236,10 +238,12 @@ async function fetchStatusHistory(orderId: string): Promise<TraceStatusHistoryRo
     status: string;
     note: string | null;
     updated_by: string;
+    correlation_id: string | null;
   }
   try {
     const rows = await executeCql<Row>(
-      `SELECT order_id, event_time, status, note, updated_by FROM order_status_history
+      `SELECT order_id, event_time, status, note, updated_by, correlation_id
+       FROM order_status_history
        WHERE order_id = ?`,
       [types.Uuid.fromString(orderId)],
     );
@@ -249,6 +253,7 @@ async function fetchStatusHistory(orderId: string): Promise<TraceStatusHistoryRo
       status: r.status,
       note: r.note ?? null,
       updatedBy: r.updated_by,
+      correlationId: r.correlation_id ?? null,
     }));
   } catch {
     return [];
@@ -401,21 +406,23 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
   let inventoryHistory: TraceInventoryEvent[] = [];
   if (cartId) {
     try {
-      inventoryHistory = (await InventoryCommandRepository.getHistoryByCart(cartId)).map((r) => ({
-        at: r.at.toISOString(),
-        seq: r.seq,
-        operation: r.operation,
-        reservationId: r.reservationId,
-        blankSku: r.blankSku,
-        variantId: r.variantId,
-        fulfillerId: r.fulfillerId,
-        quantity: r.quantity,
-        priorStatus: r.priorStatus,
-        newStatus: r.newStatus,
-        referenceId: r.referenceId,
-        actor: r.actor,
-        details: r.details,
-      }));
+      inventoryHistory = (await InventoryCommandRepository.getHistoryByCorrelation(cartId)).map(
+        (r) => ({
+          at: r.at.toISOString(),
+          seq: r.seq,
+          operation: r.operation,
+          reservationId: r.reservationId,
+          blankSku: r.blankSku,
+          variantId: r.variantId,
+          fulfillerId: r.fulfillerId,
+          quantity: r.quantity,
+          priorStatus: r.priorStatus,
+          newStatus: r.newStatus,
+          referenceId: r.referenceId,
+          actor: r.actor,
+          details: r.details,
+        }),
+      );
     } catch {
       inventoryHistory = [];
     }

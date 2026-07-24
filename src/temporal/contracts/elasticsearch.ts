@@ -61,7 +61,14 @@ export interface CollectionDocument {
 // Orders Index
 export interface OrderDocument {
   orderId: string;
+  /** Domain link to the originating cart. */
   cartId: string;
+  /**
+   * Correlation ID (ADR-0011) — the join field shared by every order-flow index
+   * (orders, fulfiller_orders, fulfillments, shipments). The value happens to be the
+   * cartId, but the field is correlation-named; never join on `cartId`.
+   */
+  correlationId: string;
   confirmationNumber: string;
   customerEmail: string;
   customerName: string;
@@ -226,6 +233,8 @@ export interface InventoryReservationDocument {
 export interface FulfillerOrderDocument {
   fulfillerOrderId: string;
   orderId: string;
+  /** Correlation ID (ADR-0011) — joinable across all order-flow indices. */
+  correlationId: string;
   fulfillerId: string;
   fulfillerName: string;
   status: string;
@@ -288,6 +297,8 @@ export interface ReservationDocument {
 // Fulfillments Index (fulfillment workflow state)
 export interface FulfillmentDocument {
   orderId: string;
+  /** Correlation ID (ADR-0011) — joinable across all order-flow indices. */
+  correlationId: string;
   customerId: string;
   status: string;
   fulfillerOrderCount: number;
@@ -301,6 +312,8 @@ export interface FulfillmentDocument {
 export interface ShipmentDocument {
   shipmentId: string;
   orderId: string;
+  /** Correlation ID (ADR-0011) — joinable across all order-flow indices. */
+  correlationId: string;
   carrier: string;
   trackingNumber: string;
   trackingUrl?: string;

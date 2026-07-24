@@ -105,7 +105,11 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       // assignment (assigning_fulfillers), fulfiller-order creation + starting the
       // fulfillment child (requesting_fulfillment) — lives in the state machine.
       await saveOrderToDatabase(input.order);
-      await insertStatusHistoryEntry(input.order.orderId, startCtx.statusHistory[0]);
+      await insertStatusHistoryEntry(
+        input.order.orderId,
+        startCtx.statusHistory[0],
+        input.order.cartId,
+      );
       await indexOrder(buildOrderDocument(input.order, startCtx, input.customerEmail));
 
       return { context: startCtx, nextState: 'pending_assignment' };
@@ -141,7 +145,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
           updatedBy,
         };
         state.statusHistory.push(entry);
-        await insertStatusHistoryEntry(input.order.orderId, entry);
+        await insertStatusHistoryEntry(input.order.orderId, entry, input.order.cartId);
       }
 
       await updateOrderInDatabase(input.order.orderId, {
@@ -156,7 +160,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       await indexOrder(getOrderDocument());
 
       for (const so of state.fulfillerOrders) {
-        await indexFulfillerOrder(buildFulfillerOrderDocument(so));
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.cartId));
       }
     },
     continueAsNewThreshold: 200,
@@ -199,7 +203,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         status: cancelCtx.status,
         statusHistory: cancelCtx.statusHistory,
       });
-      await insertStatusHistoryEntry(input.order.orderId, cancelEntry);
+      await insertStatusHistoryEntry(input.order.orderId, cancelEntry, input.order.cartId);
       await indexOrder(getOrderDocument());
     },
     onTerminal: async (finalCtx, terminalState) => {
@@ -210,7 +214,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       // Final projection sync to ensure ES is consistent
       await indexOrder(getOrderDocument());
       for (const so of finalCtx.fulfillerOrders) {
-        await indexFulfillerOrder(buildFulfillerOrderDocument(so));
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.cartId));
       }
     },
   };

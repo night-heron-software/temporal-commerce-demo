@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { createLogger, toSystemErrorDocument } from './logger';
+import { correlationMixin, createLogger, toSystemErrorDocument } from './logger';
+import { runWithCorrelationId } from './correlation-context';
 
 /** Build a pino-shaped JSON line. */
 function line(fields: Record<string, unknown>): string {
@@ -45,6 +46,17 @@ describe('toSystemErrorDocument', () => {
       // ...and does not leave them duplicated in context
       expect(doc?.context).not.toHaveProperty('component');
       expect(doc?.context).not.toHaveProperty('storeId');
+    });
+
+    it('lifts correlationId (stamped by the mixin) to top level', () => {
+      const doc = toSystemErrorDocument(line({ correlationId: 'cart-1' }));
+
+      expect(doc?.correlationId).toBe('cart-1');
+      expect(doc?.context).not.toHaveProperty('correlationId');
+    });
+
+    it('leaves correlationId undefined when the line has none', () => {
+      expect(toSystemErrorDocument(line({}))?.correlationId).toBeUndefined();
     });
 
     it('lifts err.stack into stack', () => {
@@ -111,5 +123,24 @@ describe('toSystemErrorDocument', () => {
 describe('createLogger', () => {
   it('binds the component name so log lines are filterable', () => {
     expect(createLogger('cart:worker').bindings()).toMatchObject({ component: 'cart:worker' });
+  });
+});
+
+describe('correlationMixin', () => {
+  it('returns no fields outside a correlation scope', () => {
+    expect(correlationMixin()).toEqual({});
+  });
+
+  it('stamps the ambient correlationId inside runWithCorrelationId', () => {
+    runWithCorrelationId('cart-1', () => {
+      expect(correlationMixin()).toEqual({ correlationId: 'cart-1' });
+    });
+  });
+
+  it('feeds toSystemErrorDocument: a mixin-stamped error line lifts correlationId', () => {
+    const stamped = runWithCorrelationId('cart-2', () =>
+      JSON.stringify({ level: 50, time: 1_700_000_000_000, msg: 'boom', ...correlationMixin() }),
+    );
+    expect(toSystemErrorDocument(stamped)?.correlationId).toBe('cart-2');
   });
 });

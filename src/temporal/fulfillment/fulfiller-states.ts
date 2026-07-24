@@ -56,6 +56,7 @@ async function indexNewestShipment(ctx: FulfillerOrderWorkflowContext): Promise<
   await indexShipment({
     shipmentId: shipment.shipmentId,
     orderId: so.fulfillerOrderId,
+    correlationId: ctx.cartId,
     carrier: shipment.carrier,
     trackingNumber: shipment.trackingNumber,
     trackingUrl: shipment.trackingUrl,

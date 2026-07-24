@@ -25,6 +25,7 @@ import pino from 'pino';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { currentCorrelationId } from './correlation-context';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const level = (process.env.LOG_LEVEL || (isDev ? 'debug' : 'info')) as pino.Level;
@@ -124,6 +125,19 @@ if (isDev) {
   streams.push({ level, stream: process.stdout });
 }
 
+// ── Correlation mixin ─────────────────────────────────────────────────────────
+/**
+ * Pino mixin stamping the ambient correlationId (set by the worker's activity-inbound
+ * interceptor via `runWithCorrelationId`) onto every log line emitted on an activity's
+ * async path. Cheap: one AsyncLocalStorage get per line. Mixin fields merge UNDER
+ * explicit log-call fields, so an explicit `correlationId` always wins. Exported for the
+ * logger unit tests.
+ */
+export function correlationMixin(): Record<string, unknown> {
+  const correlationId = currentCorrelationId();
+  return correlationId === undefined ? {} : { correlationId };
+}
+
 // ── Error index stream ────────────────────────────────────────────────────────
 export interface SystemErrorDocument {
   errorId: string;
@@ -132,6 +146,7 @@ export interface SystemErrorDocument {
   message: string;
   component?: string;
   storeId?: string;
+  correlationId?: string;
   stack?: string;
   context: Record<string, unknown>;
 }
@@ -150,7 +165,17 @@ export function toSystemErrorDocument(line: string): SystemErrorDocument | null 
 
   if (typeof parsed.level !== 'number' || parsed.level < 50) return null;
 
-  const { level: lvl, msg, time, component, storeId, err, error: errField, ...rest } = parsed;
+  const {
+    level: lvl,
+    msg,
+    time,
+    component,
+    storeId,
+    correlationId,
+    err,
+    error: errField,
+    ...rest
+  } = parsed;
 
   // The Temporal SDK passes errors under `error`; everything else uses pino's reserved `err`.
   const errObj = (err ?? errField) as Record<string, unknown> | undefined;
@@ -162,6 +187,7 @@ export function toSystemErrorDocument(line: string): SystemErrorDocument | null 
     message: typeof msg === 'string' ? msg : '',
     component: typeof component === 'string' ? component : undefined,
     storeId: typeof storeId === 'string' ? storeId : undefined,
+    correlationId: typeof correlationId === 'string' ? correlationId : undefined,
     stack: typeof errObj?.stack === 'string' ? errObj.stack : undefined,
     context: { ...rest, ...(errObj ? { err: errObj } : {}) },
   };
@@ -219,6 +245,7 @@ streams.push({ level: 'error', stream: errorIndexStream });
 export const logger = pino(
   {
     level,
+    mixin: correlationMixin,
     serializers: {
       err: pino.stdSerializers.err,
       error: pino.stdSerializers.err,

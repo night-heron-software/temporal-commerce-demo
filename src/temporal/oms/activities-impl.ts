@@ -288,11 +288,15 @@ export async function indexCustomer(doc: Elasticsearch.CustomerDocument): Promis
 }
 
 /**
- * Insert a status history entry into order_status_history table
+ * Insert a status history entry into order_status_history table.
+ *
+ * `correlationId` (ADR-0011) is the correlation-named join field; callers source the
+ * value from the order's cart linkage.
  */
 export async function insertStatusHistoryEntry(
   orderId: string,
   entry: { status: string; timestamp: string; note?: string; updatedBy: string },
+  correlationId: string,
 ): Promise<void> {
   const client = getCassandraClient();
   const orderIdUuid = types.Uuid.fromString(orderId);
@@ -300,9 +304,17 @@ export async function insertStatusHistoryEntry(
   const timeUuid = types.TimeUuid.fromDate(eventTime);
 
   await client.execute(
-    `INSERT INTO order_status_history (order_id, event_time, id, status, note, updated_by)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [orderIdUuid, eventTime, timeUuid, entry.status, entry.note ?? null, entry.updatedBy],
+    `INSERT INTO order_status_history (order_id, event_time, id, status, note, updated_by, correlation_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      orderIdUuid,
+      eventTime,
+      timeUuid,
+      entry.status,
+      entry.note ?? null,
+      entry.updatedBy,
+      correlationId,
+    ],
     { prepare: true },
   );
 

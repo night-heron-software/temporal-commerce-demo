@@ -68,6 +68,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
     properties: {
       orderId: { type: 'keyword' },
       cartId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
       confirmationNumber: { type: 'keyword' },
       customerEmail: { type: 'keyword' },
       customerName: { type: 'text', fields: { keyword: { type: 'keyword' } } },
@@ -241,6 +242,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
     properties: {
       fulfillerOrderId: { type: 'keyword' },
       orderId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
       fulfillerId: { type: 'keyword' },
       fulfillerName: { type: 'text', fields: { keyword: { type: 'keyword' } } },
       status: { type: 'keyword' },
@@ -306,6 +308,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
   fulfillments: {
     properties: {
       orderId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
       customerId: { type: 'keyword' },
       status: { type: 'keyword' },
       fulfillerOrderCount: { type: 'integer' },
@@ -319,6 +322,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
     properties: {
       shipmentId: { type: 'keyword' },
       orderId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
       carrier: { type: 'keyword' },
       trackingNumber: { type: 'keyword' },
       trackingUrl: { type: 'keyword', index: false },
@@ -343,6 +347,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       message: { type: 'text' },
       component: { type: 'keyword' },
       storeId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
       stack: { type: 'text', index: false },
       context: { type: 'object', dynamic: true },
     },

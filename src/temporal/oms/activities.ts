@@ -31,6 +31,7 @@ export interface OmsActivities {
   insertStatusHistoryEntry(
     orderId: string,
     entry: { status: string; timestamp: string; note?: string; updatedBy: string },
+    correlationId: string,
   ): Promise<void>;
   indexOrder(doc: Elasticsearch.OrderDocument): Promise<void>;
   indexFulfillerOrder(doc: Elasticsearch.FulfillerOrderDocument): Promise<void>;
