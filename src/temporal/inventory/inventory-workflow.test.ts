@@ -49,6 +49,8 @@ const startOpts = () => ({
     storeId: DEMO_STORE_ID,
     domain: 'inventory',
     entityId: WORKFLOW_ENTITY_SLUGS.inventoryService,
+    // The service singleton belongs to no journey — explicit correlation opt-out.
+    correlationId: undefined,
   }),
   args: [{}] as [Record<string, never>],
 });

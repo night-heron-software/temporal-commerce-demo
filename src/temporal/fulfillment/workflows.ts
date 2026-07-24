@@ -31,6 +31,7 @@ import {
   SignalRegistration,
   deriveDisplayStatus,
   isTerminal,
+  workflowCorrelationId,
 } from '../framework';
 import { FULFILLMENT_STATES } from './states';
 import {
@@ -249,6 +250,9 @@ export async function fulfillmentWorkflow(
               storeId: DEMO_STORE_ID,
               domain: 'fulfiller-order',
               entityId: fulfillerOrder.fulfillerOrderId,
+              // Journey correlationId from this workflow's own Search Attribute
+              // (fallback cartId for legacy pre-tagging starts) — ADR-0011.
+              correlationId: workflowCorrelationId() ?? startCtx.cartId,
               orderId: startCtx.orderId,
               cartId: startCtx.cartId,
             }),

@@ -43,6 +43,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 const CART_ID = 'cart-e2e-1';
 const ORDER_ID = 'o-e2e-1';
+// The journey correlationId — its own id minted at cart creation, deliberately ≠ CART_ID.
+const CORRELATION_ID = 'corr-e2e-1';
 
 const WAIT = { timeout: 30_000 } as const;
 
@@ -87,6 +89,7 @@ const checkoutActivities = {
     async (input: CreateOrderInput): Promise<Order> => ({
       orderId: ORDER_ID,
       cartId: input.cartId,
+      correlationId: CORRELATION_ID,
       customerEmail: input.shippingAddress.email,
       items: input.items,
       shippingAddress: input.shippingAddress,
@@ -109,6 +112,7 @@ const checkoutActivities = {
       storeId: DEMO_STORE_ID,
       domain: 'order',
       entityId: order.orderId,
+      correlationId: order.correlationId,
       orderId: order.orderId,
       cartId: order.cartId,
     });
@@ -206,6 +210,9 @@ describe('order journey (cart → checkout → OMS → fulfillment, Temporal tes
           storeId: DEMO_STORE_ID,
           domain: 'cart',
           entityId: CART_ID,
+          // Minted at cart creation (its own id ≠ cartId); the checkout child must
+          // inherit it from the cart's CorrelationId Search Attribute.
+          correlationId: CORRELATION_ID,
           cartId: CART_ID,
         }),
         args: [{ cartId: CART_ID }],
@@ -227,6 +234,12 @@ describe('order journey (cart → checkout → OMS → fulfillment, Temporal tes
         return id!;
       }, WAIT);
       const checkoutHandle = env.client.workflow.getHandle(checkoutWorkflowId);
+
+      // The checkout child inherited the journey correlationId by reading the cart
+      // workflow's own CorrelationId Search Attribute (ADR-0011) — the minted id, not
+      // the cartId.
+      const checkoutDesc = await checkoutHandle.describe();
+      expect(checkoutDesc.searchAttributes?.CorrelationId).toEqual([CORRELATION_ID]);
 
       // The checkout validates first (real queryCart against the live cart), then waits
       // for the shipping address — same readiness the storefront polls for.

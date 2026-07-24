@@ -29,6 +29,7 @@ const WORKFLOWS_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '
 const order: Cart.Order = {
   orderId: 'o-test-1',
   cartId: 'cart-1',
+  correlationId: 'corr-1',
   customerEmail: 'a@b.c',
   items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
   shippingAddress: {
@@ -83,6 +84,7 @@ const startOpts = () => ({
     storeId: DEMO_STORE_ID,
     domain: 'order',
     entityId: `o-${Math.random().toString(36).slice(2, 10)}`,
+    correlationId: order.correlationId,
     orderId: order.orderId,
     cartId: order.cartId,
   }),

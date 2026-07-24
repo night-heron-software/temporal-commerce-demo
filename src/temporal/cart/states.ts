@@ -26,7 +26,7 @@ import type {
   CartStateName,
   CartWorkflowContext,
 } from './types';
-import { defineDomain, terminal, SELF } from '../framework';
+import { defineDomain, terminal, SELF, workflowCorrelationId } from '../framework';
 import type { StateRegistry, TransitionMap } from '../framework';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 
@@ -213,12 +213,15 @@ const active = cart.transitions(
         }
 
         const parentCartWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', ctx.cart.cartId);
-        // A fresh checkout id per attempt, tagged with the cart's correlation id so the
-        // whole journey is queryable (ADR-0011).
+        // A fresh checkout id per attempt, tagged with the journey's correlationId so the
+        // whole journey is queryable (ADR-0011). The value is read from this cart
+        // workflow's own CorrelationId Search Attribute (minted at cart creation);
+        // legacy carts started before tagging fall back to the cartId.
         const checkoutStart = buildWorkflowStartOptions({
           storeId: DEMO_STORE_ID,
           domain: 'checkout',
           entityId: uuid4(),
+          correlationId: workflowCorrelationId() ?? ctx.cart.cartId,
           cartId: ctx.cart.cartId,
         });
         const newCheckoutWorkflowId = checkoutStart.workflowId;

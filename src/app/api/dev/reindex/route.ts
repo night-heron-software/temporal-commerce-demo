@@ -221,6 +221,7 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
   interface OrderRow {
     order_id: CqlUuid;
     cart_id: string;
+    correlation_id: string | null;
     confirmation_number: string;
     customer_email: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -261,8 +262,9 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
       const doc = {
         orderId,
         cartId: row.cart_id,
-        // Correlation-named join field (ADR-0011), sourced from the order's cart linkage.
-        correlationId: row.cart_id,
+        // Journey correlationId (ADR-0011); legacy rows predate the column → fall back
+        // to the cart linkage (correlationId used to equal cartId).
+        correlationId: row.correlation_id ?? row.cart_id,
         confirmationNumber: row.confirmation_number,
         customerEmail: row.customer_email,
         customerName: row.shipping_address
@@ -532,11 +534,14 @@ async function reindexFulfillerOrders(esClient: EsClient, errors: string[]): Pro
   interface OrderRow {
     order_id: CqlUuid;
     cart_id: string;
+    correlation_id: string | null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fulfiller_orders: any[] | null;
   }
 
-  const rows = await executeCql<OrderRow>('SELECT order_id, cart_id, fulfiller_orders FROM orders');
+  const rows = await executeCql<OrderRow>(
+    'SELECT order_id, cart_id, correlation_id, fulfiller_orders FROM orders',
+  );
   let indexed = 0;
 
   for (const row of rows) {
@@ -546,8 +551,8 @@ async function reindexFulfillerOrders(esClient: EsClient, errors: string[]): Pro
         const doc = {
           fulfillerOrderId: so.fulfiller_order_id,
           orderId,
-          // Correlation join via the parent order's cart linkage (ADR-0011).
-          correlationId: row.cart_id,
+          // Journey correlationId (ADR-0011); fallback cart_id for legacy rows.
+          correlationId: row.correlation_id ?? row.cart_id,
           fulfillerId: so.fulfiller_id,
           fulfillerName: so.fulfiller_name,
           status: so.status,

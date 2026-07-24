@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 
 import { executeCql, logger as log, sendEmail, getElasticsearchClient } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
+import { currentCorrelationId } from '../../lib/correlation-context';
 
 import {
   InventoryCommandRepository,
@@ -127,6 +128,10 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const order: Order = {
     orderId,
     cartId: input.cartId,
+    // The journey's correlationId (ADR-0011) from the ambient activity context (set by
+    // the worker's correlation interceptor). Fallback cartId keeps seed/api paths —
+    // which run outside any workflow — working.
+    correlationId: currentCorrelationId() ?? input.cartId,
     customerEmail: input.shippingAddress.email,
     items: input.items,
     shippingAddress: input.shippingAddress,
@@ -185,10 +190,14 @@ export async function startOrderManagementWorkflow(
   const { buildWorkflowStartOptions, DEMO_STORE_ID } = await import('../contracts/constants');
   const client = await getTemporalClient();
 
+  // Pass the journey's correlationId along: ambient activity context first (set by the
+  // worker's correlation interceptor from this checkout's own CorrelationId Search
+  // Attribute), the order record's copy as the fallback (ADR-0011).
   const startOptions = buildWorkflowStartOptions({
     storeId: DEMO_STORE_ID,
     domain: 'order',
     entityId: order.orderId,
+    correlationId: currentCorrelationId() ?? order.correlationId,
     orderId: order.orderId,
     cartId: order.cartId,
     memo: { confirmationNumber: order.confirmationNumber },

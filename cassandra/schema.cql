@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS collections (
 CREATE TABLE IF NOT EXISTS orders (
     order_id UUID PRIMARY KEY,
     cart_id TEXT,
+    correlation_id TEXT,      -- journey correlationId (ADR-0011): its own UUID minted at cart creation
     confirmation_number TEXT,
     customer_email TEXT,
     items LIST<FROZEN<order_item>>,

@@ -5,6 +5,7 @@
 
 import { log } from '@temporalio/activity';
 import { getCassandraClient, cassandraTypes as types, getElasticsearchClient } from '../../lib';
+import { currentCorrelationId } from '../../lib/correlation-context';
 import { Order, OrderState, OrderStatus, OrderAssignment } from './types';
 import type { Elasticsearch } from '../contracts';
 import { ES_INDICES } from '../contracts/elasticsearch';
@@ -74,14 +75,15 @@ export async function saveOrderToDatabase(order: Order): Promise<void> {
   const queries = [
     {
       query: `INSERT INTO orders (
-        order_id, cart_id, confirmation_number, customer_email,
+        order_id, cart_id, correlation_id, confirmation_number, customer_email,
         items, assignments, shipping_address, payment_method,
         subtotal, shipping_cost, tax, total_discounts, total,
         currency, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         orderIdUuid,
         order.cartId,
+        order.correlationId,
         order.confirmationNumber,
         order.customerEmail,
         items,
@@ -272,7 +274,9 @@ export async function indexFulfillerOrder(
   await client.index({
     index: ES_INDICES.fulfillerOrders,
     id: doc.fulfillerOrderId,
-    document: doc,
+    // Prefer the ambient journey correlationId (ADR-0011); the builder-supplied value
+    // (order.correlationId) is the fallback outside an activity correlation scope.
+    document: { ...doc, correlationId: currentCorrelationId() ?? doc.correlationId },
   });
   log.info(`[Activity] Indexed fulfiller order ${doc.fulfillerOrderId} to Elasticsearch`);
 }
@@ -291,7 +295,7 @@ export async function indexCustomer(doc: Elasticsearch.CustomerDocument): Promis
  * Insert a status history entry into order_status_history table.
  *
  * `correlationId` (ADR-0011) is the correlation-named join field; callers source the
- * value from the order's cart linkage.
+ * value from the order record's journey correlationId.
  */
 export async function insertStatusHistoryEntry(
   orderId: string,

@@ -85,13 +85,20 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
 
   try {
     if (options.createIfMissing) {
-      // Use updateWithStart to lazily create the workflow
+      // Use updateWithStart to lazily create the workflow.
+      // The journey's correlationId is minted HERE, at cart creation, as its own UUID
+      // (deliberately ≠ cartId — ADR-0011). Every downstream workflow start reads it
+      // from its parent's CorrelationId Search Attribute and passes it along. When the
+      // cart workflow already exists (USE_EXISTING), this freshly minted value is
+      // ignored and the existing workflow's correlationId stays authoritative.
+      const correlationId = randomUUID();
       const { WithStartWorkflowOperation } = await import('@temporalio/client');
       const startOp = new WithStartWorkflowOperation('cartWorkflow', {
         ...buildWorkflowStartOptions({
           storeId: DEMO_STORE_ID,
           domain: 'cart',
           entityId: cartId,
+          correlationId,
           cartId,
         }),
         args: [{ cartId }],

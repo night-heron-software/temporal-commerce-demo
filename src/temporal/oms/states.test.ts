@@ -14,7 +14,9 @@ vi.mock('@temporalio/workflow', () => ({
   workflowInfo: vi.fn(() => ({
     workflowId: 'demo.order.o-1',
     runId: 'run-1',
-    searchAttributes: {},
+    // The workflow's own journey correlationId (ADR-0011) — downstream startChild
+    // reads this Search Attribute and passes it on.
+    searchAttributes: { CorrelationId: ['corr-1'] },
     workflowType: 'orderWorkflow',
   })),
   condition: vi.fn(async () => true),
@@ -65,6 +67,7 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
   return {
     orderId: 'o-1',
     cartId: 'cart-1',
+    correlationId: 'corr-1',
     customerEmail: 'a@b.c',
     items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
     shippingAddress: {
@@ -252,7 +255,9 @@ describe('requesting_fulfillment (transitional)', () => {
         searchAttributes: expect.objectContaining({
           OrderId: ['o-1'],
           CartId: ['cart-1'],
-          CorrelationId: ['cart-1'],
+          // The journey UUID read from this workflow's own CorrelationId Search
+          // Attribute — no longer the cartId.
+          CorrelationId: ['corr-1'],
         }),
       }),
     );

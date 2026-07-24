@@ -1,7 +1,7 @@
 export * from './types';
 export * from './driver';
 export { createTransitionRecorder } from './transition-sink';
-export { conventionIdentityResolver } from './identity';
+export { conventionIdentityResolver, workflowCorrelationId } from './identity';
 export type { ConventionIdentityOptions } from './identity';
 export { transitionActivityInterceptors } from './activity-capture';
 /** @internal — implementation detail; use defineDomain().state() for new authoring. */

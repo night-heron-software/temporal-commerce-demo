@@ -31,20 +31,24 @@ export interface OrderSummary {
   currency: string;
   status: string;
   createdAt: string;
-  /** Correlation ID (= cart ID, ADR-0011); null if the row predates cart_id. */
   cartId: string | null;
   /**
+   * The journey's correlationId (ADR-0011) — its own UUID minted at cart creation;
+   * legacy rows predate the column, where correlationId equalled cartId.
+   */
+  correlationId: string | null;
+  /**
    * Temporal UI workflows page filtered to this order's journey
-   * (`CorrelationId = cartId`, ADR-0011); null if the row predates cart_id.
+   * (`CorrelationId` Search Attribute query); null if no correlation is known.
    * Built server-side because TEMPORAL_UI_URL is a server-only env var.
    */
   temporalUrl: string | null;
 }
 
-/** Temporal UI workflows list filtered by the correlation (= cart) ID. */
-function temporalWorkflowsByCorrelationUrl(cartId: string): string {
+/** Temporal UI workflows list filtered by the journey correlationId. */
+function temporalWorkflowsByCorrelationUrl(correlationId: string): string {
   const base = process.env.TEMPORAL_UI_URL || 'http://localhost:8233';
-  const query = encodeURIComponent(`CorrelationId="${cartId}"`);
+  const query = encodeURIComponent(`CorrelationId="${correlationId}"`);
   return `${base}/namespaces/${TEMPORAL_NAMESPACE}/workflows?query=${query}`;
 }
 
@@ -63,8 +67,9 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       status: string;
       created_at: Date | null;
       cart_id: string | null;
+      correlation_id: string | null;
     }>(
-      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at, cart_id FROM orders`,
+      `SELECT order_id, confirmation_number, customer_email, total, currency, status, created_at, cart_id, correlation_id FROM orders`,
     );
 
     const sorted = rows.sort((a, b) => {
@@ -73,17 +78,22 @@ export async function getAllOrders(): Promise<ActionResult<OrderSummary[]>> {
       return bTime - aTime;
     });
 
-    const data = sorted.map((row) => ({
-      orderId: row.order_id.toString(),
-      confirmationNumber: row.confirmation_number,
-      customerEmail: row.customer_email ?? '',
-      total: row.total ?? 0,
-      currency: row.currency ?? 'USD',
-      status: row.status ?? 'unknown',
-      createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
-      cartId: row.cart_id,
-      temporalUrl: row.cart_id ? temporalWorkflowsByCorrelationUrl(row.cart_id) : null,
-    }));
+    const data = sorted.map((row) => {
+      // Legacy rows predate orders.correlation_id, where the correlationId was the cartId.
+      const correlationId = row.correlation_id ?? row.cart_id;
+      return {
+        orderId: row.order_id.toString(),
+        confirmationNumber: row.confirmation_number,
+        customerEmail: row.customer_email ?? '',
+        total: row.total ?? 0,
+        currency: row.currency ?? 'USD',
+        status: row.status ?? 'unknown',
+        createdAt: row.created_at?.toISOString() ?? new Date().toISOString(),
+        cartId: row.cart_id,
+        correlationId,
+        temporalUrl: correlationId ? temporalWorkflowsByCorrelationUrl(correlationId) : null,
+      };
+    });
 
     return { success: true, data };
   } catch (e) {

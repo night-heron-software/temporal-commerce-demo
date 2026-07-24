@@ -43,7 +43,7 @@ import type {
 import { buildFulfillerOrderDocument } from './document-builder';
 import { decide as omsDecide, evolve, copyOrderState, aggregateShippingState } from './oms-decider';
 import type { OrderCommand } from './oms-decider';
-import { defineDomain, terminal, SELF } from '../framework';
+import { defineDomain, terminal, SELF, workflowCorrelationId } from '../framework';
 import type { StateRegistry, StateInput, DecisionResult, InputMeta } from '../framework';
 
 /** Order line item shape with the optional display fields the intake logic reads. */
@@ -126,7 +126,7 @@ async function omsFinalize(_ctx: Readonly<OrderState>, decision: OmsDecision): P
       const order = fin.order;
       // Index the newly-created fulfiller orders so the admin sees them immediately.
       for (const so of fin.fulfillerOrders) {
-        await indexFulfillerOrder(buildFulfillerOrderDocument(so, order.cartId));
+        await indexFulfillerOrder(buildFulfillerOrderDocument(so, order.correlationId));
       }
       // Price validation — warn on $0 items to catch cart manipulation.
       const zeroItems = fin.fulfillmentInputs
@@ -138,10 +138,13 @@ async function omsFinalize(_ctx: Readonly<OrderState>, decision: OmsDecision): P
           zeroSkus: zeroItems.map((i) => i.sku),
         });
       }
+      // Pass the journey's correlationId along: this workflow's own CorrelationId
+      // Search Attribute first, the order record's copy as the fallback (ADR-0011).
       const fulfillmentStart = buildWorkflowStartOptions({
         storeId: DEMO_STORE_ID,
         domain: 'fulfillment',
         entityId: order.orderId,
+        correlationId: workflowCorrelationId() ?? order.correlationId,
         orderId: order.orderId,
         cartId: order.cartId,
       });

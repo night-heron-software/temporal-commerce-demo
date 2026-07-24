@@ -6,7 +6,9 @@ export function buildFulfillmentDocument(
 ): Elasticsearch.FulfillmentDocument {
   return {
     orderId: state.orderId,
-    // Correlation-named join field (ADR-0011); the value is sourced from the cart linkage.
+    // Correlation-named join field (ADR-0011). The workflow state only carries the cart
+    // linkage; the indexFulfillment activity overrides this with the ambient journey
+    // correlationId, so this value is only the legacy fallback.
     correlationId: state.cartId,
     customerId: state.customerId,
     status: state.status,

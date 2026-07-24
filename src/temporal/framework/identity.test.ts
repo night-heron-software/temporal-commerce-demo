@@ -7,7 +7,7 @@ vi.mock('@temporalio/workflow', () => ({
   workflowInfo: () => info,
 }));
 
-import { conventionIdentityResolver } from './identity';
+import { conventionIdentityResolver, workflowCorrelationId } from './identity';
 
 beforeEach(() => {
   info = { workflowId: 'store-1.oms.order-1', searchAttributes: {} };
@@ -87,5 +87,22 @@ describe('conventionIdentityResolver', () => {
   it('omits tags entirely when none resolve', () => {
     info = { workflowId: 'untagged', searchAttributes: { StoreId: ['store-1'] } };
     expect(conventionIdentityResolver()()).toEqual({ tenantId: 'store-1', tags: undefined });
+  });
+});
+
+describe('workflowCorrelationId', () => {
+  it("reads the workflow's own CorrelationId Search Attribute", () => {
+    info.searchAttributes = { CorrelationId: ['corr-1'], StoreId: ['store-1'] };
+    expect(workflowCorrelationId()).toBe('corr-1');
+  });
+
+  it('returns undefined when untagged (service singletons)', () => {
+    info.searchAttributes = { StoreId: ['store-1'] };
+    expect(workflowCorrelationId()).toBeUndefined();
+  });
+
+  it('returns undefined outside workflow context instead of throwing', () => {
+    info = undefined as unknown as typeof info;
+    expect(workflowCorrelationId()).toBeUndefined();
   });
 });

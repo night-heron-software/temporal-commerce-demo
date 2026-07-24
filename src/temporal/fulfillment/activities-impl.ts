@@ -1,5 +1,6 @@
 import { heartbeat } from '@temporalio/activity';
 import { logger, getElasticsearchClient } from '../../lib';
+import { currentCorrelationId } from '../../lib/correlation-context';
 import type { Fulfillers, Elasticsearch } from '../contracts';
 import type { TrackingInfo } from './activities';
 import { ES_INDICES } from '../contracts/elasticsearch';
@@ -139,7 +140,10 @@ export async function indexFulfillment(doc: Elasticsearch.FulfillmentDocument): 
   await client.index({
     index: ES_INDICES.fulfillments,
     id: doc.orderId,
-    document: doc,
+    // The workflow-side builder only has the cart linkage; this activity carries the
+    // journey's true correlationId ambiently (ADR-0011) — the builder value is the
+    // fallback for legacy untagged workflows.
+    document: { ...doc, correlationId: currentCorrelationId() ?? doc.correlationId },
   });
 }
 
@@ -148,6 +152,7 @@ export async function indexShipment(doc: Elasticsearch.ShipmentDocument): Promis
   await client.index({
     index: ES_INDICES.shipments,
     id: doc.shipmentId,
-    document: doc,
+    // Same ambient-correlationId override as indexFulfillment (ADR-0011).
+    document: { ...doc, correlationId: currentCorrelationId() ?? doc.correlationId },
   });
 }
