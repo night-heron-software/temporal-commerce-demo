@@ -26,3 +26,18 @@ export function getElasticsearchClient(): Client {
   }
   return cachedClient;
 }
+
+/**
+ * True when an Elasticsearch error is `index_not_found_exception` — the target index does
+ * not exist, typically a transient delete-and-recreate reindexing window. Matched
+ * defensively on both the typed response body and the message string, since the client
+ * wraps errors differently across transports.
+ */
+export function isIndexNotFoundError(error: unknown): boolean {
+  const e = error as {
+    meta?: { body?: { error?: { type?: string } } };
+    message?: unknown;
+  };
+  if (e?.meta?.body?.error?.type === 'index_not_found_exception') return true;
+  return typeof e?.message === 'string' && e.message.includes('index_not_found_exception');
+}

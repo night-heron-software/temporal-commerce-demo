@@ -50,12 +50,35 @@ export const childCancelSignal = wf.defineSignal('cancel');
 export const getFulfillerOrderStateQuery =
   wf.defineQuery<FulfillmentFulfillerOrderState>('getFulfillerOrderState');
 
+/**
+ * True when a signal to the parent failed because the parent workflow no longer exists
+ * (not found / already completed). This is the expected terminal race: the parent
+ * fulfillment workflow completes as soon as its aggregate status reaches `delivered`,
+ * which happens while this child is still delivering its FINAL status update — so the
+ * child's last signal has nowhere to land on every successful delivery.
+ *
+ * Matched defensively on the message (the SDK surfaces it as an ApplicationFailure whose
+ * message reads "Unable to signal external workflow because it was not found"; exact
+ * wording may drift across SDK versions).
+ */
+function isParentGoneSignalError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /not found|already completed/i.test(message);
+}
+
 async function notifyParent(so: FulfillmentFulfillerOrderState, orderId: string) {
   try {
     const parentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
     const parentHandle = wf.getExternalWorkflowHandle(parentWorkflowId);
     await parentHandle.signal('childStatusUpdate', so);
   } catch (err) {
+    if (isParentGoneSignalError(err)) {
+      // Expected terminal race (see isParentGoneSignalError) — info, not error.
+      wf.log.info('Parent fulfillment workflow already completed — skipping child status update', {
+        error: String(err),
+      });
+      return;
+    }
     wf.log.error('Failed to notify parent workflow of child status update', { error: String(err) });
   }
 }

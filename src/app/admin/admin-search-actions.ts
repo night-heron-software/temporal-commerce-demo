@@ -4,7 +4,7 @@
  * Admin Search Actions — Server Actions for querying Elasticsearch indices.
  */
 
-import { getElasticsearchClient } from '@/lib/es-client';
+import { getElasticsearchClient, isIndexNotFoundError } from '@/lib/es-client';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('admin-search-actions');
@@ -85,6 +85,8 @@ export async function searchElasticsearch(
   indices: SearchableIndex[],
   size: number = 25,
 ): Promise<SearchResponse> {
+  // Hoisted so the catch block can attribute failures to the index set actually queried.
+  let indexPattern = indices.join(',');
   try {
     const client = getElasticsearchClient();
 
@@ -99,7 +101,7 @@ export async function searchElasticsearch(
       return { success: true, results: [], total: 0, took: 0 };
     }
 
-    const indexPattern = existingIndices.join(',');
+    indexPattern = existingIndices.join(',');
     const trimmed = query.trim();
 
     // UUID pattern for detection and extraction
@@ -210,7 +212,20 @@ export async function searchElasticsearch(
       took: response.took,
     };
   } catch (error) {
-    log.error({ err: error }, 'Search failed');
+    if (isIndexNotFoundError(error)) {
+      // A target index vanished between the exists() pre-check and the search — a
+      // transient delete-and-recreate reindexing window. Clean client-facing failure,
+      // logged at warn so rebuild windows don't spam system_errors.
+      log.warn({ index: indexPattern, err: error }, 'Search index missing — it may be rebuilding');
+      return {
+        success: false,
+        results: [],
+        total: 0,
+        took: 0,
+        error: `index '${indexPattern}' does not exist (it may be rebuilding)`,
+      };
+    }
+    log.error({ index: indexPattern, err: error }, 'Search failed');
     return { success: false, results: [], total: 0, took: 0, error: String(error) };
   }
 }
