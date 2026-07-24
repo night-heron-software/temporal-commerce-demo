@@ -17,6 +17,7 @@
  * (Temporal isolates workflow module state), and is only mutated around the awaited prepare/finalize
  * phases — so capture is deterministic and replay-safe (activity results are replayed from history).
  */
+import { workflowInfo } from '@temporalio/workflow';
 import type {
   ActivityInput,
   LocalActivityInput,
