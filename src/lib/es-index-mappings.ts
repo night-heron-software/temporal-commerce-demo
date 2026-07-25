@@ -313,6 +313,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
     properties: {
       reservationId: { type: 'keyword' },
       cartId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
       variantId: { type: 'keyword' },
       quantity: { type: 'integer' },
       status: { type: 'keyword' },

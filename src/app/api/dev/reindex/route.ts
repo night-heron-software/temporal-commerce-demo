@@ -603,6 +603,7 @@ async function reindexReservations(esClient: EsClient, errors: string[]): Promis
     reservation_id: string;
     blank_sku: string;
     cart_id: string;
+    correlation_id: string | null;
     variant_id: string;
     quantity: number;
     status: string;
@@ -618,6 +619,9 @@ async function reindexReservations(esClient: EsClient, errors: string[]): Promis
       const doc = {
         reservationId: row.reservation_id,
         cartId: row.cart_id,
+        // Journey key stored on the row since the write-side correlation change;
+        // legacy rows predate it, where the correlationId equalled the cartId.
+        correlationId: row.correlation_id ?? row.cart_id,
         variantId: row.variant_id ?? row.blank_sku,
         quantity: row.quantity,
         status: row.status,
