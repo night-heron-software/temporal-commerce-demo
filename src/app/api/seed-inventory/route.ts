@@ -8,10 +8,8 @@
 
 import { NextResponse } from 'next/server';
 import { executeCql, executeCqlAll } from '@/lib';
-import { createLogger } from '@/lib/logger';
+import { createErrorResponse } from '@/lib/api-utils';
 import { InventoryCommandRepository } from '@/temporal/inventory/db/inventory-command-repository';
-
-const log = createLogger('api-seed-inventory');
 
 const DEFAULT_STOCK = 100;
 const FULFILLER_ID = 'default-fulfiller';
@@ -91,7 +89,7 @@ export async function POST() {
       },
     });
   } catch (error) {
-    log.error({ err: error }, 'Inventory seed error');
-    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+    // Standard error envelope — raw error text goes to the log, not the client.
+    return createErrorResponse(500, 'Failed to seed inventory', error);
   }
 }

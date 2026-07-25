@@ -72,6 +72,9 @@ export async function GET(request: Request, { params }: RouteParams) {
       });
     }
 
+    // Prefer the first available variant; when every variant is out of stock, fall back
+    // to the first one anyway so the product page still renders — the storefront reads
+    // `available` and shows Out of Stock / disables add-to-cart in that case.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const defaultVariant = variants.find((v: any) => v.available) || variants[0];
 

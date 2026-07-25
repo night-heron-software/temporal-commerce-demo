@@ -110,15 +110,15 @@ describe('POST /api/seed-inventory', () => {
     );
   });
 
-  it('returns 500 when a stock write fails', async () => {
+  it('returns the standard 500 envelope when a stock write fails (no raw error text)', async () => {
     mocks.setFulfillerStock.mockRejectedValueOnce(new Error('cassandra unavailable'));
 
     const res = await POST();
 
     expect(res.status).toBe(500);
-    await expect(res.json()).resolves.toEqual({
-      success: false,
-      error: 'Error: cassandra unavailable',
-    });
+    const body = await res.json();
+    expect(body.error).toBe('Failed to seed inventory');
+    expect(typeof body.correlationId).toBe('string');
+    expect(JSON.stringify(body)).not.toContain('cassandra unavailable');
   });
 });

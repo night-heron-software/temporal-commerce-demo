@@ -105,7 +105,7 @@ export async function getIndexStats(): Promise<{
 
     return { success: true, stats };
   } catch (error) {
-    return { success: true, stats: [], error: String(error) };
+    return { success: false, stats: [], error: String(error) };
   }
 }
 

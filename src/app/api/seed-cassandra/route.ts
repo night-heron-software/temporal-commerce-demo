@@ -45,7 +45,6 @@ interface SampleData {
 
 export async function POST() {
   const results = {
-    reset: false,
     collections: 0,
     products: 0,
     variants: 0,
@@ -99,32 +98,41 @@ export async function POST() {
           ],
         );
 
+        // The main row is in: count the product as inserted even if a denormalized
+        // row below fails — a partially-denormalized product is an error entry, not
+        // a missing product.
+        results.products++;
+
         // Products by collection
         if (product.collection_ids?.length) {
           for (const collectionId of product.collection_ids) {
-            await executeCql(
-              `INSERT INTO products_by_collection (
-                collection_id, product_id, type, name,
-                base_price_amount, base_price_currency,
-                default_variant_id, default_variant_image_url
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              [
-                types.Uuid.fromString(collectionId),
-                types.Uuid.fromString(product.id),
-                product.type,
-                product.name,
-                product.base_price_amount,
-                product.base_price_currency,
-                product.default_variant_id
-                  ? types.Uuid.fromString(product.default_variant_id)
-                  : null,
-                product.default_variant_image_url ?? null,
-              ],
-            );
+            try {
+              await executeCql(
+                `INSERT INTO products_by_collection (
+                  collection_id, product_id, type, name,
+                  base_price_amount, base_price_currency,
+                  default_variant_id, default_variant_image_url
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  types.Uuid.fromString(collectionId),
+                  types.Uuid.fromString(product.id),
+                  product.type,
+                  product.name,
+                  product.base_price_amount,
+                  product.base_price_currency,
+                  product.default_variant_id
+                    ? types.Uuid.fromString(product.default_variant_id)
+                    : null,
+                  product.default_variant_image_url ?? null,
+                ],
+              );
+            } catch (error) {
+              results.errors.push(
+                `Product ${product.id} denormalization (products_by_collection ${collectionId}): ${error}`,
+              );
+            }
           }
         }
-
-        results.products++;
       } catch (error) {
         results.errors.push(`Product ${product.id}: ${error}`);
       }
@@ -153,29 +161,37 @@ export async function POST() {
           ],
         );
 
+        // Same accounting as products: main row in → counted; denorm failure is its
+        // own error entry.
+        results.variants++;
+
         const primaryImageUrl =
           variant.images?.['front'] ??
           variant.images?.['back'] ??
           Object.values(variant.images ?? {})[0] ??
           null;
-        await executeCql(
-          `INSERT INTO variants_by_product (
-            product_id, id, blank_sku, price_amount, price_currency,
-            available, variant_image_url, options
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            types.Uuid.fromString(variant.product_id),
-            types.Uuid.fromString(variant.id),
-            variant.blank_sku,
-            variant.price_amount,
-            variant.price_currency,
-            variant.available,
-            primaryImageUrl,
-            variant.options ?? [],
-          ],
-        );
-
-        results.variants++;
+        try {
+          await executeCql(
+            `INSERT INTO variants_by_product (
+              product_id, id, blank_sku, price_amount, price_currency,
+              available, variant_image_url, options
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              types.Uuid.fromString(variant.product_id),
+              types.Uuid.fromString(variant.id),
+              variant.blank_sku,
+              variant.price_amount,
+              variant.price_currency,
+              variant.available,
+              primaryImageUrl,
+              variant.options ?? [],
+            ],
+          );
+        } catch (error) {
+          results.errors.push(
+            `Variant ${variant.blank_sku} denormalization (variants_by_product): ${error}`,
+          );
+        }
       } catch (error) {
         results.errors.push(`Variant ${variant.blank_sku}: ${error}`);
       }
