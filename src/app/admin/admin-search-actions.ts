@@ -154,6 +154,9 @@ export async function searchElasticsearch(
         // Direct term matches on common UUID fields (keyword = no analysis)
         { term: { orderId: lower } },
         { term: { cartId: lower } },
+        // Top-level keyword field (ADR-0011 journey UUID) — the '*.keyword' sweep below
+        // only reaches text sub-fields, so it must be matched here explicitly.
+        { term: { correlationId: lower } },
         { term: { variantId: lower } },
         { term: { id: lower } },
         { term: { reservationId: lower } },
