@@ -166,6 +166,18 @@ export async function searchElasticsearch(
         { term: { customerId: lower } },
         { term: { defaultVariantId: lower } },
         { term: { confirmationNumber: lower } },
+        { term: { variantIds: lower } },
+        // Product variants are nested docs — flat term/keyword sweeps can't reach
+        // variants.id, so a variant UUID needs an explicit nested clause (this is how
+        // products are found by variant). ignore_unmapped: other indices have no
+        // 'variants' path and would otherwise fail the whole query.
+        {
+          nested: {
+            path: 'variants',
+            ignore_unmapped: true,
+            query: { term: { 'variants.id': lower } },
+          },
+        },
         // Keyword sub-field sweep for any field we may have missed
         {
           multi_match: {
