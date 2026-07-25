@@ -2,6 +2,7 @@ import { NativeConnection, Worker, WorkerOptions } from '@temporalio/worker';
 import { logger } from '../../lib';
 import { createOmsActivities } from './activities-impl';
 import { transitionRecorderActivities } from '../transition-recorder';
+import { projectionCompletionActivities } from '../projection-completion';
 import { OMS_TASK_QUEUE } from '../contracts';
 
 async function start(
@@ -11,7 +12,11 @@ async function start(
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
-    activities: { ...createOmsActivities(), ...transitionRecorderActivities },
+    activities: {
+      ...createOmsActivities(),
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     taskQueue: OMS_TASK_QUEUE,
     ...otelConfig,
   });

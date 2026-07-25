@@ -4,6 +4,7 @@ import { FULFILLMENT_TASK_QUEUE } from '../contracts';
 
 import { createFulfillmentActivities } from './activities-impl';
 import { transitionRecorderActivities } from '../transition-recorder';
+import { projectionCompletionActivities } from '../projection-completion';
 
 export default async function start(
   connection: NativeConnection,
@@ -14,7 +15,11 @@ export default async function start(
     namespace: 'default',
     taskQueue: FULFILLMENT_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
-    activities: { ...createFulfillmentActivities(), ...transitionRecorderActivities },
+    activities: {
+      ...createFulfillmentActivities(),
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     ...otelConfig,
   });
 

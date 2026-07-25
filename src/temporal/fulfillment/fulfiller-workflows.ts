@@ -1,6 +1,7 @@
 import * as wf from '@temporalio/workflow';
 import { Fulfillment, Fulfillers } from '../contracts';
 import { buildWorkflowId, DEMO_STORE_ID } from '../contracts/constants';
+import { ES_INDICES } from '../contracts/elasticsearch';
 import type { FulfillmentFulfillerOrderState, FulfillmentLineItemState } from './types';
 import {
   sendShippedEmail,
@@ -221,6 +222,15 @@ export async function fulfillerOrderWorkflow(
         }
       }
       await notifyParent(finalCtx.so, finalCtx.orderId);
+    },
+    // Shipments only: the fulfiller_orders doc is owned (and re-indexed after this child
+    // closes) by the OMS workflow, which marks it at its own close.
+    projections: {
+      refs: (finalCtx) =>
+        (finalCtx.so.shipments ?? []).map((s) => ({
+          index: ES_INDICES.shipments,
+          id: s.shipmentId,
+        })),
     },
   };
 

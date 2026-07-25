@@ -13,6 +13,29 @@ export function buildReservationId(cartId: string, variantId: string): string {
   return `${cartId}-${variantId}`;
 }
 
+/**
+ * Partial-update body that closes a reservation's ES doc in place of the old delete:
+ * terminal reservations stay searchable (Explorer live/completed filter) with the same
+ * lifecycle fields workflow-owned projections get at close. `FULFILLED` is the one
+ * happy-path ending; every other terminal status is a form of giving the stock back.
+ */
+export function reservationClosedDoc(
+  status: 'RELEASED' | 'CANCELLED' | 'FULFILLED',
+  closedAt: string,
+): {
+  status: string;
+  workflowStatus: 'completed';
+  workflowOutcome: 'completed' | 'canceled';
+  workflowClosedAt: string;
+} {
+  return {
+    status,
+    workflowStatus: 'completed',
+    workflowOutcome: status === 'FULFILLED' ? 'completed' : 'canceled',
+    workflowClosedAt: closedAt,
+  };
+}
+
 export interface InventoryItem {
   variantId: string;
   fulfillerLocations: Record<string, FulfillerLocation>; // keyed by fulfillerId

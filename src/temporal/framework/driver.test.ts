@@ -15,13 +15,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  */
 
 class ContinueAsNewError extends Error {}
+// vi.hoisted: the mock factory references these classes eagerly (`TemporalFailure:
+// MockTemporalFailure`), so they must initialize before the hoisted vi.mock runs.
+// MockTemporalFailure mirrors the SDK's failure hierarchy — only TemporalFailure
+// subclasses close a workflow (the driver's failure-path mark gates on instanceof).
+// MockCancelledError is the sentinel recognized by the mocked isCancellation.
+const { MockTemporalFailure, MockCancelledError } = vi.hoisted(() => {
+  class MockTemporalFailure extends Error {}
+  class MockCancelledError extends Error {}
+  return { MockTemporalFailure, MockCancelledError };
+});
 let canPayload: unknown;
 const handlers = new Map<unknown, (...a: unknown[]) => void>();
 // Captures batches handed to the persistWorkflowTransitions activity (ADR-0010 recorder).
 let persistedBatches: Array<Array<Record<string, unknown>>> = [];
+// Captures calls to the markProjectionsCompleted activity (projection completion).
+let markedCalls: Array<Record<string, unknown>> = [];
+// Ordered log of domain hooks + marks, for asserting the mark runs after the hook.
+let callOrder: string[] = [];
 
 vi.mock('@temporalio/workflow', () => ({
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   setHandler: (def: unknown, fn: (...a: unknown[]) => void) => {
     handlers.set(def, fn);
   },
@@ -37,12 +51,17 @@ vi.mock('@temporalio/workflow', () => ({
     throw new ContinueAsNewError();
   },
   allHandlersFinished: () => true,
-  isCancellation: () => false,
+  isCancellation: (e: unknown) => e instanceof MockCancelledError,
   CancellationScope: { nonCancellable: async (fn: () => Promise<void>) => fn() },
-  ApplicationFailure: { nonRetryable: (m: string) => new Error(m) },
+  ApplicationFailure: { nonRetryable: (m: string) => new MockTemporalFailure(m) },
+  TemporalFailure: MockTemporalFailure,
   proxyActivities: () => ({
     persistWorkflowTransitions: async (records: Array<Record<string, unknown>>) => {
       persistedBatches.push(records);
+    },
+    markProjectionsCompleted: async (input: Record<string, unknown>) => {
+      markedCalls.push(input);
+      callOrder.push('mark');
     },
   }),
   workflowInfo: () => ({
@@ -72,6 +91,8 @@ beforeEach(() => {
   handlers.clear();
   canPayload = undefined;
   persistedBatches = [];
+  markedCalls = [];
+  callOrder = [];
 });
 
 describe('runStateMachine — continue-as-new threshold counts every input', () => {
@@ -238,5 +259,111 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
     for (const r of records.filter((r) => r.triggerKind !== 'update')) {
       expect(r.updateResult).toBeUndefined();
     }
+  });
+});
+
+describe('runStateMachine — projection completion at close', () => {
+  const REFS = [{ index: 'carts', id: 'cart-1' }];
+
+  /** One-state machine that closes however `fn` decides; records hook order. */
+  const makeConfig = (
+    fn: (ctx: Ctx) => Promise<{ context: Ctx; next: string }>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    overrides: Record<string, any> = {},
+  ): StateMachineConfig<State, never, Ctx, void, Sig> =>
+    ({
+      states: { live: { transitional: true, fn } } as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+      projections: { refs: () => REFS },
+      onTerminal: async () => {
+        callOrder.push('onTerminal');
+      },
+      onCancellation: async () => {
+        callOrder.push('onCancellation');
+      },
+      ...overrides,
+    }) as Any;
+
+  it('terminal close marks refs with outcome completed, after onTerminal', async () => {
+    const config = makeConfig(async (ctx) => ({ context: ctx, next: '__terminal:done' }));
+
+    await runStateMachine(config, { count: 0 }, [], []);
+
+    expect(markedCalls).toHaveLength(1);
+    expect(markedCalls[0]).toMatchObject({ refs: REFS, outcome: 'completed' });
+    expect(typeof markedCalls[0].closedAt).toBe('string');
+    expect(callOrder).toEqual(['onTerminal', 'mark']);
+  });
+
+  it('cancellation marks refs with outcome canceled, after onCancellation', async () => {
+    const config = makeConfig(async () => {
+      throw new MockCancelledError('cancelled');
+    });
+
+    await runStateMachine(config, { count: 0 }, [], []);
+
+    expect(markedCalls).toHaveLength(1);
+    expect(markedCalls[0]).toMatchObject({ refs: REFS, outcome: 'canceled' });
+    expect(callOrder).toEqual(['onCancellation', 'mark']);
+  });
+
+  it('a TemporalFailure marks refs with outcome failed and still rejects with the original error', async () => {
+    const boom = new MockTemporalFailure('boom');
+    const config = makeConfig(async () => {
+      throw boom;
+    });
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toBe(boom);
+
+    expect(markedCalls).toHaveLength(1);
+    expect(markedCalls[0]).toMatchObject({ refs: REFS, outcome: 'failed' });
+  });
+
+  it('a plain Error (workflow-task retry, not a close) does not mark', async () => {
+    const config = makeConfig(async () => {
+      throw new Error('transient');
+    });
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toThrow('transient');
+    expect(markedCalls).toEqual([]);
+  });
+
+  it('continue-as-new does not mark (the workflow is not closing)', async () => {
+    const config = makeConfig(
+      async (ctx) => ({ context: { count: ctx.count + 1 }, next: 'live' }),
+      {
+        continueAsNewThreshold: 2,
+        serializeForContinueAsNew: serialize as Any,
+      },
+    );
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toBeInstanceOf(
+      ContinueAsNewError,
+    );
+    expect(markedCalls).toEqual([]);
+  });
+
+  it('no projections config schedules no mark activity', async () => {
+    const config = makeConfig(async (ctx) => ({ context: ctx, next: '__terminal:done' }), {
+      projections: undefined,
+    });
+
+    await runStateMachine(config, { count: 0 }, [], []);
+    expect(markedCalls).toEqual([]);
+  });
+
+  it('a marking failure never fails a completed workflow', async () => {
+    const config = makeConfig(async (ctx) => ({ context: ctx, next: '__terminal:done' }), {
+      projections: {
+        refs: () => {
+          throw new Error('refs blew up');
+        },
+      },
+    });
+
+    const result = await runStateMachine(config, { count: 0 }, [], []);
+    expect(result).toEqual({ count: 0 });
+    expect(markedCalls).toEqual([]);
   });
 });

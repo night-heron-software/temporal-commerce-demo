@@ -12,6 +12,7 @@ import { IDENTITY_TASK_QUEUE } from '../contracts';
 
 import * as activities from './activities-impl';
 import { transitionRecorderActivities } from '../transition-recorder';
+import { projectionCompletionActivities } from '../projection-completion';
 
 const logger = createLogger('identity:worker');
 
@@ -23,7 +24,11 @@ export default async function identityWorker(
     connection,
     namespace: 'default',
     taskQueue: IDENTITY_TASK_QUEUE,
-    activities: { ...activities, ...transitionRecorderActivities },
+    activities: {
+      ...activities,
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     ...otelConfig,
   });
 

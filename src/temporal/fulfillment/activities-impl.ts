@@ -6,7 +6,7 @@ import type { TrackingInfo } from './activities';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import { getFlag } from '../../lib/feature-flags';
 import { InventoryCommandRepository } from '../inventory/db/inventory-command-repository';
-import { buildReservationId } from '../contracts/inventory';
+import { buildReservationId, reservationClosedDoc } from '../contracts/inventory';
 
 export async function getFeatureFlag(name: string): Promise<boolean> {
   return getFlag(name);
@@ -74,11 +74,12 @@ export async function fulfillInventoryReservations(
     const reservationId = buildReservationId(cartId, item.variantId);
     await InventoryCommandRepository.fulfill(reservationId);
 
-    // Remove reservation doc from ES
+    // Close the reservation doc in ES (kept searchable, marked completed)
     await esClient
-      .delete({
+      .update({
         index: ES_INDICES.reservations,
         id: reservationId,
+        doc: reservationClosedDoc('FULFILLED', new Date().toISOString()),
       })
       .catch(() => {
         /* ignore if not found */
@@ -107,11 +108,15 @@ export async function releaseInventoryReservations(
       await InventoryCommandRepository.release(reservationId);
     }
 
-    // Remove reservation doc from ES
+    // Close the reservation doc in ES (kept searchable, marked completed)
     await esClient
-      .delete({
+      .update({
         index: ES_INDICES.reservations,
         id: reservationId,
+        doc: reservationClosedDoc(
+          reservation.status === 'CONFIRMED' ? 'CANCELLED' : 'RELEASED',
+          new Date().toISOString(),
+        ),
       })
       .catch(() => {
         /* ignore if not found */

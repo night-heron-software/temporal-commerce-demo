@@ -20,6 +20,7 @@ import {
 } from './definitions';
 
 import { runStateMachine, StateMachineConfig, deriveDisplayStatus } from '../framework';
+import { ES_INDICES } from '../contracts/elasticsearch';
 
 import { CART_STATES } from './states';
 
@@ -189,6 +190,9 @@ export async function cartWorkflow(input: CartWorkflowInput): Promise<CartDetail
         }
       }
       await indexCart(buildCartDocument(finalCtx.cart, finalCtx.cart.createdAt));
+    },
+    projections: {
+      refs: () => [{ index: ES_INDICES.carts, id: cartId }],
     },
   };
 

@@ -73,8 +73,13 @@ export async function withWorkflowEnv<T>(
           // Register a no-op transition-recorder activity (ADR-0010) on every test worker so
           // state-machine workflows — which activate the recorder because withWorkflowEnv tags
           // them with correlation Search Attributes — don't stall on an unregistered activity or
-          // require a live Cassandra. A spec may override it.
-          activities: { persistWorkflowTransitions: async () => {}, ...s.activities },
+          // require a live Cassandra. Same for the projection-completion mark scheduled at
+          // workflow close. A spec may override either.
+          activities: {
+            persistWorkflowTransitions: async () => {},
+            markProjectionsCompleted: async () => {},
+            ...s.activities,
+          },
         }),
       ),
     );

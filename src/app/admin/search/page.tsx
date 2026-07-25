@@ -8,7 +8,14 @@ import {
   type SearchResult,
   type SearchableIndex,
   type IndexStats,
+  type LifecycleFilter,
 } from '../admin-search-actions';
+
+const LIFECYCLE_OPTIONS: { key: LifecycleFilter; label: string }[] = [
+  { key: 'live', label: 'Live' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'both', label: 'Both' },
+];
 
 const ALL_INDICES: { key: SearchableIndex; label: string; icon: string }[] = [
   { key: 'products', label: 'Products', icon: '📦' },
@@ -38,6 +45,7 @@ export default function AdminSearchPage() {
   const [expandedResult, setExpandedResult] = useState<string | null>(null);
   const [stats, setStats] = useState<IndexStats[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
+  const [lifecycle, setLifecycle] = useState<LifecycleFilter>('both');
 
   // Load index stats on mount
   useEffect(() => {
@@ -75,7 +83,7 @@ export default function AdminSearchPage() {
     setHasSearched(true);
     setExpandedResult(null);
 
-    const response = await searchElasticsearch(query, Array.from(selectedIndices), 50);
+    const response = await searchElasticsearch(query, Array.from(selectedIndices), 50, lifecycle);
 
     if (response.success) {
       setResults(response.results);
@@ -86,7 +94,7 @@ export default function AdminSearchPage() {
       setResults([]);
     }
     setIsSearching(false);
-  }, [query, selectedIndices]);
+  }, [query, selectedIndices, lifecycle]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') executeSearch();
@@ -96,8 +104,14 @@ export default function AdminSearchPage() {
     setExpandedResult((prev) => (prev === key ? null : key));
   };
 
+  // Chip badge count for the active lifecycle mode. Non-lifecycle indices have no
+  // completedCount: all their docs are "live", none are "completed".
   const getDocCount = (index: string): number => {
-    return stats.find((s) => s.index === index)?.docCount ?? 0;
+    const s = stats.find((st) => st.index === index);
+    if (!s) return 0;
+    if (lifecycle === 'completed') return s.completedCount ?? 0;
+    if (lifecycle === 'live') return s.docCount - (s.completedCount ?? 0);
+    return s.docCount;
   };
 
   // Group results by index
@@ -167,6 +181,35 @@ export default function AdminSearchPage() {
           >
             None
           </button>
+          <span className="mx-1 text-zinc-300 dark:text-zinc-600">•</span>
+          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+            Lifecycle
+          </span>
+          <div className="inline-flex rounded-full border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+            {LIFECYCLE_OPTIONS.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setLifecycle(key)}
+                title={
+                  key === 'live'
+                    ? 'Only documents whose workflow is still running'
+                    : key === 'completed'
+                      ? 'Only documents whose workflow has closed'
+                      : 'All documents'
+                }
+                className={`
+                  px-3 py-1 text-xs font-medium transition-colors
+                  ${
+                    lifecycle === key
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700'
+                  }
+                `}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {ALL_INDICES.map(({ key, label, icon }) => {
@@ -315,6 +358,23 @@ export default function AdminSearchPage() {
                           {hit.id}
                         </div>
                       </div>
+                      {hit.source?.workflowStatus === 'completed' && (
+                        <span
+                          title={`Workflow closed${hit.source.workflowClosedAt ? ` at ${hit.source.workflowClosedAt}` : ''}`}
+                          className={`
+                            px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap
+                            ${
+                              hit.source.workflowOutcome === 'failed'
+                                ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
+                                : hit.source.workflowOutcome === 'canceled'
+                                  ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400'
+                            }
+                          `}
+                        >
+                          ✓ {hit.source.workflowOutcome ?? 'completed'}
+                        </span>
+                      )}
                       <span className="text-[10px] text-zinc-400 dark:text-zinc-600 font-mono whitespace-nowrap">
                         score: {hit.score.toFixed(2)}
                       </span>

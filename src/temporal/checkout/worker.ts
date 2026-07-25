@@ -3,6 +3,7 @@ import { createLogger } from '../../lib';
 
 import * as activities from './activities-impl';
 import { transitionRecorderActivities } from '../transition-recorder';
+import { projectionCompletionActivities } from '../projection-completion';
 
 import { CHECKOUT_TASK_QUEUE } from '../contracts';
 
@@ -15,7 +16,11 @@ async function start(
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
-    activities: { ...activities, ...transitionRecorderActivities },
+    activities: {
+      ...activities,
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     taskQueue: CHECKOUT_TASK_QUEUE,
     ...otelConfig,
   });

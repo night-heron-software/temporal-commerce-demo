@@ -1,6 +1,7 @@
 import * as wf from '@temporalio/workflow';
 import { OMS } from '../contracts';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
+import { ES_INDICES } from '../contracts/elasticsearch';
 import type {
   FulfillmentOrderRequest,
   FulfillmentOrderStatus,
@@ -327,6 +328,9 @@ export async function fulfillmentWorkflow(
       // Inventory fulfillment on delivery happens in the fulfiller-order child (which
       // owns the shipment lifecycle) — fulfilling here too double-decremented stock.
       await syncProjections(finalCtx);
+    },
+    projections: {
+      refs: (finalCtx) => [{ index: ES_INDICES.fulfillments, id: finalCtx.orderId }],
     },
   };
 

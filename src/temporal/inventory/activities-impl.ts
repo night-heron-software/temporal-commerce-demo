@@ -11,6 +11,7 @@ import { InventoryCommandRepository } from './db/inventory-command-repository';
 import { executeCql, executeBatch } from '../../lib';
 import { getElasticsearchClient } from '../../lib';
 import { Elasticsearch } from '../contracts';
+import { reservationClosedDoc } from '../contracts/inventory';
 const { ES_INDICES } = Elasticsearch;
 type InventoryDocument = Elasticsearch.InventoryDocument;
 type InventoryFulfillerLocationDocument = Elasticsearch.InventoryFulfillerLocationDocument;
@@ -30,6 +31,24 @@ export async function expireReservations(): Promise<number> {
 
   await Promise.all(
     expired.map((r) => InventoryCommandRepository.release(r.reservationId, 'expiry-sweep')),
+  );
+
+  // Close the expired docs in the ES reservations index too — before this, the sweep
+  // released only in Cassandra and left the ES docs stale as TEMPORARY forever.
+  const esClient = getElasticsearchClient();
+  const closedDoc = reservationClosedDoc('RELEASED', new Date().toISOString());
+  await Promise.all(
+    expired.map((r) =>
+      esClient
+        .update({
+          index: ES_INDICES.reservations,
+          id: r.reservationId,
+          doc: closedDoc,
+        })
+        .catch(() => {
+          /* ignore if not found */
+        }),
+    ),
   );
 
   logger.info({ count: expired.length }, 'Expired reservations released');

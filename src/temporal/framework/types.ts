@@ -146,7 +146,33 @@ export interface StateMachineConfig<
    * resolved.
    */
   transitionRecording?: TransitionRecordingConfig<TContext>;
+  /**
+   * ES projection docs owned by this workflow, marked completed at ANY close —
+   * terminal, cancellation, or failure (via the {@link MARK_PROJECTIONS_ACTIVITY}
+   * activity, after `onTerminal`/`onCancellation` so the domain's final re-index
+   * cannot overwrite the mark). Omit for workflows that own no projection docs —
+   * no activity is ever scheduled then.
+   */
+  projections?: ProjectionCompletionConfig<TContext, TState>;
 }
+
+/** See {@link StateMachineConfig.projections}. */
+export interface ProjectionCompletionConfig<TContext, TState extends string> {
+  /** Resolve the docs to mark from the final context; may return `[]`. */
+  refs: (
+    ctx: Readonly<TContext>,
+    currentState: TState | `__terminal:${string}`,
+  ) => ProjectionCompletionRef[];
+}
+
+/** One ES doc to stamp with the workflow-lifecycle fields at close. */
+export interface ProjectionCompletionRef {
+  index: string;
+  id: string;
+}
+
+/** How the workflow closed, as recorded on its projection docs. */
+export type ProjectionWorkflowOutcome = 'completed' | 'canceled' | 'failed';
 
 /** What drove a transition. */
 export interface TransitionTrigger {
@@ -210,6 +236,14 @@ export type TransitionIdentityResolver = () => TransitionIdentity | undefined;
  * writes are never mis-attributed to a state.
  */
 export const PERSIST_TRANSITIONS_ACTIVITY = 'persistWorkflowTransitions';
+
+/**
+ * Name of the host-provided activity that stamps ES projection docs completed at workflow
+ * close. Hosts register an implementation under this name on every worker that runs state
+ * machines with a `projections` config (a no-op is fine in tests). Also excluded from
+ * per-phase activity capture, like {@link PERSIST_TRANSITIONS_ACTIVITY}.
+ */
+export const MARK_PROJECTIONS_ACTIVITY = 'markProjectionsCompleted';
 
 /**
  * Wire shape of one persisted transition — the payload of the

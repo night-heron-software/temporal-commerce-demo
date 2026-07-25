@@ -7,7 +7,7 @@ import {
   InventoryCommandRepository,
   InventoryContentionError,
 } from '../inventory/db/inventory-command-repository';
-import { buildReservationId } from '../contracts/inventory';
+import { buildReservationId, reservationClosedDoc } from '../contracts/inventory';
 import { currentCorrelationId } from '../../lib/correlation-context';
 import { executeCql } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
@@ -133,12 +133,13 @@ export async function releaseCartItem(cartId: string, variantId: string): Promis
   try {
     await InventoryCommandRepository.release(reservationId);
 
-    // Remove reservation from ES
+    // Close the reservation doc in ES (kept searchable, marked completed)
     const esClient = getElasticsearchClient();
     await esClient
-      .delete({
+      .update({
         index: ES_INDICES.reservations,
         id: reservationId,
+        doc: reservationClosedDoc('RELEASED', new Date().toISOString()),
       })
       .catch(() => {
         /* ignore if not found */
