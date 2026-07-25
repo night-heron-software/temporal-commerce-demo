@@ -8,6 +8,7 @@ import {
   setHandler,
   SignalDefinition,
   ApplicationFailure,
+  TemporalFailure,
 } from '@temporalio/workflow';
 import {
   StateMachineConfig,
@@ -20,6 +21,7 @@ import {
   TransitionTrigger,
 } from './types';
 import { createTransitionRecorder } from './transition-sink';
+import { markProjections } from './projection-completion';
 
 function isTerminalState(name: string): boolean {
   return name.startsWith('__terminal:');
@@ -342,11 +344,33 @@ export async function runStateMachine<
         if (config.onCancellation) {
           await config.onCancellation!(ctx, currentStateName);
         }
+        // After onCancellation, so the domain's final re-index cannot overwrite the mark.
+        try {
+          await markProjections(config.projections, ctx, currentStateName, 'canceled');
+        } catch (markErr) {
+          log.warn('projection completion mark failed during cancellation', {
+            error: String(markErr),
+          });
+        }
       });
       return ctx;
     }
     // Let the flusher coroutine unwind with the failing workflow task.
     recorder?.close();
+    // Only a TemporalFailure closes the workflow — a plain Error fails the workflow *task*
+    // (retry loop, workflow still open, must not be marked), and the continue-as-new
+    // sentinel is not a TemporalFailure either.
+    if (err instanceof TemporalFailure && config.projections) {
+      try {
+        await CancellationScope.nonCancellable(() =>
+          markProjections(config.projections, ctx, currentStateName, 'failed'),
+        );
+      } catch (markErr) {
+        log.warn('projection completion mark failed during workflow failure', {
+          error: String(markErr),
+        });
+      }
+    }
     throw err;
   }
 
@@ -363,6 +387,13 @@ export async function runStateMachine<
   await shutdownRecorder();
   if (config.onTerminal) {
     await config.onTerminal(ctx, currentStateName);
+  }
+  // After onTerminal, so the domain's final re-index cannot overwrite the mark. A marking
+  // failure (activity retries exhausted) must never fail an otherwise-completed workflow.
+  try {
+    await markProjections(config.projections, ctx, currentStateName, 'completed');
+  } catch (markErr) {
+    log.warn('projection completion mark failed at terminal exit', { error: String(markErr) });
   }
 
   return ctx;

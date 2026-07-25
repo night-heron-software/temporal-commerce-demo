@@ -9,6 +9,85 @@ export interface PriceDocument {
   currency: string;
 }
 
+// ── Workflow lifecycle (projection completion) ──
+
+/** How the owning Temporal workflow closed. */
+export type WorkflowOutcome = 'completed' | 'canceled' | 'failed';
+
+/**
+ * Lifecycle fields stamped onto a projection doc when its owning workflow
+ * closes (or, for reservations, when the reservation reaches a terminal
+ * domain status). Absence of `workflowStatus` means the doc is live.
+ */
+export interface WorkflowLifecycleFields {
+  workflowStatus?: 'completed';
+  workflowOutcome?: WorkflowOutcome;
+  workflowClosedAt?: string;
+}
+
+/** A pointer to one projection doc to mark completed at workflow close. */
+export interface ProjectionRef {
+  index: string;
+  id: string;
+}
+
+/** Indices whose docs carry workflow lifecycle fields. */
+export const LIFECYCLE_INDICES = [
+  'orders',
+  'fulfiller_orders',
+  'carts',
+  'reservations',
+  'fulfillments',
+  'shipments',
+] as const;
+
+/**
+ * Domain statuses that imply the owning workflow has closed, used by the dev reindex
+ * route to retro-derive lifecycle fields from Cassandra (the exact close type —
+ * completed vs canceled vs failed — is unrecoverable there, so rebuilt docs get
+ * `completed`/`canceled` by status). Live writes never consult these: the driver marks
+ * docs at actual workflow close.
+ *
+ * Note `delivered` is NOT terminal for orders — the order stays open for feedback,
+ * refunds, and returns until `complete`.
+ */
+const TERMINAL_STATUS: Record<string, ReadonlyMap<string, WorkflowOutcome>> = {
+  orders: new Map([
+    ['cancelled', 'completed'],
+    ['refunded', 'completed'],
+    ['returned', 'completed'],
+    ['complete', 'completed'],
+  ]),
+  fulfiller_orders: new Map([
+    ['delivered', 'completed'],
+    ['rejected', 'completed'],
+  ]),
+  reservations: new Map([
+    ['FULFILLED', 'completed'],
+    ['RELEASED', 'canceled'],
+    ['CANCELLED', 'canceled'],
+  ]),
+};
+
+/**
+ * Derive the lifecycle fields for a reindexed doc from its domain status.
+ * Returns `{}` (live) for non-terminal statuses or unknown indices, so callers can
+ * always spread the result.
+ */
+export function deriveLifecycleFromStatus(
+  index: 'orders' | 'fulfiller_orders' | 'reservations',
+  status: string | null | undefined,
+  closedAt?: string,
+): WorkflowLifecycleFields {
+  const outcome = status != null ? TERMINAL_STATUS[index]?.get(status) : undefined;
+  if (!outcome) return {};
+  return {
+    workflowStatus: 'completed',
+    workflowOutcome: outcome,
+    workflowClosedAt: closedAt,
+  };
+}
+
 // Products Index (with nested variants)
 export interface ProductDocument {
   id: string;
@@ -59,7 +138,7 @@ export interface CollectionDocument {
 }
 
 // Orders Index
-export interface OrderDocument {
+export interface OrderDocument extends WorkflowLifecycleFields {
   orderId: string;
   /** Domain link to the originating cart. */
   cartId: string;
@@ -230,7 +309,7 @@ export interface InventoryReservationDocument {
 }
 
 // Fulfiller Orders Index
-export interface FulfillerOrderDocument {
+export interface FulfillerOrderDocument extends WorkflowLifecycleFields {
   fulfillerOrderId: string;
   orderId: string;
   /** Correlation ID (ADR-0011) — joinable across all order-flow indices. */
@@ -268,7 +347,7 @@ export interface CartItemDocument {
   price: number;
 }
 
-export interface CartDocument {
+export interface CartDocument extends WorkflowLifecycleFields {
   cartId: string;
   /**
    * Correlation ID (ADR-0011) — joinable across all order-flow indices. Optional:
@@ -290,7 +369,7 @@ export interface CartDocument {
 }
 
 // Reservations Index (inventory reservations)
-export interface ReservationDocument {
+export interface ReservationDocument extends WorkflowLifecycleFields {
   reservationId: string;
   cartId: string;
   variantId: string;
@@ -301,7 +380,7 @@ export interface ReservationDocument {
 }
 
 // Fulfillments Index (fulfillment workflow state)
-export interface FulfillmentDocument {
+export interface FulfillmentDocument extends WorkflowLifecycleFields {
   orderId: string;
   /** Correlation ID (ADR-0011) — joinable across all order-flow indices. */
   correlationId: string;
@@ -315,7 +394,7 @@ export interface FulfillmentDocument {
 }
 
 // Shipments Index (shipment tracking)
-export interface ShipmentDocument {
+export interface ShipmentDocument extends WorkflowLifecycleFields {
   shipmentId: string;
   orderId: string;
   /** Correlation ID (ADR-0011) — joinable across all order-flow indices. */

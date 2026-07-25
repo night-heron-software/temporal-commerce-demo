@@ -3,6 +3,17 @@
  * All domain objects — products, orders, inventory, fulfillments, etc.
  */
 
+/**
+ * Lifecycle fields stamped when the owning workflow closes (or, for reservations,
+ * when the reservation reaches a terminal domain status). Absent = live.
+ * Spread into every index listed in `LIFECYCLE_INDICES` (contracts/elasticsearch.ts).
+ */
+const WORKFLOW_LIFECYCLE_PROPERTIES = {
+  workflowStatus: { type: 'keyword' },
+  workflowOutcome: { type: 'keyword' },
+  workflowClosedAt: { type: 'date' },
+} as const;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const INDEX_MAPPINGS: Record<string, any> = {
   products: {
@@ -158,6 +169,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       },
       createdAt: { type: 'date' },
       updatedAt: { type: 'date' },
+      ...WORKFLOW_LIFECYCLE_PROPERTIES,
     },
   },
   customers: {
@@ -268,6 +280,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           note: { type: 'text' },
         },
       },
+      ...WORKFLOW_LIFECYCLE_PROPERTIES,
     },
   },
   carts: {
@@ -293,6 +306,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       appliedCoupons: { type: 'keyword' },
       createdAt: { type: 'date' },
       updatedAt: { type: 'date' },
+      ...WORKFLOW_LIFECYCLE_PROPERTIES,
     },
   },
   reservations: {
@@ -304,6 +318,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       status: { type: 'keyword' },
       expiresAt: { type: 'date' },
       createdAt: { type: 'date' },
+      ...WORKFLOW_LIFECYCLE_PROPERTIES,
     },
   },
   fulfillments: {
@@ -317,6 +332,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       updatedAt: { type: 'date' },
       completedAt: { type: 'date' },
       errorMessage: { type: 'text' },
+      ...WORKFLOW_LIFECYCLE_PROPERTIES,
     },
   },
   shipments: {
@@ -330,6 +346,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       itemCount: { type: 'integer' },
       shippedAt: { type: 'date' },
       deliveredAt: { type: 'date' },
+      ...WORKFLOW_LIFECYCLE_PROPERTIES,
     },
   },
 
@@ -380,7 +397,10 @@ export async function ensureIndicesExist(): Promise<void> {
       });
       console.log(`[ES] Created index: ${indexName}`);
     } else {
-      console.log(`[ES] Index already exists: ${indexName}`);
+      // Additive mapping updates (new fields) are idempotent; ES rejects breaking
+      // changes to existing fields, which would need a reindex instead.
+      await client.indices.putMapping({ index: indexName, ...mapping });
+      console.log(`[ES] Index already exists, mapping refreshed: ${indexName}`);
     }
   }
 }

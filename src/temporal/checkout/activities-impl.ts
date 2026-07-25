@@ -4,6 +4,7 @@
  */
 
 import { Cart } from '../contracts';
+import { reservationClosedDoc } from '../contracts/inventory';
 type CartItem = Cart.CartItem;
 type Order = Cart.Order;
 type PaymentMethod = Cart.PaymentMethod;
@@ -403,14 +404,16 @@ export async function releaseReservations(reservations: ReservationInfo[]): Prom
 
   await Promise.all(reservations.map((r) => InventoryCommandRepository.release(r.reservationId)));
 
-  // Remove reservation docs from ES
+  // Close reservation docs in ES (kept searchable, marked completed)
   const esClient = getElasticsearchClient();
+  const closedDoc = reservationClosedDoc('RELEASED', new Date().toISOString());
   await Promise.all(
     reservations.map((r) =>
       esClient
-        .delete({
+        .update({
           index: ES_INDICES.reservations,
           id: r.reservationId,
+          doc: closedDoc,
         })
         .catch(() => {
           /* ignore if not found */
@@ -429,14 +432,16 @@ export async function cancelReservations(reservations: ReservationInfo[]): Promi
 
   await Promise.all(reservations.map((r) => InventoryCommandRepository.cancel(r.reservationId)));
 
-  // Remove reservation docs from ES
+  // Close reservation docs in ES (kept searchable, marked completed)
   const esClient = getElasticsearchClient();
+  const closedDoc = reservationClosedDoc('CANCELLED', new Date().toISOString());
   await Promise.all(
     reservations.map((r) =>
       esClient
-        .delete({
+        .update({
           index: ES_INDICES.reservations,
           id: r.reservationId,
+          doc: closedDoc,
         })
         .catch(() => {
           /* ignore if not found */

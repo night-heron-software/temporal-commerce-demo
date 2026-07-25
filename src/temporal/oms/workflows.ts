@@ -1,5 +1,6 @@
 import { log, setHandler, getExternalWorkflowHandle } from '@temporalio/workflow';
 import { buildWorkflowId, DEMO_STORE_ID } from '../contracts/constants';
+import { ES_INDICES } from '../contracts/elasticsearch';
 
 import {
   saveOrderToDatabase,
@@ -216,6 +217,17 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
       for (const so of finalCtx.fulfillerOrders) {
         await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.correlationId));
       }
+    },
+    // OMS is the sole writer of both indices and re-indexes fulfiller orders after the
+    // child fulfiller-order workflows close, so the mark must come from OMS's own close.
+    projections: {
+      refs: (finalCtx) => [
+        { index: ES_INDICES.orders, id: input.order.orderId },
+        ...finalCtx.fulfillerOrders.map((so) => ({
+          index: ES_INDICES.fulfillerOrders,
+          id: so.fulfillerOrderId,
+        })),
+      ],
     },
   };
 

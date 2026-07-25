@@ -8,6 +8,7 @@ import { createErrorResponse } from '@/lib/api-utils';
 import { executeCql, executeCqlAll } from '@/lib';
 import { getElasticsearchClient } from '@/lib/es-client';
 import { INDEX_MAPPINGS, NEVER_REINDEX, REINDEXABLE_INDICES } from '@/lib/es-index-mappings';
+import { deriveLifecycleFromStatus } from '@/temporal/contracts/elasticsearch';
 
 /** Cassandra UUID columns have a toString() method */
 type CqlUuid = { toString(): string };
@@ -351,6 +352,7 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
         statusHistory: [],
         createdAt: row.created_at?.toISOString(),
         updatedAt: row.updated_at?.toISOString(),
+        ...deriveLifecycleFromStatus('orders', row.status, row.updated_at?.toISOString()),
       };
 
       await esClient.index({ index: 'orders', id: orderId, document: doc });
@@ -576,6 +578,11 @@ async function reindexFulfillerOrders(esClient: EsClient, errors: string[]): Pro
               note: h.note,
             }),
           ),
+          ...deriveLifecycleFromStatus(
+            'fulfiller_orders',
+            so.status,
+            so.updated_at ? new Date(so.updated_at).toISOString() : undefined,
+          ),
         };
         await esClient.index({
           index: 'fulfiller_orders',
@@ -616,6 +623,7 @@ async function reindexReservations(esClient: EsClient, errors: string[]): Promis
         status: row.status,
         expiresAt: row.expires_at?.toISOString(),
         createdAt: row.created_at?.toISOString(),
+        ...deriveLifecycleFromStatus('reservations', row.status),
       };
       await esClient.index({ index: 'reservations', id: row.reservation_id, document: doc });
       indexed++;

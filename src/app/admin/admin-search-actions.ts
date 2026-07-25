@@ -25,6 +25,24 @@ const ALL_INDICES = [
 
 export type SearchableIndex = (typeof ALL_INDICES)[number];
 
+/**
+ * Lifecycle filter over the workflow-owned indices. Docs are marked
+ * `workflowStatus: 'completed'` when their owning workflow closes; a missing field
+ * means live — so docs in non-lifecycle indices (products, customers, …) count as
+ * live and simply return nothing under `completed`.
+ */
+export type LifecycleFilter = 'live' | 'completed' | 'both';
+
+/** Indices whose docs carry the workflow lifecycle fields. */
+const LIFECYCLE_INDICES: ReadonlySet<string> = new Set([
+  'orders',
+  'fulfiller_orders',
+  'carts',
+  'reservations',
+  'fulfillments',
+  'shipments',
+]);
+
 export interface SearchResult {
   index: string;
   id: string;
@@ -44,6 +62,8 @@ export interface SearchResponse {
 export interface IndexStats {
   index: string;
   docCount: number;
+  /** Docs marked completed by workflow close; only set for lifecycle indices. */
+  completedCount?: number;
   status: 'green' | 'yellow' | 'red' | 'unknown';
 }
 
@@ -61,9 +81,18 @@ export async function getIndexStats(): Promise<{
         const exists = await client.indices.exists({ index });
         if (exists) {
           const count = await client.count({ index });
+          let completedCount: number | undefined;
+          if (LIFECYCLE_INDICES.has(index)) {
+            const completed = await client.count({
+              index,
+              query: { term: { workflowStatus: 'completed' } },
+            });
+            completedCount = completed.count;
+          }
           stats.push({
             index,
             docCount: count.count,
+            completedCount,
             status: 'green',
           });
         } else {
@@ -84,6 +113,7 @@ export async function searchElasticsearch(
   query: string,
   indices: SearchableIndex[],
   size: number = 25,
+  lifecycle: LifecycleFilter = 'both',
 ): Promise<SearchResponse> {
   // Hoisted so the catch block can attribute failures to the index set actually queried.
   let indexPattern = indices.join(',');
@@ -178,6 +208,18 @@ export async function searchElasticsearch(
           should: shouldClauses,
           minimum_should_match: 1,
         },
+      };
+    }
+
+    // Lifecycle filter: a missing workflowStatus counts as live, so non-lifecycle
+    // indices pass `live`/`both` untouched and return nothing under `completed`.
+    if (lifecycle === 'live') {
+      esQuery = {
+        bool: { must: [esQuery], must_not: [{ term: { workflowStatus: 'completed' } }] },
+      };
+    } else if (lifecycle === 'completed') {
+      esQuery = {
+        bool: { must: [esQuery], filter: [{ term: { workflowStatus: 'completed' } }] },
       };
     }
 

@@ -86,6 +86,44 @@ describe('cartWorkflow (Temporal test env)', () => {
     });
   }, 120_000);
 
+  it('marks the carts projection completed when the workflow closes', async () => {
+    const marked: Array<{
+      refs: Array<{ index: string; id: string }>;
+      outcome: string;
+      closedAt: string;
+    }> = [];
+    const spyWorker = {
+      ...cartWorker,
+      activities: {
+        ...activities,
+        markProjectionsCompleted: async (input: (typeof marked)[number]) => {
+          marked.push(input);
+        },
+      },
+    };
+
+    await withWorkflowEnv([spyWorker], async (env) => {
+      const handle = await env.client.workflow.start(cartWorkflow, startOpts('cart-harness-mark'));
+
+      await handle.executeUpdate(cartUpdate, {
+        args: [{ type: 'addItem', variantId: 'v1', quantity: 1, price: 10 }],
+      });
+      const merged = await handle.query(getCartQuery);
+      // Removing the only line abandons the cart → terminal close → the driver marks.
+      await handle.executeUpdate(cartUpdate, {
+        args: [{ type: 'removeItem', lineItemId: merged.items[0].lineItemId }],
+      });
+      await handle.result();
+
+      expect(marked).toHaveLength(1);
+      expect(marked[0]).toMatchObject({
+        refs: [{ index: 'carts', id: 'cart-harness-mark' }],
+        outcome: 'completed',
+      });
+      expect(typeof marked[0].closedAt).toBe('string');
+    });
+  }, 120_000);
+
   it('auto-abandons after the active-state idle timeout (time-skip)', async () => {
     await withWorkflowEnv([cartWorker], async (env) => {
       const handle = await env.client.workflow.start(

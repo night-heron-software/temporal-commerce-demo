@@ -17,7 +17,6 @@
  * (Temporal isolates workflow module state), and is only mutated around the awaited prepare/finalize
  * phases — so capture is deterministic and replay-safe (activity results are replayed from history).
  */
-import { workflowInfo } from '@temporalio/workflow';
 import type {
   ActivityInput,
   LocalActivityInput,
@@ -26,7 +25,7 @@ import type {
   WorkflowOutboundCallsInterceptor,
 } from '@temporalio/workflow';
 import type { ActivityCall } from './types';
-import { PERSIST_TRANSITIONS_ACTIVITY } from './types';
+import { MARK_PROJECTIONS_ACTIVITY, PERSIST_TRANSITIONS_ACTIVITY } from './types';
 import { CORRELATION_ID_HEADER, encodeCorrelationHeader } from './correlation-header';
 import { workflowCorrelationId } from './identity';
 
@@ -35,6 +34,12 @@ import { workflowCorrelationId } from './identity';
  * writes (which can interleave with an awaited prepare/finalize) are never mis-attributed to a state.
  */
 const RECORDER_ACTIVITY = PERSIST_TRANSITIONS_ACTIVITY;
+
+/**
+ * The close-time projection mark — excluded for the same reason: it runs at workflow exit,
+ * never as part of a state's prepare/finalize phase.
+ */
+const PROJECTION_MARK_ACTIVITY = MARK_PROJECTIONS_ACTIVITY;
 
 /** Per-value cap so one large arg/result can't bloat a transition row; others are still captured. */
 const MAX_VALUE_BYTES = 16 * 1024;
@@ -68,7 +73,8 @@ function capValue(value: unknown): unknown {
 }
 
 function capture<T>(activityType: string, args: unknown, run: () => Promise<T>): Promise<T> {
-  if (!activeBucket || activityType === RECORDER_ACTIVITY) return run();
+  if (!activeBucket || activityType === RECORDER_ACTIVITY || activityType === PROJECTION_MARK_ACTIVITY)
+    return run();
   const call: ActivityCall = { name: activityType, args: capValue(args) };
   activeBucket.push(call);
   return run().then(
