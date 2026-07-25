@@ -7,6 +7,10 @@
 
 import type { OrderState, Order, FulfillerOrder } from './types';
 import { Elasticsearch } from '../contracts';
+// Direct module import (not the contracts barrel): this is the builder's only runtime
+// value from contracts — the barrel would drag cart.ts's module-scope defineUpdate into
+// every consumer's import graph (breaking workflow-mocked tests).
+import { deriveLifecycleFromStatus } from '../contracts/elasticsearch';
 type OrderDocument = Elasticsearch.OrderDocument;
 type FulfillerOrderDocument = Elasticsearch.FulfillerOrderDocument;
 
@@ -134,5 +138,13 @@ export function buildFulfillerOrderDocument(
       timestamp: h.timestamp,
       note: h.note,
     })),
+    // The child fulfiller-order workflow closes when the SO reaches a terminal status,
+    // but OMS (which runs ~30 days) owns this doc — so lifecycle is derived from the
+    // domain status at write time instead of waiting for OMS's own close-mark.
+    ...deriveLifecycleFromStatus(
+      'fulfiller_orders',
+      fulfillerOrder.status,
+      fulfillerOrder.updatedAt,
+    ),
   };
 }

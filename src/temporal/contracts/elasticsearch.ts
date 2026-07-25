@@ -45,8 +45,11 @@ export const LIFECYCLE_INDICES = [
  * Domain statuses that imply the owning workflow has closed, used by the dev reindex
  * route to retro-derive lifecycle fields from Cassandra (the exact close type —
  * completed vs canceled vs failed — is unrecoverable there, so rebuilt docs get
- * `completed`/`canceled` by status). Live writes never consult these: the driver marks
- * docs at actual workflow close.
+ * `completed`/`canceled` by status). Live writes normally don't consult these — the
+ * driver marks docs at actual workflow close — with one exception: fulfiller_orders
+ * docs are written by the long-running OMS workflow (not their own child), so
+ * buildFulfillerOrderDocument stamps them here the moment the SO status is terminal
+ * rather than a month later at OMS close.
  *
  * Note `delivered` is NOT terminal for orders — the order stays open for feedback,
  * refunds, and returns until `complete`.
