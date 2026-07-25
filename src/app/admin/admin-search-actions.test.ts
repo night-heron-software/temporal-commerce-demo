@@ -11,18 +11,22 @@ const es = vi.hoisted(() => ({
   count: vi.fn(),
   search: vi.fn(),
   get: vi.fn(),
+  clientUnreachable: { v: false },
 }));
 
 vi.mock('@/lib/es-client', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/lib/es-client')>();
   return {
     ...original,
-    getElasticsearchClient: () => ({
-      indices: { exists: es.exists },
-      count: es.count,
-      search: es.search,
-      get: es.get,
-    }),
+    getElasticsearchClient: () => {
+      if (es.clientUnreachable.v) throw new Error('ES unreachable');
+      return {
+        indices: { exists: es.exists },
+        count: es.count,
+        search: es.search,
+        get: es.get,
+      };
+    },
   };
 });
 vi.mock('@/lib/logger', () => ({
@@ -38,9 +42,20 @@ beforeEach(() => {
   es.exists.mockResolvedValue(true);
   es.count.mockResolvedValue({ count: 0 });
   es.search.mockResolvedValue(EMPTY_SEARCH);
+  es.clientUnreachable.v = false;
 });
 
 describe('getIndexStats', () => {
+  it('reports failure when the client itself is unreachable', async () => {
+    es.clientUnreachable.v = true;
+
+    const result = await getIndexStats();
+
+    expect(result.success).toBe(false);
+    expect(result.stats).toEqual([]);
+    expect(result.error).toContain('ES unreachable');
+  });
+
   it('adds completedCount only for lifecycle indices, via a workflowStatus term count', async () => {
     es.count.mockResolvedValue({ count: 7 });
 

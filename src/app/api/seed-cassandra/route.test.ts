@@ -70,7 +70,7 @@ describe('POST /api/seed-cassandra', () => {
     await expect(res.json()).resolves.toEqual({
       success: true,
       message: 'Sample data loaded successfully',
-      results: { reset: false, collections: 1, products: 1, variants: 1, errors: [] },
+      results: { collections: 1, products: 1, variants: 1, errors: [] },
     });
 
     // 1 collection + 1 product + 1 products_by_collection + 1 variant + 1 variants_by_product
@@ -104,6 +104,24 @@ describe('POST /api/seed-cassandra', () => {
     expect(body.results.products).toBe(1);
     expect(body.results.variants).toBe(1);
     expect(body.results.errors).toEqual([expect.stringContaining('Collection c-1')]);
+  });
+
+  it('counts a product whose denormalization row fails as inserted, with its own error entry', async () => {
+    // The main products row succeeds; the products_by_collection insert fails.
+    mocks.executeCql.mockImplementation(async (cql: string) => {
+      if (cql.includes('INSERT INTO products_by_collection')) throw new Error('write timeout');
+      return [];
+    });
+
+    const res = await POST();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    // The product IS in the main table, so it counts — the failure is its own entry.
+    expect(body.results.products).toBe(1);
+    expect(body.results.errors).toEqual([
+      expect.stringContaining('Product p-1 denormalization (products_by_collection c-1)'),
+    ]);
   });
 
   it('returns 500 when the sample-data file cannot be read', async () => {

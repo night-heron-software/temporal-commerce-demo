@@ -19,6 +19,9 @@ const DEFAULTS: FeatureFlags = {
   DATA_FLOW_LOGGING: false,
 };
 
+/** The complete flag vocabulary — writers validate against this so a typo can't mint a dead flag. */
+export const KNOWN_FLAG_NAMES: readonly string[] = Object.keys(DEFAULTS);
+
 function ensureDir(): void {
   if (!existsSync(FLAGS_DIR)) {
     mkdirSync(FLAGS_DIR, { recursive: true });
