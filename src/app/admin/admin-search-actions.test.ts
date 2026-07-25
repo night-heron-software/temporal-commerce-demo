@@ -143,6 +143,14 @@ describe('searchElasticsearch query building', () => {
     expect(should).toContainEqual({ term: { cartId: uuid.toLowerCase() } });
     // Top-level keyword field: the '*.keyword' sweep can't reach it (run-004 finding).
     expect(should).toContainEqual({ term: { correlationId: uuid.toLowerCase() } });
+    // Products by variant: nested docs need an explicit nested clause, unmapped-safe.
+    expect(should).toContainEqual({
+      nested: {
+        path: 'variants',
+        ignore_unmapped: true,
+        query: { term: { 'variants.id': uuid.toLowerCase() } },
+      },
+    });
     // The residual text still gets a fuzzy best_fields pass.
     expect(should).toContainEqual({
       multi_match: {
