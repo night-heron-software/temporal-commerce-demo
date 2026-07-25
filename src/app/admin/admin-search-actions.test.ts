@@ -141,6 +141,8 @@ describe('searchElasticsearch query building', () => {
     expect(should).toContainEqual({ ids: { values: [uuid.toLowerCase()] } });
     expect(should).toContainEqual({ term: { orderId: uuid.toLowerCase() } });
     expect(should).toContainEqual({ term: { cartId: uuid.toLowerCase() } });
+    // Top-level keyword field: the '*.keyword' sweep can't reach it (run-004 finding).
+    expect(should).toContainEqual({ term: { correlationId: uuid.toLowerCase() } });
     // The residual text still gets a fuzzy best_fields pass.
     expect(should).toContainEqual({
       multi_match: {
