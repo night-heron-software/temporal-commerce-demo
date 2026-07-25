@@ -16,6 +16,7 @@ import {
   calculateShipping,
   calculateTax,
   processPayment,
+  refundPayment,
   createOrder,
   createPaymentIntent,
   sendConfirmationEmail,
@@ -161,7 +162,20 @@ async function prepareSubmitOrder(ctx: Readonly<CheckoutContext>): Promise<Submi
       return { success: false, error: 'Payment failed. Please try again.' };
     }
 
-    await confirmReservations(ctx.reservations);
+    // Two-phase resurrect-then-confirm (issue #34): a hold that expired while the
+    // shopper parked at payment is re-acquired only if the stock is still there. If
+    // any item is gone, refund and fail the submit BEFORE the order exists — no
+    // order, no fulfillment, no phantom inventory.
+    const { unavailable } = await confirmReservations(ctx.reservations);
+    if (unavailable.length > 0) {
+      await refundPayment(ctx.state.paymentMethod!.token, ctx.totalPrice, ctx.currency, ctx.cartId);
+      return {
+        success: false,
+        error:
+          'Some items are no longer available. Your payment has been refunded — ' +
+          'please adjust your cart and try again.',
+      };
+    }
 
     const order: Order = await createOrder({
       cartId: ctx.cartId,

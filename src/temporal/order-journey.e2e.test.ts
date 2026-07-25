@@ -123,7 +123,8 @@ const checkoutActivities = {
     });
     return startOptions.workflowId;
   }),
-  confirmReservations: vi.fn(async () => undefined),
+  confirmReservations: vi.fn(async () => ({ unavailable: [] })),
+  refundPayment: vi.fn(async () => true),
   releaseReservations: vi.fn(async () => undefined),
   cancelReservations: vi.fn(async () => undefined),
 };

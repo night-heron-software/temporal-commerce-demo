@@ -113,6 +113,23 @@ export async function processPayment(
 }
 
 /**
+ * Refund a payment — always mock for demo. Issued when inventory cannot be re-secured
+ * after payment (a hold expired at the payment step and its stock resold — issue #34),
+ * so the shopper is made whole before the submit fails.
+ */
+export async function refundPayment(
+  token: string,
+  amount: number,
+  currency: string,
+  cartId: string,
+): Promise<boolean> {
+  log.info(
+    `[Activity] Refunding MOCK payment: ${amount} ${currency} with token ${token} for cart ${cartId}`,
+  );
+  return true;
+}
+
+/**
  * Create an order object
  */
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
@@ -310,31 +327,70 @@ export async function renewReservationsForCheckout(
 }
 
 /**
- * Confirm reservations after successful payment.
- * Transitions all TEMPORARY reservations for the cart to CONFIRMED status,
- * removing TTL expiration so they persist until fulfillment.
+ * Confirm reservations after successful payment — two-phase (issue #34).
+ *
+ * A hold that sat at the payment step past its TTL may have been expiry-released, so
+ * phase 1 resurrect()s every reservation: live holds pass through, RELEASED holds are
+ * re-acquired (availability-checked) back to TEMPORARY with a fresh TTL. If ANY item
+ * comes back unavailable, nothing is confirmed — every live hold is still TEMPORARY
+ * and TTL-bound, so a failed submit strands no never-expiring CONFIRMED rows; the
+ * caller refunds and fails the submit. Only when all holds are live does phase 2
+ * confirm them.
  */
-export async function confirmReservations(reservations: ReservationInfo[]): Promise<void> {
-  if (reservations.length === 0) return;
+export async function confirmReservations(
+  reservations: ReservationInfo[],
+): Promise<{ unavailable: ReservationInfo[] }> {
+  if (reservations.length === 0) return { unavailable: [] };
   log.info({ count: reservations.length }, 'Confirming reservations');
 
-  await Promise.all(reservations.map((r) => InventoryCommandRepository.confirm(r.reservationId)));
+  // Phase 1: resurrect — re-secure any hold the expiry sweep released while the
+  // shopper parked at payment. All-or-nothing: bail before confirming anything.
+  const resurrected = await Promise.all(
+    reservations.map(async (r) => ({
+      reservation: r,
+      outcome: await InventoryCommandRepository.resurrect(r.reservationId),
+    })),
+  );
+  const unavailable = resurrected
+    .filter(({ outcome }) => outcome === 'unavailable')
+    .map(({ reservation }) => reservation);
+  if (unavailable.length > 0) {
+    log.warn({ count: unavailable.length }, 'Reservations unavailable at confirm — not confirming');
+    return { unavailable };
+  }
 
-  // Update reservation status in ES
+  // Phase 2: confirm all. A hold can still slip terminal between resurrect and
+  // confirm (a sub-second expiry-sweep race) — treat any non-confirmed outcome as
+  // unavailable too rather than shipping blind.
+  const confirmed = await Promise.all(
+    reservations.map(async (r) => ({
+      reservation: r,
+      outcome: await InventoryCommandRepository.confirm(r.reservationId),
+    })),
+  );
+  const lost = confirmed.filter(
+    ({ outcome }) => outcome !== 'confirmed' && outcome !== 'already-confirmed',
+  );
+
+  // Update reservation status in ES for the holds that did confirm
   const esClient = getElasticsearchClient();
   await Promise.all(
-    reservations.map((r) =>
-      esClient
-        .update({
-          index: ES_INDICES.reservations,
-          id: r.reservationId,
-          doc: { status: 'CONFIRMED', expiresAt: null },
-        })
-        .catch(() => {
-          /* ignore if not found */
-        }),
-    ),
+    confirmed
+      .filter(({ outcome }) => outcome === 'confirmed' || outcome === 'already-confirmed')
+      .map(({ reservation }) =>
+        esClient
+          .update({
+            index: ES_INDICES.reservations,
+            id: reservation.reservationId,
+            doc: { status: 'CONFIRMED', expiresAt: null },
+          })
+          .catch(() => {
+            /* ignore if not found */
+          }),
+      ),
   );
+
+  return { unavailable: lost.map(({ reservation }) => reservation) };
 }
 
 /**

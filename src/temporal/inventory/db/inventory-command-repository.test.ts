@@ -1,4 +1,30 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// ── Mock the Cassandra/signal edges so the repository operations (confirm/resurrect/
+// fulfill/transfer) can be exercised against controlled rows. The pure-function suites
+// below never touch these mocks.
+const db = vi.hoisted(() => ({
+  executeCql: vi.fn(),
+  executeBatch: vi.fn(),
+  clientExecute: vi.fn(),
+  signalInventoryChanged: vi.fn(),
+}));
+
+vi.mock('../../../lib', () => ({
+  executeCql: db.executeCql,
+  executeBatch: db.executeBatch,
+  getCassandraClient: vi.fn(async () => ({ execute: db.clientExecute })),
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+vi.mock('../../../lib/correlation-context', () => ({
+  currentCorrelationId: vi.fn(() => undefined),
+}));
+
+vi.mock('../inventory-signal', () => ({
+  signalInventoryChanged: db.signalInventoryChanged,
+}));
+
 import {
   computeTotalAvailable,
   computeExpectedReserved,
@@ -6,6 +32,7 @@ import {
   historyInsert,
   planRenewal,
   selectPreemptibleReservations,
+  InventoryCommandRepository,
   PLATFORM_CORRELATION_ID,
   UNLIMITED_STOCK,
   type HistoryEvent,
@@ -438,5 +465,224 @@ describe('historyInsert', () => {
     // Context.current() path throws and the seed-route fallback applies.
     const stmt = historyInsert(event({ actor: undefined }));
     expect(stmt.params[P.actor]).toBe('api');
+  });
+});
+
+// ============================================================
+// Repository operations against mocked Cassandra (issue #34)
+// ============================================================
+
+/** A full inventory_reservations_w row as the mocked SELECT returns it. */
+const reservationRow = (over: Partial<Record<string, unknown>> = {}) => ({
+  reservation_id: 'cart-1-v1',
+  blank_sku: 'TEE',
+  cart_id: 'cart-1',
+  variant_id: 'v1',
+  fulfiller_id: 'f1',
+  quantity: 2,
+  reference_id: 'checkout-cart-1',
+  status: 'TEMPORARY',
+  expires_at: new Date('2026-07-01T12:00:00Z'),
+  created_at: new Date('2026-07-01T11:00:00Z'),
+  updated_at: new Date('2026-07-01T11:00:00Z'),
+  ...over,
+});
+
+/** Route the two SELECT shapes the operations issue; journal INSERTs fall through to []. */
+function primeReads(opts: {
+  reservation: ReturnType<typeof reservationRow> | null;
+  stock?: { total_stock: number; reserved_stock: number } | null;
+}) {
+  db.executeCql.mockImplementation(async (query: string) => {
+    if (query.includes('FROM inventory_reservations_w')) {
+      return opts.reservation ? [opts.reservation] : [];
+    }
+    if (query.includes('FROM inventory_stock_w')) {
+      return opts.stock ? [opts.stock] : [];
+    }
+    return [];
+  });
+}
+
+const batchStatements = (call = 0) =>
+  db.executeBatch.mock.calls[call][0] as Array<{ query: string; params: unknown[] }>;
+
+/** History-insert param positions (columns in declaration order) — see historyInsert. */
+const H = { operation: 3, priorStatus: 9, newStatus: 10, details: 13 } as const;
+
+const journalCalls = () =>
+  db.executeCql.mock.calls.filter(([query]) =>
+    (query as string).includes('INSERT INTO inventory_history'),
+  );
+
+beforeEach(() => {
+  db.executeCql.mockReset();
+  db.executeBatch.mockReset().mockResolvedValue(undefined);
+  db.clientExecute.mockReset().mockResolvedValue({ rows: [{ '[applied]': true }] });
+  db.signalInventoryChanged.mockReset().mockResolvedValue(undefined);
+});
+
+describe('confirm() outcome mapping', () => {
+  it("returns 'missing' when no row exists (nothing to confirm)", async () => {
+    primeReads({ reservation: null });
+    await expect(InventoryCommandRepository.confirm('cart-1-v1')).resolves.toBe('missing');
+    expect(db.executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns 'already-confirmed' for a CONFIRMED row without re-running the batch", async () => {
+    primeReads({ reservation: reservationRow({ status: 'CONFIRMED', expires_at: null }) });
+    await expect(InventoryCommandRepository.confirm('cart-1-v1')).resolves.toBe(
+      'already-confirmed',
+    );
+    expect(db.executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns 'lost' for terminal rows — never resurrects via confirm", async () => {
+    for (const status of ['RELEASED', 'CANCELLED', 'FULFILLED']) {
+      primeReads({ reservation: reservationRow({ status }) });
+      await expect(InventoryCommandRepository.confirm('cart-1-v1')).resolves.toBe('lost');
+    }
+    expect(db.executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns 'confirmed' after the TEMPORARY → CONFIRMED batch", async () => {
+    primeReads({ reservation: reservationRow() });
+    await expect(InventoryCommandRepository.confirm('cart-1-v1')).resolves.toBe('confirmed');
+
+    const statements = batchStatements();
+    expect(statements.some((s) => s.query.includes("SET status = 'CONFIRMED'"))).toBe(true);
+    const history = statements.find((s) => s.query.includes('INSERT INTO inventory_history'))!;
+    expect(history.params[H.operation]).toBe('CONFIRM');
+    expect(db.signalInventoryChanged).toHaveBeenCalledWith(['TEE']);
+  });
+});
+
+describe('resurrect()', () => {
+  it("passes live holds through as 'active' without touching stock", async () => {
+    for (const status of ['TEMPORARY', 'CONFIRMED']) {
+      primeReads({ reservation: reservationRow({ status }) });
+      await expect(InventoryCommandRepository.resurrect('cart-1-v1')).resolves.toBe('active');
+    }
+    expect(db.clientExecute).not.toHaveBeenCalled();
+    expect(db.executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("is 'unavailable' for a missing row", async () => {
+    primeReads({ reservation: null });
+    await expect(InventoryCommandRepository.resurrect('cart-1-v1')).resolves.toBe('unavailable');
+    expect(db.clientExecute).not.toHaveBeenCalled();
+  });
+
+  it("never resurrects CANCELLED/FULFILLED — real end states stay 'unavailable'", async () => {
+    for (const status of ['CANCELLED', 'FULFILLED']) {
+      primeReads({ reservation: reservationRow({ status }) });
+      await expect(InventoryCommandRepository.resurrect('cart-1-v1')).resolves.toBe('unavailable');
+    }
+    expect(db.clientExecute).not.toHaveBeenCalled();
+    expect(db.executeBatch).not.toHaveBeenCalled();
+  });
+
+  it("RELEASED with insufficient stock → 'unavailable' and a RESERVE_FAILED journal entry", async () => {
+    // available = 4 − 3 = 1 < quantity 2: the freed units were resold while the hold was dead.
+    primeReads({
+      reservation: reservationRow({ status: 'RELEASED', expires_at: null }),
+      stock: { total_stock: 4, reserved_stock: 3 },
+    });
+
+    await expect(InventoryCommandRepository.resurrect('cart-1-v1')).resolves.toBe('unavailable');
+    expect(db.clientExecute).not.toHaveBeenCalled(); // no LWT attempted
+    expect(db.executeBatch).not.toHaveBeenCalled(); // no row restoration
+
+    const [, params] = journalCalls()[0];
+    expect((params as unknown[])[H.operation]).toBe('RESERVE_FAILED');
+    expect(JSON.parse((params as unknown[])[H.details] as string)).toEqual({
+      reason: 'post-expiry-resurrect',
+      available: 1,
+      requested: 2,
+    });
+  });
+
+  it('RELEASED with stock → re-acquires the counter and restores the hold as TEMPORARY', async () => {
+    primeReads({
+      reservation: reservationRow({ status: 'RELEASED', expires_at: null }),
+      stock: { total_stock: 10, reserved_stock: 3 },
+    });
+
+    const before = Date.now();
+    await expect(InventoryCommandRepository.resurrect('cart-1-v1')).resolves.toBe('resurrected');
+
+    // Counter CAS on the ORIGINAL fulfiller row: reserved 3 → 5, conditioned on 3.
+    expect(db.clientExecute).toHaveBeenCalledTimes(1);
+    expect(db.clientExecute.mock.calls[0][1]).toEqual([5, 'TEE', 'f1', 3]);
+
+    const statements = batchStatements();
+    // Main row back to TEMPORARY with a fresh 15-minute checkout TTL.
+    const main = statements.find((s) => s.query.includes("SET status = 'TEMPORARY'"))!;
+    const expiresAt = main.params[0] as Date;
+    expect(expiresAt.getTime() - before).toBeGreaterThanOrEqual(15 * 60 * 1000 - 1000);
+    expect(expiresAt.getTime() - before).toBeLessThanOrEqual(15 * 60 * 1000 + 5000);
+    // The by_cart lookup row and active-registry mirror release() removed come back.
+    expect(
+      statements.some((s) => s.query.includes('INSERT INTO inventory_reservations_by_cart_w')),
+    ).toBe(true);
+    expect(
+      statements.some((s) => s.query.includes('INSERT INTO inventory_reservations_by_status_w')),
+    ).toBe(true);
+    // Journaled as a RESERVE with the resurrect provenance.
+    const history = statements.find((s) => s.query.includes('INSERT INTO inventory_history'))!;
+    expect(history.params[H.operation]).toBe('RESERVE');
+    expect(history.params[H.priorStatus]).toBe('RELEASED');
+    expect(history.params[H.newStatus]).toBe('TEMPORARY');
+    expect(JSON.parse(history.params[H.details] as string)).toEqual({
+      reason: 'post-expiry-resurrect',
+    });
+    expect(db.signalInventoryChanged).toHaveBeenCalledWith(['TEE']);
+  });
+});
+
+describe('fulfill() RELEASED backstop', () => {
+  it('decrements total_stock only, flips to FULFILLED, and journals {unreserved: true}', async () => {
+    primeReads({
+      reservation: reservationRow({ status: 'RELEASED', expires_at: null }),
+      stock: { total_stock: 10, reserved_stock: 3 },
+    });
+
+    await InventoryCommandRepository.fulfill('cart-1-v1');
+
+    // Status flip + history only — release() already cleaned by_cart and the registry.
+    const statements = batchStatements();
+    expect(statements).toHaveLength(2);
+    expect(statements[0].query).toContain("SET status = 'FULFILLED'");
+    expect(statements.some((s) => s.query.includes('by_cart'))).toBe(false);
+    expect(statements.some((s) => s.query.includes('by_status'))).toBe(false);
+    const history = statements.find((s) => s.query.includes('INSERT INTO inventory_history'))!;
+    expect(history.params[H.operation]).toBe('FULFILL');
+    expect(history.params[H.priorStatus]).toBe('RELEASED');
+    expect(history.params[H.newStatus]).toBe('FULFILLED');
+    expect(JSON.parse(history.params[H.details] as string)).toEqual({ unreserved: true });
+
+    // Counter CAS: reserved untouched (3 → 3, no active hold), total 10 → 8.
+    expect(db.clientExecute).toHaveBeenCalledTimes(1);
+    expect(db.clientExecute.mock.calls[0][1]).toEqual([3, 8, 'TEE', 'f1', 3]);
+    expect(db.signalInventoryChanged).toHaveBeenCalledWith(['TEE']);
+  });
+
+  it('a retried fulfill hits the FULFILLED terminal guard — no double-decrement', async () => {
+    primeReads({ reservation: reservationRow({ status: 'FULFILLED', expires_at: null }) });
+    await InventoryCommandRepository.fulfill('cart-1-v1');
+    expect(db.executeBatch).not.toHaveBeenCalled();
+    expect(db.clientExecute).not.toHaveBeenCalled();
+  });
+});
+
+describe('transferToFulfiller() terminal early-return', () => {
+  it('skips terminal reservations before any row mutation or journal write', async () => {
+    for (const status of ['RELEASED', 'CANCELLED', 'FULFILLED']) {
+      primeReads({ reservation: reservationRow({ status, expires_at: null }) });
+      await InventoryCommandRepository.transferToFulfiller('cart-1-v1', 'f2', 2);
+    }
+    expect(db.executeBatch).not.toHaveBeenCalled();
+    expect(db.clientExecute).not.toHaveBeenCalled();
+    expect(db.signalInventoryChanged).not.toHaveBeenCalled();
   });
 });

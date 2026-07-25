@@ -68,7 +68,8 @@ function makeActivities() {
     createOrder: vi.fn(async () => order),
     sendConfirmationEmail: vi.fn(async () => undefined),
     startOrderManagementWorkflow: vi.fn(async () => 'demo.order.o-1'),
-    confirmReservations: vi.fn(async () => undefined),
+    confirmReservations: vi.fn(async () => ({ unavailable: [] })),
+    refundPayment: vi.fn(async () => true),
     releaseReservations: vi.fn(async () => undefined),
     cancelReservations: vi.fn(async () => undefined),
   };
