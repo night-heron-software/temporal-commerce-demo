@@ -264,6 +264,11 @@ CREATE TABLE IF NOT EXISTS inventory_reservations_w (
     reservation_id TEXT PRIMARY KEY,
     blank_sku TEXT,
     cart_id TEXT,
+    correlation_id TEXT,      -- journey correlationId (ADR-0011) captured at reserve time; the
+                              -- history-journal key for later mutations by system actors
+                              -- (expiry sweep, preemption). Null = legacy row → journal falls
+                              -- back to cart_id. Main table only: the by_cart/by_status mirrors
+                              -- never journal (mutations always load this row first).
     variant_id TEXT,
     fulfiller_id TEXT,
     quantity INT,

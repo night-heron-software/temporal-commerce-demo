@@ -16,6 +16,10 @@ type CartDocument = Elasticsearch.CartDocument;
 export function buildCartDocument(cart: CartDetails, createdAt?: string): CartDocument {
   return {
     cartId: cart.cartId,
+    // Correlation-named join field (ADR-0011). CartDetails only carries the cartId;
+    // the indexCart activity overrides this with the ambient journey correlationId,
+    // so this value is only the legacy fallback (since #33 they are distinct UUIDs).
+    correlationId: cart.cartId,
     email: cart.email,
     userId: cart.userId,
     items: cart.items.map((item) => ({

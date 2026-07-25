@@ -273,6 +273,7 @@ export const INDEX_MAPPINGS: Record<string, any> = {
   carts: {
     properties: {
       cartId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
       email: { type: 'keyword' },
       userId: { type: 'keyword' },
       items: {

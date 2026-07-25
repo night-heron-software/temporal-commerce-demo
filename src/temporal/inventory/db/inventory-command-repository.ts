@@ -326,6 +326,8 @@ interface ReservationRow {
   reservation_id: string;
   blank_sku: string;
   cart_id: string;
+  /** Journey correlationId (ADR-0011) captured at reserve time; null on legacy rows. */
+  correlation_id: string | null;
   variant_id: string;
   fulfiller_id: string | null;
   quantity: number;
@@ -522,6 +524,17 @@ function resolveActor(): string {
  */
 function journalCorrelation(cartLinkedFallback: string): string {
   return currentCorrelationId() ?? cartLinkedFallback;
+}
+
+/**
+ * The journal partition key stored on a loaded reservation row: the journey
+ * correlationId captured at reserve time, falling back to the cart linkage for rows
+ * that predate the correlation_id column. Keying every later mutation off the row keeps
+ * a reservation's whole journal in ONE partition no matter which actor (owning journey,
+ * expiry sweep, preemption) performs it.
+ */
+function rowJournalKey(row: Pick<ReservationRow, 'correlation_id' | 'cart_id'>): string {
+  return row.correlation_id ?? row.cart_id;
 }
 
 /**
@@ -914,18 +927,25 @@ export const InventoryCommandRepository = {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
 
+    // The journey correlationId lives on the main row so LATER mutations by system
+    // actors (expiry sweep, preemption) can journal under the owning journey's key.
+    // Null — never the cartId — when absent: null means "legacy/unknown" and the
+    // journal falls back to cart_id at write time (see rowJournalKey).
+    const journeyCorrelationId = currentCorrelationId() ?? null;
+
     // Insert per-variant reservation records + mirrors, attributed to the fulfiller whose
     // counter we just incremented.
     const statements = entries.flatMap((entry) => [
       {
         query: `INSERT INTO inventory_reservations_w (
-          reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
+          reservation_id, blank_sku, cart_id, correlation_id, variant_id, fulfiller_id,
           quantity, reference_id, status, expires_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'TEMPORARY', ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'TEMPORARY', ?, ?, ?)`,
         params: [
           entry.reservationId,
           blankSku,
           cartId,
+          journeyCorrelationId,
           entry.variantId,
           fulfiller.fulfiller_id,
           entry.quantity,
@@ -1082,8 +1102,11 @@ export const InventoryCommandRepository = {
         // System-initiated releases (expiry-sweep / preemption) belong to the RELEASED
         // reservation's journey, not the ambient caller's — a preemption runs inside
         // ANOTHER cart's reserve activity, whose ambient correlationId must not steal
-        // this event. Journey-initiated releases use the ambient value as usual.
-        correlationId: reason ? reservation.cart_id : journalCorrelation(reservation.cart_id),
+        // this event — so they key off the row's stored journey correlationId (cart_id
+        // for legacy rows). Journey-initiated releases use the ambient value as usual.
+        correlationId: reason
+          ? rowJournalKey(reservation)
+          : journalCorrelation(rowJournalKey(reservation)),
         operation: 'RELEASE',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1146,7 +1169,7 @@ export const InventoryCommandRepository = {
         params: [newExpiresAt, reservation.status, reservationId],
       },
       historyInsert({
-        correlationId: journalCorrelation(reservation.cart_id),
+        correlationId: journalCorrelation(rowJournalKey(reservation)),
         operation: 'RENEW',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1209,7 +1232,7 @@ export const InventoryCommandRepository = {
       },
       activeRegistryDelete(reservation.status, reservationId),
       historyInsert({
-        correlationId: journalCorrelation(reservation.cart_id),
+        correlationId: journalCorrelation(rowJournalKey(reservation)),
         operation: 'CANCEL',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1296,7 +1319,7 @@ export const InventoryCommandRepository = {
         updated_at: new Date(),
       }),
       historyInsert({
-        correlationId: journalCorrelation(rows[0].cart_id),
+        correlationId: journalCorrelation(rowJournalKey(rows[0])),
         operation: 'CONFIRM',
         reservationId,
         blankSku: rows[0].blank_sku,
@@ -1382,7 +1405,7 @@ export const InventoryCommandRepository = {
       const available = current.total_stock - current.reserved_stock;
       if (!isUnlimited(current.total_stock) && available < reservation.quantity) {
         await recordHistoryBestEffort({
-          correlationId: journalCorrelation(reservation.cart_id),
+          correlationId: journalCorrelation(rowJournalKey(reservation)),
           operation: 'RESERVE_FAILED',
           reservationId,
           blankSku: reservation.blank_sku,
@@ -1469,7 +1492,7 @@ export const InventoryCommandRepository = {
           updated_at: now,
         }),
         historyInsert({
-          correlationId: journalCorrelation(reservation.cart_id),
+          correlationId: journalCorrelation(rowJournalKey(reservation)),
           operation: 'RESERVE',
           reservationId,
           blankSku: reservation.blank_sku,
@@ -1554,7 +1577,7 @@ export const InventoryCommandRepository = {
           params: [reservationId],
         },
         historyInsert({
-          correlationId: journalCorrelation(reservation.cart_id),
+          correlationId: journalCorrelation(rowJournalKey(reservation)),
           operation: 'FULFILL',
           reservationId,
           blankSku: reservation.blank_sku,
@@ -1592,7 +1615,7 @@ export const InventoryCommandRepository = {
       },
       activeRegistryDelete(reservation.status, reservationId),
       historyInsert({
-        correlationId: journalCorrelation(reservation.cart_id),
+        correlationId: journalCorrelation(rowJournalKey(reservation)),
         operation: 'FULFILL',
         reservationId,
         blankSku: reservation.blank_sku,
@@ -1677,7 +1700,7 @@ export const InventoryCommandRepository = {
     }
     statements.push(
       historyInsert({
-        correlationId: journalCorrelation(current.cart_id),
+        correlationId: journalCorrelation(rowJournalKey(current)),
         operation: 'TRANSFER',
         reservationId,
         blankSku: current.blank_sku,

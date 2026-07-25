@@ -25,6 +25,7 @@ vi.mock('../inventory-signal', () => ({
   signalInventoryChanged: db.signalInventoryChanged,
 }));
 
+import { currentCorrelationId } from '../../../lib/correlation-context';
 import {
   computeTotalAvailable,
   computeExpectedReserved,
@@ -477,6 +478,7 @@ const reservationRow = (over: Partial<Record<string, unknown>> = {}) => ({
   reservation_id: 'cart-1-v1',
   blank_sku: 'TEE',
   cart_id: 'cart-1',
+  correlation_id: null, // legacy default — rows predating the column; tests override
   variant_id: 'v1',
   fulfiller_id: 'f1',
   quantity: 2,
@@ -491,7 +493,7 @@ const reservationRow = (over: Partial<Record<string, unknown>> = {}) => ({
 /** Route the two SELECT shapes the operations issue; journal INSERTs fall through to []. */
 function primeReads(opts: {
   reservation: ReturnType<typeof reservationRow> | null;
-  stock?: { total_stock: number; reserved_stock: number } | null;
+  stock?: Record<string, unknown> | null;
 }) {
   db.executeCql.mockImplementation(async (query: string) => {
     if (query.includes('FROM inventory_reservations_w')) {
@@ -508,7 +510,14 @@ const batchStatements = (call = 0) =>
   db.executeBatch.mock.calls[call][0] as Array<{ query: string; params: unknown[] }>;
 
 /** History-insert param positions (columns in declaration order) — see historyInsert. */
-const H = { operation: 3, priorStatus: 9, newStatus: 10, details: 13 } as const;
+const H = {
+  correlationId: 0,
+  operation: 3,
+  priorStatus: 9,
+  newStatus: 10,
+  actor: 12,
+  details: 13,
+} as const;
 
 const journalCalls = () =>
   db.executeCql.mock.calls.filter(([query]) =>
@@ -520,6 +529,7 @@ beforeEach(() => {
   db.executeBatch.mockReset().mockResolvedValue(undefined);
   db.clientExecute.mockReset().mockResolvedValue({ rows: [{ '[applied]': true }] });
   db.signalInventoryChanged.mockReset().mockResolvedValue(undefined);
+  vi.mocked(currentCorrelationId).mockReset(); // back to no ambient correlation scope
 });
 
 describe('confirm() outcome mapping', () => {
@@ -684,5 +694,100 @@ describe('transferToFulfiller() terminal early-return', () => {
     expect(db.executeBatch).not.toHaveBeenCalled();
     expect(db.clientExecute).not.toHaveBeenCalled();
     expect(db.signalInventoryChanged).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================
+// Journey correlation on reservation rows (validation run 003)
+// ============================================================
+
+/** The main-table INSERT binds correlation_id 4th (after reservation_id, blank_sku, cart_id). */
+const MAIN_ROW_CORRELATION_PARAM = 3;
+
+const mainRowInsert = () =>
+  batchStatements().find((s) => s.query.includes('INSERT INTO inventory_reservations_w'))!;
+
+const batchHistoryInsert = () =>
+  batchStatements().find((s) => s.query.includes('INSERT INTO inventory_history'))!;
+
+describe('reserveGroup() stores the journey correlationId on the main row', () => {
+  const reserve = () =>
+    InventoryCommandRepository.reserveGroup(
+      'TEE',
+      'cart-1',
+      [{ reservationId: 'cart-1-v1', variantId: 'v1', quantity: 2 }],
+      'checkout-cart-1',
+      900,
+    );
+
+  it('binds the ambient correlationId into the main-row INSERT and the RESERVE journal entry', async () => {
+    vi.mocked(currentCorrelationId).mockReturnValue('corr-1');
+    primeReads({
+      reservation: null,
+      stock: { fulfiller_id: 'f1', total_stock: 10, reserved_stock: 0 },
+    });
+
+    await expect(reserve()).resolves.toEqual({ success: true });
+
+    expect(mainRowInsert().params[MAIN_ROW_CORRELATION_PARAM]).toBe('corr-1');
+    expect(batchHistoryInsert().params[H.correlationId]).toBe('corr-1');
+  });
+
+  it('stores null — never the cartId — outside a correlation scope (null = legacy/unknown)', async () => {
+    primeReads({
+      reservation: null,
+      stock: { fulfiller_id: 'f1', total_stock: 10, reserved_stock: 0 },
+    });
+
+    await expect(reserve()).resolves.toEqual({ success: true });
+
+    // A cartId stand-in here would masquerade as a real journey key; the fallback
+    // belongs at journal time (rowJournalKey), where legacy rows resolve to cart_id.
+    expect(mainRowInsert().params[MAIN_ROW_CORRELATION_PARAM]).toBeNull();
+    expect(batchHistoryInsert().params[H.correlationId]).toBe('cart-1');
+  });
+});
+
+describe('release() journal key for system-initiated releases', () => {
+  it("journals under the row's stored journey correlationId when present", async () => {
+    primeReads({
+      reservation: reservationRow({ correlation_id: 'corr-1' }),
+      stock: { total_stock: 10, reserved_stock: 3 },
+    });
+
+    await InventoryCommandRepository.release('cart-1-v1', 'expiry-sweep');
+
+    const history = batchHistoryInsert();
+    expect(history.params[H.correlationId]).toBe('corr-1');
+    expect(history.params[H.actor]).toBe('expiry-sweep');
+    expect(history.params[H.operation]).toBe('RELEASE');
+  });
+
+  it('falls back to cart_id for legacy rows that predate the correlation_id column', async () => {
+    primeReads({
+      reservation: reservationRow(), // correlation_id: null
+      stock: { total_stock: 10, reserved_stock: 3 },
+    });
+
+    await InventoryCommandRepository.release('cart-1-v1', 'expiry-sweep');
+
+    expect(batchHistoryInsert().params[H.correlationId]).toBe('cart-1');
+  });
+
+  it("never uses the ambient correlationId for a reasoned release — a preemption runs inside ANOTHER cart's reserve activity", async () => {
+    vi.mocked(currentCorrelationId).mockReturnValue('corr-other-cart');
+    primeReads({
+      reservation: reservationRow({ correlation_id: 'corr-1' }),
+      stock: { total_stock: 10, reserved_stock: 3 },
+    });
+
+    await InventoryCommandRepository.release('cart-1-v1', 'preemption', { forCart: 'cart-2' });
+    expect(batchHistoryInsert().params[H.correlationId]).toBe('corr-1');
+
+    // Legacy row under the same ambient scope: still the row's OWN cart linkage.
+    db.executeBatch.mockClear();
+    primeReads({ reservation: reservationRow(), stock: { total_stock: 10, reserved_stock: 3 } });
+    await InventoryCommandRepository.release('cart-1-v1', 'preemption', { forCart: 'cart-2' });
+    expect(batchHistoryInsert().params[H.correlationId]).toBe('cart-1');
   });
 });
