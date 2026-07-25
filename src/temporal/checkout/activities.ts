@@ -40,6 +40,7 @@ export interface CheckoutActivities {
     currency: string,
     idempotencyKey?: string,
   ): Promise<boolean>;
+  refundPayment(token: string, amount: number, currency: string, cartId: string): Promise<boolean>;
   createOrder(input: CreateOrderInput): Promise<Order>;
   sendConfirmationEmail(email: string, confirmationNumber: string, order: Order): Promise<void>;
   startOrderManagementWorkflow(order: Order, customerEmail: string): Promise<string>;
@@ -52,7 +53,12 @@ export interface CheckoutActivities {
     unavailableItems?: Array<{ variantId: string; error: string }>;
     error?: string;
   }>;
-  confirmReservations(reservations: ReservationInfo[]): Promise<void>;
+  /**
+   * Two-phase resurrect-then-confirm (issue #34): any reservation whose stock could
+   * not be re-secured after payment comes back in `unavailable` — the workflow must
+   * refund and fail the submit instead of creating the order.
+   */
+  confirmReservations(reservations: ReservationInfo[]): Promise<{ unavailable: ReservationInfo[] }>;
   releaseReservations(reservations: ReservationInfo[]): Promise<void>;
   cancelReservations(reservations: ReservationInfo[]): Promise<void>;
   /**
@@ -69,7 +75,7 @@ export interface CheckoutActivities {
 }
 
 // Payment activities: non-retryable for permanent failures (declined cards, invalid tokens)
-export const { createPaymentIntent, verifyPayment, processPayment } =
+export const { createPaymentIntent, verifyPayment, processPayment, refundPayment } =
   proxyActivities<CheckoutActivities>({
     startToCloseTimeout: '1m',
     retry: {

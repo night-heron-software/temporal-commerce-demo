@@ -279,6 +279,20 @@ export interface BatchReserveResult {
   contention?: boolean;
 }
 
+/**
+ * What confirm() found and did. Checkout branches on this instead of proceeding blind
+ * (issue #34): 'confirmed' | 'already-confirmed' mean the hold backs the order;
+ * 'lost' (terminal row) and 'missing' (no row) mean the stock is NOT secured.
+ */
+export type ConfirmOutcome = 'confirmed' | 'already-confirmed' | 'lost' | 'missing';
+
+/**
+ * What resurrect() found and did. 'active' — the hold is live (TEMPORARY/CONFIRMED),
+ * nothing to do; 'resurrected' — a RELEASED hold was re-acquired as TEMPORARY;
+ * 'unavailable' — the row is missing/CANCELLED/FULFILLED, or the stock is gone.
+ */
+export type ResurrectOutcome = 'active' | 'resurrected' | 'unavailable';
+
 export interface ReservationRecord {
   reservationId: string;
   blankSku: string;
@@ -1220,8 +1234,12 @@ export const InventoryCommandRepository = {
   /**
    * Confirm a reservation (payment succeeded).
    * Removes TTL expiration so the reservation persists until fulfillment.
+   *
+   * Returns the {@link ConfirmOutcome} so callers can tell a secured hold from a lost
+   * one — a void return let checkout proceed blind after an expiry-released hold
+   * (issue #34's phantom-inventory path).
    */
-  async confirm(reservationId: string): Promise<void> {
+  async confirm(reservationId: string): Promise<ConfirmOutcome> {
     const rows = await executeCql<ReservationRow>(
       `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
       [reservationId],
@@ -1229,21 +1247,24 @@ export const InventoryCommandRepository = {
 
     if (rows.length === 0) {
       logger.warn({ reservationId }, 'Reservation not found for confirm');
-      return;
+      return 'missing';
     }
 
     // Only TEMPORARY → CONFIRMED is legal. A retried confirm on an already-CONFIRMED
     // row is an idempotent no-op; confirming a terminal (RELEASED/CANCELLED/FULFILLED)
     // reservation must not resurrect it — that would flip the main row back to
     // CONFIRMED and insert a never-expiring ghost into the active registry.
+    // (Resurrection is a real, availability-checked operation: see resurrect().)
     if (rows[0].status !== 'TEMPORARY') {
+      if (rows[0].status === 'CONFIRMED') {
+        logger.warn({ reservationId, status: rows[0].status }, 'Reservation already confirmed');
+        return 'already-confirmed';
+      }
       logger.warn(
         { reservationId, status: rows[0].status },
-        rows[0].status === 'CONFIRMED'
-          ? 'Reservation already confirmed'
-          : 'Cannot confirm non-TEMPORARY reservation',
+        'Cannot confirm non-TEMPORARY reservation',
       );
-      return;
+      return 'lost';
     }
 
     await executeBatch([
@@ -1290,6 +1311,202 @@ export const InventoryCommandRepository = {
 
     logger.info({ reservationId }, 'Confirmed reservation');
     await signalInventoryChanged([rows[0].blank_sku]);
+    return 'confirmed';
+  },
+
+  /**
+   * Resurrect an expiry-RELEASED reservation back to TEMPORARY (issue #34).
+   *
+   * A shopper who parks at the payment step past the hold TTL loses the hold to the
+   * expiry sweep; when payment then succeeds, checkout calls this BEFORE confirm() so
+   * the stock is re-acquired under an availability check instead of being shipped
+   * blind. The hold comes back as TEMPORARY with a fresh checkout TTL — never straight
+   * to CONFIRMED — so a submit that fails later leaks nothing: the hold just expires.
+   *
+   * Only RELEASED rows are resurrected. CANCELLED/FULFILLED are permanent outcomes,
+   * and a missing row has nothing to restore — all 'unavailable'. Live rows
+   * (TEMPORARY/CONFIRMED) are 'active' passthroughs.
+   *
+   * The re-acquire is an availability-checked CAS on the row's ORIGINAL fulfiller
+   * stock row (no re-routing — the attribution set at reserve time stays correct for
+   * release/fulfill later). Exhausted CAS attempts throw InventoryContentionError so
+   * the activity retry policy takes over, like every other counter mutation.
+   */
+  async resurrect(reservationId: string): Promise<ResurrectOutcome> {
+    const rows = await executeCql<ReservationRow>(
+      `SELECT * FROM inventory_reservations_w WHERE reservation_id = ?`,
+      [reservationId],
+    );
+
+    if (rows.length === 0) {
+      logger.warn({ reservationId }, 'Reservation not found for resurrect');
+      return 'unavailable';
+    }
+
+    const reservation = rows[0];
+    if (reservation.status === 'TEMPORARY' || reservation.status === 'CONFIRMED') {
+      return 'active';
+    }
+    if (reservation.status !== 'RELEASED') {
+      // CANCELLED/FULFILLED: the reservation reached a real end state — never resurrect.
+      logger.warn(
+        { reservationId, status: reservation.status },
+        'Cannot resurrect terminal reservation',
+      );
+      return 'unavailable';
+    }
+
+    const fulfillerId = reservation.fulfiller_id;
+    if (!fulfillerId) {
+      throw new Error(`Reservation ${reservationId} has no attributed fulfiller ID on resurrect`);
+    }
+
+    // Availability-checked CAS: unlike release/cancel decrements (which casAdjustStock
+    // covers), re-acquiring stock must re-verify availability — the freed units may
+    // have been resold while the hold was dead.
+    const client = await getCassandraClient();
+    let acquired = false;
+    for (let attempt = 1; attempt <= CAS_MAX_ATTEMPTS; attempt++) {
+      const stockRows = await executeCql<StockRow>(
+        `SELECT total_stock, reserved_stock FROM inventory_stock_w
+         WHERE blank_sku = ? AND fulfiller_id = ?`,
+        [reservation.blank_sku, fulfillerId],
+      );
+      if (stockRows.length === 0) {
+        throw new Error(
+          `Stock row not found for SKU ${reservation.blank_sku} / fulfiller ${fulfillerId}`,
+        );
+      }
+      const current = stockRows[0];
+
+      const available = current.total_stock - current.reserved_stock;
+      if (!isUnlimited(current.total_stock) && available < reservation.quantity) {
+        await recordHistoryBestEffort({
+          correlationId: journalCorrelation(reservation.cart_id),
+          operation: 'RESERVE_FAILED',
+          reservationId,
+          blankSku: reservation.blank_sku,
+          variantId: reservation.variant_id,
+          fulfillerId,
+          quantity: reservation.quantity,
+          referenceId: reservation.reference_id,
+          details: {
+            reason: 'post-expiry-resurrect',
+            available,
+            requested: reservation.quantity,
+          },
+        });
+        return 'unavailable';
+      }
+
+      const result = await client.execute(
+        `UPDATE inventory_stock_w
+         SET reserved_stock = ?, updated_at = toTimestamp(now())
+         WHERE blank_sku = ? AND fulfiller_id = ?
+         IF reserved_stock = ?`,
+        [
+          current.reserved_stock + reservation.quantity,
+          reservation.blank_sku,
+          fulfillerId,
+          current.reserved_stock,
+        ],
+        { prepare: true },
+      );
+      if (result.rows[0]['[applied]']) {
+        acquired = true;
+        break;
+      }
+
+      logger.warn(
+        { blankSku: reservation.blank_sku, fulfillerId, attempt },
+        'Stock counter CAS not applied on resurrect — concurrent modification, retrying',
+      );
+      await new Promise((r) => setTimeout(r, 25 + Math.random() * 75));
+    }
+    if (!acquired) {
+      throw new InventoryContentionError(
+        `Stock counter CAS exhausted after ${CAS_MAX_ATTEMPTS} attempts for ` +
+          `${reservation.blank_sku}/${fulfillerId} on resurrect`,
+      );
+    }
+
+    // Counter secured — restore exactly what release() removed: main-row status (back to
+    // TEMPORARY, fresh checkout TTL), the by_cart lookup row, and the active-registry
+    // mirror. History rides in the batch, atomic with the restoration.
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15-minute checkout TTL
+    try {
+      await executeBatch([
+        {
+          query: `UPDATE inventory_reservations_w
+                  SET status = 'TEMPORARY', expires_at = ?, updated_at = ?
+                  WHERE reservation_id = ?`,
+          params: [expiresAt, now, reservationId] as unknown[],
+        },
+        {
+          query: `INSERT INTO inventory_reservations_by_cart_w (
+            cart_id, reservation_id, blank_sku, variant_id, quantity, status
+          ) VALUES (?, ?, ?, ?, ?, 'TEMPORARY')`,
+          params: [
+            reservation.cart_id,
+            reservationId,
+            reservation.blank_sku,
+            reservation.variant_id,
+            reservation.quantity,
+          ],
+        },
+        activeRegistryInsert({
+          status: 'TEMPORARY',
+          reservation_id: reservationId,
+          blank_sku: reservation.blank_sku,
+          cart_id: reservation.cart_id,
+          variant_id: reservation.variant_id,
+          fulfiller_id: fulfillerId,
+          quantity: reservation.quantity,
+          reference_id: reservation.reference_id,
+          expires_at: expiresAt,
+          created_at: reservation.created_at,
+          updated_at: now,
+        }),
+        historyInsert({
+          correlationId: journalCorrelation(reservation.cart_id),
+          operation: 'RESERVE',
+          reservationId,
+          blankSku: reservation.blank_sku,
+          variantId: reservation.variant_id,
+          fulfillerId,
+          quantity: reservation.quantity,
+          priorStatus: 'RELEASED',
+          newStatus: 'TEMPORARY',
+          referenceId: reservation.reference_id,
+          details: { reason: 'post-expiry-resurrect' },
+          at: now,
+        }),
+      ]);
+    } catch (err) {
+      // Compensate the counter so the CAS increment doesn't leak as a phantom hold —
+      // same recovery shape as reserveGroup(); the reconciler heals if this also fails.
+      logger.error(
+        { reservationId, err },
+        'Resurrect record batch failed after LWT — compensating counter',
+      );
+      try {
+        await casAdjustStock(reservation.blank_sku, fulfillerId, -reservation.quantity);
+      } catch (compErr) {
+        logger.error(
+          { blankSku: reservation.blank_sku, err: compErr },
+          'Counter compensation failed — reconciler will heal',
+        );
+      }
+      throw err;
+    }
+
+    logger.info(
+      { reservationId, blankSku: reservation.blank_sku, fulfillerId },
+      'Resurrected released reservation to TEMPORARY (post-expiry payment)',
+    );
+    await signalInventoryChanged([reservation.blank_sku]);
+    return 'resurrected';
   },
 
   /**
@@ -1307,11 +1524,8 @@ export const InventoryCommandRepository = {
     }
 
     const reservation = rows[0];
-    if (
-      reservation.status === 'FULFILLED' ||
-      reservation.status === 'RELEASED' ||
-      reservation.status === 'CANCELLED'
-    ) {
+    if (reservation.status === 'FULFILLED' || reservation.status === 'CANCELLED') {
+      // FULFILLED: idempotent no-op on activity retry. CANCELLED: nothing shipped.
       logger.warn({ reservationId, status: reservation.status }, 'Reservation already terminal');
       return;
     }
@@ -1319,6 +1533,46 @@ export const InventoryCommandRepository = {
 
     if (!fulfillerId) {
       throw new Error(`Reservation ${reservationId} has no assigned fulfiller ID on fulfill`);
+    }
+
+    // RELEASED backstop (issue #34): the hold was expiry-released but the unit still
+    // physically shipped — delivery MUST decrement total_stock unconditionally. There is
+    // no active hold, so reserved_stock stays untouched, and release() already removed
+    // the by_cart row and registry mirror — only the main row and the counter change.
+    // The status flips to FULFILLED first so an activity retry hits the terminal guard
+    // instead of double-decrementing.
+    if (reservation.status === 'RELEASED') {
+      logger.warn(
+        { reservationId, fulfillerId },
+        'Fulfilling released reservation — decrementing total_stock only (see issue #34)',
+      );
+      await executeBatch([
+        {
+          query: `UPDATE inventory_reservations_w
+                  SET status = 'FULFILLED', updated_at = toTimestamp(now())
+                  WHERE reservation_id = ?`,
+          params: [reservationId],
+        },
+        historyInsert({
+          correlationId: journalCorrelation(reservation.cart_id),
+          operation: 'FULFILL',
+          reservationId,
+          blankSku: reservation.blank_sku,
+          variantId: reservation.variant_id,
+          fulfillerId,
+          quantity: reservation.quantity,
+          priorStatus: 'RELEASED',
+          newStatus: 'FULFILLED',
+          referenceId: reservation.reference_id,
+          details: { unreserved: true },
+        }),
+      ]);
+
+      await casAdjustStock(reservation.blank_sku, fulfillerId, 0, -reservation.quantity);
+
+      logger.info({ reservationId, fulfillerId }, 'Fulfilled released reservation (total only)');
+      await signalInventoryChanged([reservation.blank_sku]);
+      return;
     }
 
     // Status first, counters second — same fail-safe ordering rationale as release().
@@ -1387,6 +1641,21 @@ export const InventoryCommandRepository = {
       return;
     }
     const current = transferRows[0];
+
+    // Terminal rows hold no stock: transferring one would mutate a dead row and journal
+    // a misleading TRANSFER over the RELEASE/CANCEL/FULFILL that ended it (issue #34).
+    if (
+      current.status === 'RELEASED' ||
+      current.status === 'CANCELLED' ||
+      current.status === 'FULFILLED'
+    ) {
+      logger.warn(
+        { reservationId, status: current.status },
+        'Skipping transfer of terminal reservation',
+      );
+      return;
+    }
+
     const priorFulfillerId = current.fulfiller_id;
     const priorQuantity = current.quantity;
 

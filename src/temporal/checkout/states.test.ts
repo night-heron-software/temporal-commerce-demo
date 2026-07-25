@@ -28,12 +28,13 @@ vi.mock('./activities', () => ({
   calculateShipping: vi.fn(async () => 5),
   calculateTax: vi.fn(async () => 0.8),
   processPayment: vi.fn(async () => true),
+  refundPayment: vi.fn(async () => true),
   createOrder: vi.fn(async () => ({ orderId: 'o-1', confirmationNumber: 'DEMO1234' })),
   createPaymentIntent: vi.fn(async () => ({ clientSecret: 'cs_1' })),
   sendConfirmationEmail: vi.fn(async () => undefined),
   startOrderManagementWorkflow: vi.fn(async () => 'demo.order.o-1'),
   releaseReservations: vi.fn(async () => undefined),
-  confirmReservations: vi.fn(async () => undefined),
+  confirmReservations: vi.fn(async () => ({ unavailable: [] })),
   renewReservationsForCheckout: vi.fn(async () => ({
     success: true,
     reservations: [{ reservationId: 'r-1' }],
@@ -41,9 +42,12 @@ vi.mock('./activities', () => ({
 }));
 
 import {
+  confirmReservations,
+  createOrder,
   createPaymentIntent,
   processPayment,
   queryCart,
+  refundPayment,
   releaseReservations,
   renewReservationsForCheckout,
   startOrderManagementWorkflow,
@@ -177,6 +181,26 @@ describe('collecting — submitOrder', () => {
     expect(out.next).toBe(terminal('complete'));
     expect(out.context.state.order?.orderId).toBe('o-1');
     expect(startOrderManagementWorkflow).toHaveBeenCalled();
+    // All holds confirmed ({unavailable: []}) — nothing to refund.
+    expect(confirmReservations).toHaveBeenCalledWith([{ reservationId: 'r-1' }]);
+    expect(refundPayment).not.toHaveBeenCalled();
+  });
+
+  it('unavailable reservations after payment refund and fail the submit before any order (issue #34)', async () => {
+    vi.mocked(confirmReservations).mockResolvedValueOnce({
+      unavailable: [{ variantId: 'v1', reservationId: 'r-1' }],
+    } as never);
+
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    expect(out.next).toBe('collecting');
+    expect(out.error).toMatch(/no longer available/i);
+    expect(out.error).toMatch(/refunded/i);
+    // The shopper is made whole for the full charged amount…
+    expect(refundPayment).toHaveBeenCalledWith('tok_1', expect.any(Number), 'USD', 'cart-1');
+    expect(vi.mocked(refundPayment).mock.calls[0][1]).toBeCloseTo(15.8);
+    // …and no order exists, so nothing downstream can fulfill phantom inventory.
+    expect(createOrder).not.toHaveBeenCalled();
+    expect(startOrderManagementWorkflow).not.toHaveBeenCalled();
   });
 
   it('a stale reviewedCartVersion aborts with CART_CHANGED and un-freezes the cart', async () => {
