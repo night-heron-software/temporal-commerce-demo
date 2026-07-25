@@ -1,5 +1,6 @@
 import { heartbeat } from '@temporalio/activity';
-import { logger, getElasticsearchClient } from '../../lib';
+import { logger, getElasticsearchClient, sendEmail } from '../../lib';
+import { buildCommunication } from '../../lib/communication-templates';
 import { currentCorrelationId } from '../../lib/correlation-context';
 import type { Fulfillers, Elasticsearch } from '../contracts';
 import type { TrackingInfo } from './activities';
@@ -32,14 +33,38 @@ export async function sendShippedEmail(
   trackingInfo: TrackingInfo,
 ): Promise<void> {
   logger.info({ email, orderId, trackingInfo }, '📧 [DEMO] Shipped notification');
+  const { subject, body } = buildCommunication('shipped', {
+    confirmationNumber,
+    orderId,
+    carrier: trackingInfo.carrier,
+    trackingNumber: trackingInfo.trackingNumber,
+    trackingUrl: trackingInfo.trackingUrl,
+  });
+  await sendEmail({
+    to: email,
+    subject,
+    text: body,
+    orderId,
+    commType: 'shipped',
+    actor: 'sendShippedEmail',
+  });
 }
 
 export async function sendDeliveredEmail(
   email: string,
   orderId: string,
-  _confirmationNumber: string,
+  confirmationNumber: string,
 ): Promise<void> {
   logger.info({ email, orderId }, '📧 [DEMO] Delivered notification');
+  const { subject, body } = buildCommunication('delivered', { confirmationNumber, orderId });
+  await sendEmail({
+    to: email,
+    subject,
+    text: body,
+    orderId,
+    commType: 'delivered',
+    actor: 'sendDeliveredEmail',
+  });
 }
 
 export async function transferInventoryReservations(

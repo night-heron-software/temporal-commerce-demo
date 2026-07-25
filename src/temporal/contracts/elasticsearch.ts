@@ -178,6 +178,13 @@ export interface OrderDocument extends WorkflowLifecycleFields {
   deliveredAt?: string;
   // Customer feedback
   customerFeedback?: OrderCustomerFeedbackDocument;
+  /**
+   * Communication summaries joined from the `customer_communications` source table.
+   * Absent from the pure workflow-side builder output — the `indexOrder` activity (and
+   * the reindex route's orders join) enrich the doc, since activities read Cassandra
+   * freely and the builder must stay I/O-free.
+   */
+  communications?: OrderCommunicationSummaryDocument[];
   // Timestamps
   createdAt: string;
   updatedAt: string;
@@ -238,6 +245,18 @@ export interface OrderStatusHistoryDocument {
   timestamp: string;
   note?: string;
   updatedBy: string;
+}
+
+/**
+ * Nested communication summary on the orders doc — enough to see what the customer was
+ * told and search an order by it, embedded the way `fulfillerOrders`/`statusHistory` are.
+ * The full record (body, correlationId, actor) lives in the `communications` index.
+ */
+export interface OrderCommunicationSummaryDocument {
+  commType?: string;
+  subject: string;
+  sentAt: string;
+  recipient: string;
 }
 
 export interface OrderCustomerFeedbackDocument {
@@ -410,6 +429,24 @@ export interface ShipmentDocument extends WorkflowLifecycleFields {
   deliveredAt?: string;
 }
 
+// Communications Index (customer communications — immutable point-in-time facts)
+export interface CommunicationDocument {
+  /** Deterministic composite id (orderId:sentAtMs:seq) — see buildCommunicationId. */
+  id: string;
+  orderId: string;
+  /** Correlation ID (ADR-0011) — joinable across all order-flow indices; absent for legacy sends. */
+  correlationId?: string;
+  channel: string;
+  commType?: string;
+  /** Customer email — keyword, so the Explorer's free-text pass matches it exactly. */
+  recipient: string;
+  subject: string;
+  body?: string;
+  sentAt: string;
+  /** Sending surface (activity name); the correlationId is the journey join. */
+  actor?: string;
+}
+
 // Index names
 export const ES_INDICES = {
   products: 'products',
@@ -423,4 +460,5 @@ export const ES_INDICES = {
   reservations: 'reservations',
   fulfillments: 'fulfillments',
   shipments: 'shipments',
+  communications: 'communications',
 } as const;

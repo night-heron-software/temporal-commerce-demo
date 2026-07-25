@@ -111,6 +111,23 @@ export interface TraceInventoryEvent {
   details: unknown;
 }
 
+/**
+ * One customer communication for the trace, read from the `communications` ES index
+ * (write-through projection of the customer_communications source table).
+ */
+export interface TraceCommunication {
+  id: string;
+  commType: string | null;
+  channel: string;
+  recipient: string;
+  subject: string;
+  body: string | null;
+  sentAt: string;
+  correlationId: string | null;
+  /** Sending surface (activity name) — not a workflowId; the correlationId is the join. */
+  actor: string | null;
+}
+
 export interface OrderTrace {
   orderId: string;
   storeId: string;
@@ -127,6 +144,8 @@ export interface OrderTrace {
   statusHistory: TraceStatusHistoryRow[];
   /** Correlation-keyed inventory operation journal (inventory_history) for the order's cart. */
   inventory: { history: TraceInventoryEvent[] };
+  /** Everything the customer was told about this order, chronological (sentAt asc). */
+  communications: TraceCommunication[];
 }
 
 /** Lightweight order descriptor used when a lookup resolves to more than one order. */
@@ -261,6 +280,46 @@ async function fetchStatusHistory(orderId: string): Promise<TraceStatusHistoryRo
       updatedBy: r.updated_by,
       correlationId: r.correlation_id ?? null,
     }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The order's customer communications from the `communications` ES index: matched by the
+ * journey correlationId OR the orderId (legacy sends may lack the correlation), sorted
+ * chronologically. Guarded — the trace must never 500 because the index is missing
+ * (pre-feature deploys) or ES is down; legacy orders just render an empty section.
+ */
+async function fetchCommunications(
+  orderId: string,
+  correlationId?: string,
+): Promise<TraceCommunication[]> {
+  try {
+    const es = getElasticsearchClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const should: any[] = [{ term: { orderId } }];
+    if (correlationId) should.push({ term: { correlationId } });
+    const resp = await es.search<Elasticsearch.CommunicationDocument>({
+      index: Elasticsearch.ES_INDICES.communications,
+      size: 100,
+      query: { bool: { should, minimum_should_match: 1 } },
+      sort: [{ sentAt: { order: 'asc' as const } }],
+    });
+    return resp.hits.hits
+      .map((h) => h._source)
+      .filter((s): s is Elasticsearch.CommunicationDocument => Boolean(s))
+      .map((s) => ({
+        id: s.id,
+        commType: s.commType ?? null,
+        channel: s.channel,
+        recipient: s.recipient,
+        subject: s.subject,
+        body: s.body ?? null,
+        sentAt: s.sentAt,
+        correlationId: s.correlationId ?? null,
+        actor: s.actor ?? null,
+      }));
   } catch {
     return [];
   }
@@ -466,6 +525,7 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
   nodes.sort((a, b) => DOMAIN_ORDER.indexOf(a.domain) - DOMAIN_ORDER.indexOf(b.domain));
 
   const statusHistory = await fetchStatusHistory(orderId);
+  const communications = await fetchCommunications(orderId, correlationId);
 
   return {
     orderId,
@@ -476,5 +536,6 @@ export async function buildOrderTrace(storeId: string, orderId: string): Promise
     nodes,
     statusHistory,
     inventory: { history: inventoryHistory },
+    communications,
   };
 }

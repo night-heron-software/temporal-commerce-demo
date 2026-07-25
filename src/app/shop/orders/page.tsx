@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getOrdersByEmail, type CustomerOrder } from '../order-actions';
+import { getOrderCommunications } from '../../order-communications-actions';
+import type { CommunicationDocument } from '@/temporal/contracts/elasticsearch';
+import OrderCommunications from '@/components/OrderCommunications';
 import { useShopper } from '@/context/ShopperContext';
 
 export default function ShopOrdersPage() {
@@ -309,6 +312,8 @@ export default function ShopOrdersPage() {
                         {formatPrice(order.total, order.currency)}
                       </span>
                     </div>
+
+                    <OrderEmailsPanel orderId={order.orderId} />
                   </div>
 
                   <OrderProgressBar status={order.status} />
@@ -327,6 +332,52 @@ export default function ShopOrdersPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Communications (emails about this order) ───
+
+/**
+ * Lazy per-order communications list: fetched on first expand so the order list stays a
+ * single query. Customer-appropriate — subject, sent date, type label, expandable body;
+ * no internal ids (the shared component hides the recipient by default).
+ */
+function OrderEmailsPanel({ orderId }: { orderId: string }) {
+  const [open, setOpen] = useState(false);
+  const [comms, setComms] = useState<CommunicationDocument[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const toggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && comms === null && !isLoading) {
+      setIsLoading(true);
+      // The action is failure-guarded (empty list) — the card never breaks over emails.
+      setComms(await getOrderCommunications(orderId));
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-700">
+      <button
+        onClick={toggle}
+        className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+      >
+        {open ? '▾' : '▸'} ✉ Emails about this order
+      </button>
+      {open &&
+        (isLoading ? (
+          <p className="text-sm text-zinc-500 mt-2">Loading…</p>
+        ) : (
+          <div className="mt-2">
+            <OrderCommunications
+              communications={comms ?? []}
+              emptyText="No emails recorded for this order yet."
+            />
+          </div>
+        ))}
     </div>
   );
 }

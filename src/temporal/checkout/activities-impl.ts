@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 
 import { executeCql, logger as log, sendEmail, getElasticsearchClient } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
+import { buildCommunication } from '../../lib/communication-templates';
 import { currentCorrelationId } from '../../lib/correlation-context';
 
 import {
@@ -170,16 +171,28 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 }
 
 /**
- * Send order confirmation email (console-only in demo)
+ * Send order confirmation email (console-only in demo; persisted as a
+ * CustomerCommunication domain object by sendEmail's write-through)
  */
 export async function sendConfirmationEmail(
   email: string,
   confirmationNumber: string,
-  _order: Order,
+  order: Order,
 ): Promise<void> {
+  const { subject, body } = buildCommunication('order-confirmation', {
+    confirmationNumber,
+    orderId: order.orderId,
+  });
   await sendEmail({
     to: email,
-    subject: `Order Confirmed - #${confirmationNumber}`,
+    subject,
+    text: body,
+    orderId: order.orderId,
+    // The order record's copy is the fallback outside an activity correlation scope
+    // (ADR-0011) — the ambient correlationId wins inside one.
+    correlationId: order.correlationId,
+    commType: 'order-confirmation',
+    actor: 'sendConfirmationEmail',
   });
 }
 

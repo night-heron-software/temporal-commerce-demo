@@ -1,7 +1,7 @@
 /**
  * POST /api/dev/reindex
  * Reindex Cassandra data into Elasticsearch.
- * Body: { index: 'products' | 'collections' | 'orders' | 'customers' | 'fulfillers' | 'inventory' | 'fulfiller_orders' | 'carts' | 'fulfillments' | 'reservations' | 'shipments' | 'all' }
+ * Body: { index: 'products' | 'collections' | 'orders' | 'customers' | 'fulfillers' | 'inventory' | 'fulfiller_orders' | 'carts' | 'fulfillments' | 'reservations' | 'shipments' | 'communications' | 'all' }
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { createErrorResponse } from '@/lib/api-utils';
@@ -89,6 +89,9 @@ export async function POST(request: NextRequest) {
             break;
           case 'shipments':
             // Shipments are ephemeral — projected live by fulfillment activities
+            break;
+          case 'communications':
+            result.indexed = await reindexCommunications(esClient, result.errors);
             break;
         }
       } catch (err) {
@@ -247,6 +250,39 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
   }
 
   const rows = await executeCql<OrderRow>('SELECT * FROM orders');
+
+  // Join the nested communication summaries from the source table, mirroring the live
+  // indexOrder enrichment. Guarded: a missing/failed communications read degrades to
+  // summary-less order docs instead of failing the whole rebuild.
+  const commsByOrder = new Map<
+    string,
+    { commType?: string; subject: string; sentAt?: string; recipient: string }[]
+  >();
+  try {
+    interface CommRow {
+      order_id: CqlUuid;
+      sent_at: Date | null;
+      comm_type: string | null;
+      recipient: string;
+      subject: string;
+    }
+    const commRows = await executeCql<CommRow>(
+      'SELECT order_id, sent_at, comm_type, recipient, subject FROM customer_communications',
+    );
+    for (const c of commRows) {
+      const key = c.order_id.toString();
+      if (!commsByOrder.has(key)) commsByOrder.set(key, []);
+      commsByOrder.get(key)!.push({
+        commType: c.comm_type ?? undefined,
+        subject: c.subject,
+        sentAt: c.sent_at ? new Date(c.sent_at).toISOString() : undefined,
+        recipient: c.recipient,
+      });
+    }
+  } catch (err) {
+    errors.push(`communications join: ${err}`);
+  }
+
   let indexed = 0;
   for (const row of rows) {
     try {
@@ -350,6 +386,7 @@ async function reindexOrders(esClient: EsClient, errors: string[]): Promise<numb
           }),
         ),
         statusHistory: [],
+        communications: commsByOrder.get(orderId) ?? [],
         createdAt: row.created_at?.toISOString(),
         updatedAt: row.updated_at?.toISOString(),
         ...deriveLifecycleFromStatus('orders', row.status, row.updated_at?.toISOString()),
@@ -633,6 +670,51 @@ async function reindexReservations(esClient: EsClient, errors: string[]): Promis
       indexed++;
     } catch (err) {
       errors.push(`Reservation ${row.reservation_id}: ${err}`);
+    }
+  }
+  return indexed;
+}
+
+async function reindexCommunications(esClient: EsClient, errors: string[]): Promise<number> {
+  interface CommunicationRow {
+    order_id: CqlUuid;
+    sent_at: Date | null;
+    seq: number;
+    correlation_id: string | null;
+    channel: string | null;
+    comm_type: string | null;
+    recipient: string;
+    subject: string;
+    body: string | null;
+    actor: string | null;
+  }
+
+  const rows = await executeCql<CommunicationRow>('SELECT * FROM customer_communications');
+  let indexed = 0;
+
+  for (const row of rows) {
+    const orderId = row.order_id.toString();
+    try {
+      const sentAt = row.sent_at ? new Date(row.sent_at) : new Date(0);
+      // Deterministic composite id (orderId:sentAtMs:seq) — matches the live
+      // write-through's buildCommunicationId, so rebuilds address the same docs.
+      const id = `${orderId}:${sentAt.getTime()}:${row.seq}`;
+      const doc = {
+        id,
+        orderId,
+        correlationId: row.correlation_id ?? undefined,
+        channel: row.channel ?? 'email',
+        commType: row.comm_type ?? undefined,
+        recipient: row.recipient,
+        subject: row.subject,
+        body: row.body ?? undefined,
+        sentAt: sentAt.toISOString(),
+        actor: row.actor ?? undefined,
+      };
+      await esClient.index({ index: 'communications', id, document: doc });
+      indexed++;
+    } catch (err) {
+      errors.push(`Communication ${orderId}/${row.seq}: ${err}`);
     }
   }
   return indexed;

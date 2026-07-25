@@ -64,6 +64,11 @@ describe('buildOrderDocument', () => {
     expect(doc.cartId).toBe('cart-1');
     expect(doc.orderId).toBe('o-1');
   });
+
+  it('stays communication-free — the summaries are joined by the indexOrder activity, not the pure builder', () => {
+    const doc = buildOrderDocument(order, state, order.customerEmail);
+    expect('communications' in doc).toBe(false);
+  });
 });
 
 describe('buildFulfillerOrderDocument', () => {

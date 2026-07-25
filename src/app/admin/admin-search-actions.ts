@@ -21,6 +21,9 @@ const ALL_INDICES = [
   'reservations',
   'fulfillments',
   'shipments',
+  // Customer communications — immutable point-in-time facts, deliberately NOT a
+  // lifecycle index (no workflow owns them, so completed-marking never applies).
+  'communications',
 ] as const;
 
 export type SearchableIndex = (typeof ALL_INDICES)[number];

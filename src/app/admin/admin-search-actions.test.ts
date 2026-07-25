@@ -73,8 +73,18 @@ describe('getIndexStats', () => {
       index: 'orders',
       query: { term: { workflowStatus: 'completed' } },
     });
-    // 11 plain counts + 6 lifecycle counts.
-    expect(es.count).toHaveBeenCalledTimes(17);
+    // 12 plain counts + 6 lifecycle counts.
+    expect(es.count).toHaveBeenCalledTimes(18);
+  });
+
+  it('lists communications as a plain (non-lifecycle) index — records are immutable facts', async () => {
+    es.count.mockResolvedValue({ count: 3 });
+
+    const { stats } = await getIndexStats();
+
+    const communications = stats.find((s) => s.index === 'communications');
+    expect(communications).toEqual({ index: 'communications', docCount: 3, status: 'green' });
+    expect(communications?.completedCount).toBeUndefined();
   });
 
   it("reports missing indices as 'unknown' and per-index failures as 'red'", async () => {

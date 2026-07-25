@@ -4,7 +4,13 @@
  */
 
 import { log } from '@temporalio/activity';
-import { getCassandraClient, cassandraTypes as types, getElasticsearchClient } from '../../lib';
+import {
+  getCassandraClient,
+  cassandraTypes as types,
+  getElasticsearchClient,
+  sendEmail,
+} from '../../lib';
+import { buildCommunication } from '../../lib/communication-templates';
 import { currentCorrelationId } from '../../lib/correlation-context';
 import { Order, OrderState, OrderStatus, OrderAssignment } from './types';
 import type { Elasticsearch } from '../contracts';
@@ -223,22 +229,47 @@ export async function updateOrderInDatabase(
 }
 
 /**
- * Send order status email to customer (console stub for demo)
+ * Send order status email to customer (console stub for demo; persisted as a
+ * CustomerCommunication domain object by sendEmail's write-through)
  */
 export async function sendOrderStatusEmail(
   email: string,
-  _orderId: string,
+  orderId: string,
   status: OrderStatus,
-  _details?: { trackingNumber?: string; carrier?: string },
+  details?: { trackingNumber?: string; carrier?: string },
 ): Promise<void> {
   log.info(`[Activity] 📧 [DEMO] Order status email: ${status} to ${email}`);
+  const { subject, body } = buildCommunication('order-status', {
+    orderId,
+    status,
+    trackingNumber: details?.trackingNumber,
+    carrier: details?.carrier,
+  });
+  await sendEmail({
+    to: email,
+    subject,
+    text: body,
+    orderId,
+    commType: 'order-status',
+    actor: 'sendOrderStatusEmail',
+  });
 }
 
 /**
- * Send feedback thank you email (console stub for demo)
+ * Send feedback thank you email (console stub for demo; persisted as a
+ * CustomerCommunication domain object by sendEmail's write-through)
  */
-export async function sendFeedbackThankYouEmail(email: string, _orderId: string): Promise<void> {
+export async function sendFeedbackThankYouEmail(email: string, orderId: string): Promise<void> {
   log.info(`[Activity] 📧 [DEMO] Feedback thank-you to ${email}`);
+  const { subject, body } = buildCommunication('feedback-thanks', { orderId });
+  await sendEmail({
+    to: email,
+    subject,
+    text: body,
+    orderId,
+    commType: 'feedback-thanks',
+    actor: 'sendFeedbackThankYouEmail',
+  });
 }
 
 /**
@@ -257,12 +288,53 @@ export async function resolveFulfillerAssignments(
   }));
 }
 
+/**
+ * Communication summaries for one order, read from the customer_communications source
+ * table in clustering order (sent_at asc, seq asc — chronological). Exported for the
+ * indexOrder enrichment tests.
+ */
+export async function fetchCommunicationSummaries(
+  orderId: string,
+): Promise<Elasticsearch.OrderCommunicationSummaryDocument[]> {
+  interface Row {
+    sent_at: Date;
+    comm_type: string | null;
+    recipient: string;
+    subject: string;
+  }
+  const client = getCassandraClient();
+  const result = await client.execute(
+    `SELECT sent_at, comm_type, recipient, subject FROM customer_communications
+     WHERE order_id = ?`,
+    [types.Uuid.fromString(orderId)],
+    { prepare: true },
+  );
+  return (result.rows as unknown as Row[]).map((r) => ({
+    commType: r.comm_type ?? undefined,
+    subject: r.subject,
+    sentAt: r.sent_at?.toISOString() ?? '',
+    recipient: r.recipient,
+  }));
+}
+
 export async function indexOrder(doc: Elasticsearch.OrderDocument): Promise<void> {
   const client = getElasticsearchClient();
+  // Enrich the workflow-built doc with communication summaries from the source table —
+  // activities read Cassandra freely; the workflow-side builder stays pure. Best-effort:
+  // a missing table / Cassandra hiccup must not fail order indexing.
+  let communications: Elasticsearch.OrderCommunicationSummaryDocument[] = [];
+  try {
+    communications = await fetchCommunicationSummaries(doc.orderId);
+  } catch (err) {
+    log.warn(
+      `[Activity] Communication enrichment failed for order ${doc.orderId} — indexing without it`,
+      { error: String(err) },
+    );
+  }
   await client.index({
     index: ES_INDICES.orders,
     id: doc.orderId,
-    document: doc,
+    document: { ...doc, communications },
   });
   log.info(`[Activity] Indexed order ${doc.orderId} to Elasticsearch`);
 }
