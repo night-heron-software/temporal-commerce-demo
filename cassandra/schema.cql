@@ -466,3 +466,25 @@ CREATE TABLE IF NOT EXISTS inventory_history (
     PRIMARY KEY ((correlation_id), at, seq)
 ) WITH CLUSTERING ORDER BY (at ASC, seq ASC)
   AND default_time_to_live = 7776000;  -- 90 days, matching workflow_state_transitions
+
+-- ===========================================
+-- Customer Communications (source of truth)
+-- ===========================================
+-- Every customer-facing send (order confirmation, status updates, shipped/delivered,
+-- feedback thanks) as an immutable point-in-time fact keyed by order. Written
+-- best-effort by sendEmail()'s persistence write-through (never fails the send) and
+-- projected into the `communications` ES index; /api/dev/reindex rebuilds that index
+-- from this table. `seq` disambiguates same-millisecond sends (mirrors inventory_history).
+CREATE TABLE IF NOT EXISTS customer_communications (
+    order_id UUID,
+    sent_at TIMESTAMP,
+    seq INT,                  -- per-process monotonic tiebreak within a timestamp
+    correlation_id TEXT,      -- journey correlationId (ADR-0011); null for legacy/API-originated sends
+    channel TEXT,             -- always 'email' today; in-app/SMS slot in without a schema change
+    comm_type TEXT,           -- order-confirmation | order-status | shipped | delivered | feedback-thanks
+    recipient TEXT,           -- customer email address
+    subject TEXT,
+    body TEXT,
+    actor TEXT,               -- sending surface (activity name); correlation_id is the journey join
+    PRIMARY KEY ((order_id), sent_at, seq)
+) WITH CLUSTERING ORDER BY (sent_at ASC, seq ASC);

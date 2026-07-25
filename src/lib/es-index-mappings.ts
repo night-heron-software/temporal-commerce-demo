@@ -167,6 +167,17 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           submittedAt: { type: 'date' },
         },
       },
+      // Communication summaries joined from customer_communications (indexOrder
+      // enrichment / reindex join) — an order is searchable by what was communicated.
+      communications: {
+        type: 'nested',
+        properties: {
+          commType: { type: 'keyword' },
+          subject: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+          sentAt: { type: 'date' },
+          recipient: { type: 'keyword' },
+        },
+      },
       createdAt: { type: 'date' },
       updatedAt: { type: 'date' },
       ...WORKFLOW_LIFECYCLE_PROPERTIES,
@@ -348,6 +359,28 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       shippedAt: { type: 'date' },
       deliveredAt: { type: 'date' },
       ...WORKFLOW_LIFECYCLE_PROPERTIES,
+    },
+  },
+
+  /**
+   * Customer communications — immutable point-in-time facts sourced from the
+   * `customer_communications` Cassandra table (so, unlike system_errors, fully
+   * reindexable). `recipient` is a keyword so the Explorer's free-text pass matches a
+   * customer email exactly (like `customers.email`); `subject`/`body` are analyzed text
+   * for fuzzy content search; the id/correlation keywords feed the UUID sweep.
+   */
+  communications: {
+    properties: {
+      id: { type: 'keyword' },
+      orderId: { type: 'keyword' },
+      correlationId: { type: 'keyword' },
+      channel: { type: 'keyword' },
+      commType: { type: 'keyword' },
+      recipient: { type: 'keyword' },
+      subject: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+      body: { type: 'text' },
+      sentAt: { type: 'date' },
+      actor: { type: 'keyword' },
     },
   },
 

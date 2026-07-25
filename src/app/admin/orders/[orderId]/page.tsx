@@ -4,8 +4,11 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { getOrderState, updateOrderStatus, cancelOrder } from '../../admin-order-actions';
+import { getOrderCommunications } from '../../../order-communications-actions';
 import type { OrderState } from '@/temporal/oms/types';
+import type { CommunicationDocument } from '@/temporal/contracts/elasticsearch';
 import EntityIds from '@/components/EntityIds';
+import OrderCommunications from '@/components/OrderCommunications';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
 export default function AdminOrderDetailPage() {
@@ -13,6 +16,7 @@ export default function AdminOrderDetailPage() {
   const orderId = params.orderId as string;
 
   const [orderState, setOrderState] = useState<OrderState | null>(null);
+  const [communications, setCommunications] = useState<CommunicationDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -21,12 +25,18 @@ export default function AdminOrderDetailPage() {
   const loadOrder = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const result = await getOrderState(orderId);
+    // Communications load alongside the workflow state; the action is failure-guarded
+    // (empty list), so the panel degrades quietly rather than breaking the page.
+    const [result, comms] = await Promise.all([
+      getOrderState(orderId),
+      getOrderCommunications(orderId),
+    ]);
     if (result.success) {
       setOrderState(result.data);
     } else {
       setError(result.error);
     }
+    setCommunications(comms);
     setLoading(false);
   }, [orderId]);
 
@@ -462,6 +472,18 @@ export default function AdminOrderDetailPage() {
         ) : (
           <p className="text-zinc-500 text-sm">No history entries</p>
         )}
+      </div>
+
+      {/* Communications — everything the customer was told about this order */}
+      <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 mt-8">
+        <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">
+          Communications ({communications.length})
+        </h2>
+        <OrderCommunications
+          communications={communications}
+          showRecipient
+          emptyText="No communications recorded for this order (it may predate the communications table)."
+        />
       </div>
     </div>
   );

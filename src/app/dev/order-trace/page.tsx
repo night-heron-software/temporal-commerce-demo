@@ -10,6 +10,7 @@ import type {
   TraceTransition,
   TraceActivityCall,
   TraceInventoryEvent,
+  TraceCommunication,
   OrderCandidate,
   TraceDomain,
 } from './trace-service';
@@ -67,6 +68,12 @@ const DOMAIN_ACCENT: Record<TraceDomain, { border: string; badge: string; bar: s
 const INVENTORY_ACCENT = {
   border: 'border-teal-700',
   badge: 'bg-teal-900 text-teal-200 border-teal-700',
+};
+
+// Communications are likewise correlation-keyed facts, not a workflow node — own accent.
+const COMMUNICATION_ACCENT = {
+  border: 'border-rose-700',
+  badge: 'bg-rose-900 text-rose-200 border-rose-700',
 };
 
 type TraceTab = 'state-machines' | 'status-history';
@@ -965,6 +972,94 @@ function InventorySection({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Communications section (everything the customer was told about this order)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The order's customer communications from the `communications` projection, in send
+ * order: recipient, type badge, subject, expandable body, timestamp. Legacy orders
+ * (pre-feature) simply show the empty state — never an error.
+ */
+function CommunicationsSection({
+  communications,
+  forceOpen,
+}: {
+  communications: TraceCommunication[];
+  forceOpen: boolean;
+}) {
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = forceOpen || localOpen;
+
+  return (
+    <div className={`border-b border-gray-700 border-l-2 ${COMMUNICATION_ACCENT.border}`}>
+      <button
+        onClick={() => setLocalOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-800/50 text-left select-none"
+      >
+        <span className="text-gray-400 text-xs w-4 shrink-0">{open ? '▾' : '▸'}</span>
+        <span
+          className={`inline-block px-2 py-0.5 rounded-full border text-xs shrink-0 ${COMMUNICATION_ACCENT.badge}`}
+        >
+          Communications
+        </span>
+        <span className="text-xs text-gray-500 ml-2">emails sent to the customer</span>
+        <span className="ml-auto text-[10px] text-gray-600 shrink-0">
+          {communications.length} sent
+        </span>
+      </button>
+
+      {open &&
+        (communications.length === 0 ? (
+          <div className="px-4 py-2 text-xs text-gray-600 italic">
+            No communications recorded for this order (predates the communications table).
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="text-gray-600 uppercase text-[10px] tracking-wide font-sans border-b border-gray-800">
+                  <th className="px-3 py-1.5 text-left whitespace-nowrap">Time</th>
+                  <th className="px-3 py-1.5 text-left">Type</th>
+                  <th className="px-3 py-1.5 text-left">Recipient</th>
+                  <th className="px-3 py-1.5 text-left">Subject</th>
+                  <th className="px-3 py-1.5 text-left">Body</th>
+                </tr>
+              </thead>
+              <tbody>
+                {communications.map((c) => (
+                  <tr key={c.id} className="border-t border-gray-800/60 hover:bg-gray-800/30">
+                    <td className="px-3 py-1 text-gray-500 whitespace-nowrap">
+                      {fmtTime(c.sentAt)}
+                    </td>
+                    <td className="px-3 py-1">
+                      <span
+                        className={`inline-block px-1.5 py-0.5 rounded-full border text-[10px] ${COMMUNICATION_ACCENT.badge}`}
+                      >
+                        {c.commType ?? c.channel}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1 text-gray-400 whitespace-nowrap">{c.recipient}</td>
+                    <td className="px-3 py-1 text-gray-200 max-w-[280px]">
+                      <ExpandableCell text={c.subject} />
+                    </td>
+                    <td className="px-3 py-1 text-gray-400 max-w-[320px]">
+                      {c.body ? (
+                        <ExpandableCell text={c.body} />
+                      ) : (
+                        <span className="text-gray-700">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function StateMachinesTab({ trace }: { trace: OrderTrace }) {
   const [expandAll, setExpandAll] = useState(false);
   const [full, setFull] = useState(false);
@@ -981,6 +1076,9 @@ function StateMachinesTab({ trace }: { trace: OrderTrace }) {
         nodes={trace.nodes}
         forceOpen={expandAll}
       />
+
+      {/* Customer communications — chronological record of everything the customer was told */}
+      <CommunicationsSection communications={trace.communications ?? []} forceOpen={expandAll} />
 
       {/* Table toolbar — controls apply to every state machine's transitions at once */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-700 bg-gray-800/30">
