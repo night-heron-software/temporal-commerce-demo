@@ -12,7 +12,11 @@ async function start(
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
-    activities: { ...createOmsActivities(), ...transitionRecorderActivities, ...projectionCompletionActivities },
+    activities: {
+      ...createOmsActivities(),
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     taskQueue: OMS_TASK_QUEUE,
     ...otelConfig,
   });

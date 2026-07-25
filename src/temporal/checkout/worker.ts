@@ -16,7 +16,11 @@ async function start(
   const worker = await Worker.create({
     connection,
     workflowsPath: require.resolve('./workflows'),
-    activities: { ...activities, ...transitionRecorderActivities, ...projectionCompletionActivities },
+    activities: {
+      ...activities,
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     taskQueue: CHECKOUT_TASK_QUEUE,
     ...otelConfig,
   });

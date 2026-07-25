@@ -17,7 +17,11 @@ export default async function inventoryWorker(
     namespace: 'default',
     taskQueue: INVENTORY_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
-    activities: { ...activities, ...transitionRecorderActivities, ...projectionCompletionActivities },
+    activities: {
+      ...activities,
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     ...otelConfig,
   });
 

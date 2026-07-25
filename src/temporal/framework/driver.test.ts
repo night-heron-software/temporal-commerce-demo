@@ -330,10 +330,13 @@ describe('runStateMachine — projection completion at close', () => {
   });
 
   it('continue-as-new does not mark (the workflow is not closing)', async () => {
-    const config = makeConfig(async (ctx) => ({ context: { count: ctx.count + 1 }, next: 'live' }), {
-      continueAsNewThreshold: 2,
-      serializeForContinueAsNew: serialize as Any,
-    });
+    const config = makeConfig(
+      async (ctx) => ({ context: { count: ctx.count + 1 }, next: 'live' }),
+      {
+        continueAsNewThreshold: 2,
+        serializeForContinueAsNew: serialize as Any,
+      },
+    );
 
     await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toBeInstanceOf(
       ContinueAsNewError,

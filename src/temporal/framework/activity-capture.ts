@@ -73,7 +73,11 @@ function capValue(value: unknown): unknown {
 }
 
 function capture<T>(activityType: string, args: unknown, run: () => Promise<T>): Promise<T> {
-  if (!activeBucket || activityType === RECORDER_ACTIVITY || activityType === PROJECTION_MARK_ACTIVITY)
+  if (
+    !activeBucket ||
+    activityType === RECORDER_ACTIVITY ||
+    activityType === PROJECTION_MARK_ACTIVITY
+  )
     return run();
   const call: ActivityCall = { name: activityType, args: capValue(args) };
   activeBucket.push(call);

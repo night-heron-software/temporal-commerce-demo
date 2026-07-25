@@ -24,7 +24,11 @@ export default async function identityWorker(
     connection,
     namespace: 'default',
     taskQueue: IDENTITY_TASK_QUEUE,
-    activities: { ...activities, ...transitionRecorderActivities, ...projectionCompletionActivities },
+    activities: {
+      ...activities,
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     ...otelConfig,
   });
 

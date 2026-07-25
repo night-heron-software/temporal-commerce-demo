@@ -15,7 +15,11 @@ export default async function start(
     namespace: 'default',
     taskQueue: FULFILLMENT_TASK_QUEUE,
     workflowsPath: require.resolve('./workflows'),
-    activities: { ...createFulfillmentActivities(), ...transitionRecorderActivities, ...projectionCompletionActivities },
+    activities: {
+      ...createFulfillmentActivities(),
+      ...transitionRecorderActivities,
+      ...projectionCompletionActivities,
+    },
     ...otelConfig,
   });
 
