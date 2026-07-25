@@ -224,7 +224,9 @@ export async function fulfillerOrderWorkflow(
       await notifyParent(finalCtx.so, finalCtx.orderId);
     },
     // Shipments only: the fulfiller_orders doc is owned (and re-indexed after this child
-    // closes) by the OMS workflow, which marks it at its own close.
+    // closes) by the OMS workflow. Its lifecycle is stamped by buildFulfillerOrderDocument
+    // the moment the SO status is terminal (OMS runs ~30 days — its close-mark is only
+    // the backstop for SOs that never reached a terminal status).
     projections: {
       refs: (finalCtx) =>
         (finalCtx.so.shipments ?? []).map((s) => ({

@@ -218,8 +218,10 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         await indexFulfillerOrder(buildFulfillerOrderDocument(so, input.order.correlationId));
       }
     },
-    // OMS is the sole writer of both indices and re-indexes fulfiller orders after the
-    // child fulfiller-order workflows close, so the mark must come from OMS's own close.
+    // OMS is the sole writer of both indices. Terminal fulfiller_orders docs are already
+    // lifecycle-stamped at write time by buildFulfillerOrderDocument (the child closes
+    // long before OMS does); this close-mark is the orders doc plus a backstop for any
+    // SO that never reached a terminal status.
     projections: {
       refs: (finalCtx) => [
         { index: ES_INDICES.orders, id: input.order.orderId },

@@ -73,4 +73,28 @@ describe('buildFulfillerOrderDocument', () => {
     expect(doc.fulfillerOrderId).toBe('fo-1');
     expect(doc.orderId).toBe('o-1');
   });
+
+  it('leaves non-terminal fulfiller orders live (no lifecycle fields)', () => {
+    const doc = buildFulfillerOrderDocument(fulfillerOrder, order.correlationId);
+    expect(doc.workflowStatus).toBeUndefined();
+    expect(doc.workflowOutcome).toBeUndefined();
+    expect(doc.workflowClosedAt).toBeUndefined();
+  });
+
+  it('stamps lifecycle fields at write time for terminal statuses (the owning child closed)', () => {
+    const delivered = buildFulfillerOrderDocument(
+      { ...fulfillerOrder, status: 'delivered' },
+      order.correlationId,
+    );
+    expect(delivered.workflowStatus).toBe('completed');
+    expect(delivered.workflowOutcome).toBe('completed');
+    expect(delivered.workflowClosedAt).toBe(fulfillerOrder.updatedAt);
+
+    const rejected = buildFulfillerOrderDocument(
+      { ...fulfillerOrder, status: 'rejected' },
+      order.correlationId,
+    );
+    expect(rejected.workflowStatus).toBe('completed');
+    expect(rejected.workflowOutcome).toBe('completed');
+  });
 });
