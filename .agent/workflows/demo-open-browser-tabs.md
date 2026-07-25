@@ -1,15 +1,25 @@
 ---
-description: Open all temporal-commerce-demo app and infrastructure URLs in the browser
+description: Open missing temporal-commerce-demo app and infrastructure URLs in the browser
 ---
 
 # Open Demo Browser Tabs
 
-Open all relevant URLs for the temporal-commerce-demo local development environment in the
-Antigravity browser (using the `browser_subagent` tool, not the system `open` command).
+Open standard application and infrastructure URLs for the `temporal-commerce-demo` local development environment in the Antigravity browser (using the `browser_subagent` tool). Only tabs that are not already open will be opened.
+
+## Target URLs
+
+| Tab | URL | Notes |
+| --- | --- | --- |
+| Storefront | `http://localhost:3000/shop` | Shopper catalog storefront |
+| Admin Panel | `http://localhost:3000/admin` | Merchant order & catalog management |
+| Temporal UI | `http://localhost:8233` | Temporal workflow & execution web UI |
+| Jaeger UI | `http://localhost:16686` | OpenTelemetry distributed tracing (if OTEL enabled) |
+| Prometheus | `http://localhost:9090` | Metrics & monitoring (if OTEL enabled) |
+| Grafana | `http://localhost:3200` | Dashboards (admin/admin, if OTEL enabled) |
 
 ## Steps
 
-### 1. Check OTEL
+### 1. Check OTEL Status
 
 // turbo
 
@@ -17,30 +27,24 @@ Antigravity browser (using the `browser_subagent` tool, not the system `open` co
 grep -q "^OTEL_ENABLED=true" .env.local 2>/dev/null && echo "otel=true" || echo "otel=false"
 ```
 
-### 2. Open URLs in the Antigravity browser
+### 2. Inspect Currently Open Tabs
 
-Use the `browser_subagent` tool to open each URL as a new tab. Open the following tabs in order:
+Check the active Browser State / open pages in context to identify which of the target URLs (or host:port endpoints) are already open.
 
-1. `http://localhost:3000/shop` — Storefront
-2. `http://localhost:3000/admin` — Admin Panel
-3. `http://localhost:8233` — Temporal UI
+### 3. Open Missing URLs in the Antigravity Browser
 
-If the OTEL check above returned `otel=true`, also open:
+Use the `browser_subagent` tool to open **only** the target URLs that are **not currently open**:
 
+Target set:
+1. `http://localhost:3000/shop` — Storefront (check if `http://localhost:3000` or `/shop` open)
+2. `http://localhost:3000/admin` — Admin Panel (check if `http://localhost:3000/admin` or `/dev` open)
+3. `http://localhost:8233` — Temporal UI (check if `http://localhost:8233` open)
+
+If OTEL is enabled (`otel=true`), also check:
 4. `http://localhost:16686` — Jaeger UI
 5. `http://localhost:9090` — Prometheus
 6. `http://localhost:3200` — Grafana (admin/admin)
 
-For each URL, instruct the subagent to navigate to the URL and confirm the page loaded (title
-visible or any content rendered). Return a summary of which pages loaded successfully.
+Skip any tab that is already open. For each missing URL, open a new tab, navigate to the URL, and confirm the page renders. Return a summary showing which tabs were already open and which new tabs were opened.
 
-## URL Reference
 
-| Service | URL |
-| --- | --- |
-| Storefront | http://localhost:3000/shop |
-| Admin Panel | http://localhost:3000/admin |
-| Temporal UI | http://localhost:8233 |
-| Jaeger UI | http://localhost:16686 |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3200 (admin/admin) |
