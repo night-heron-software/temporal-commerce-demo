@@ -270,6 +270,12 @@ export interface CartItemDocument {
 
 export interface CartDocument {
   cartId: string;
+  /**
+   * Correlation ID (ADR-0011) — joinable across all order-flow indices. Optional:
+   * docs indexed before the carts projection carried it lack the field entirely;
+   * readers fall back to cartId.
+   */
+  correlationId?: string;
   email?: string;
   userId?: string;
   items: CartItemDocument[];

@@ -277,10 +277,13 @@ export default function AdminCartsPage() {
                 </a>
               </button>
 
-              {/* cartId as a stand-in corr chip: the carts projection doesn't carry the
-                  journey correlationId yet (backlog) — since #33 they are distinct UUIDs. */}
+              {/* The journey correlationId from the carts projection; docs indexed before
+                  the projection carried it fall back to the cartId stand-in. */}
               <div className="px-5 pb-2 -mt-1 pl-14">
-                <EntityIds correlationId={cart.cartId} orderId={cart.orderId} />
+                <EntityIds
+                  correlationId={cart.correlationId ?? cart.cartId}
+                  orderId={cart.orderId}
+                />
               </div>
 
               {/* Expanded Details */}

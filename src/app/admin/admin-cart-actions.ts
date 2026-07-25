@@ -21,6 +21,8 @@ export type ActionResult<T> = { success: true; data: T } | { success: false; err
 
 export interface CartSummary {
   cartId: string;
+  /** Journey correlationId (ADR-0011) from the ES doc; undefined for legacy docs. */
+  correlationId?: string;
   workflowId: string;
   status: string;
   itemCount: number;
@@ -145,6 +147,7 @@ export async function searchCarts({
           const workflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', doc.cartId);
           const fromDoc: CartSummary = {
             cartId: doc.cartId,
+            correlationId: doc.correlationId,
             workflowId,
             status: doc.status,
             itemCount: doc.itemCount,
@@ -155,7 +158,10 @@ export async function searchCarts({
             updatedAt: doc.updatedAt,
           };
           if (!IN_FLIGHT_STATUSES.includes(doc.status)) return fromDoc;
-          return (await enrichFromWorkflow(client, workflowId)) ?? fromDoc;
+          // Live-workflow enrichment refreshes cart state, but the correlationId only
+          // lives on the ES doc (getCartQuery returns CartDetails, which lacks it).
+          const live = await enrichFromWorkflow(client, workflowId);
+          return live ? { ...live, correlationId: doc.correlationId } : fromDoc;
         }),
       )
     ).filter((c): c is CartSummary => c !== null);

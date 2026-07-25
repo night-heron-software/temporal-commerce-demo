@@ -8,6 +8,7 @@ import {
   InventoryContentionError,
 } from '../inventory/db/inventory-command-repository';
 import { buildReservationId } from '../contracts/inventory';
+import { currentCorrelationId } from '../../lib/correlation-context';
 import { executeCql } from '../../lib';
 import { cassandraTypes as types } from '../../lib';
 import { getElasticsearchClient } from '../../lib';
@@ -154,7 +155,10 @@ export async function indexCart(doc: Elasticsearch.CartDocument): Promise<void> 
   await client.index({
     index: ES_INDICES.carts,
     id: doc.cartId,
-    document: doc,
+    // The workflow-side builder only has the cart linkage; this activity carries the
+    // journey's true correlationId ambiently (ADR-0011) — the builder value is the
+    // fallback for legacy untagged workflows (same pattern as indexFulfillment).
+    document: { ...doc, correlationId: currentCorrelationId() ?? doc.correlationId },
   });
 }
 
