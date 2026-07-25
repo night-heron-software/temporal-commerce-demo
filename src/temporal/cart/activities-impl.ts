@@ -98,6 +98,9 @@ export async function reserveCartItem(
           document: {
             reservationId,
             cartId,
+            // The journey correlationId (ADR-0011), carried ambiently from the cart
+            // workflow; cartId fallback mirrors the legacy correlationId-was-cartId era.
+            correlationId: currentCorrelationId() ?? cartId,
             variantId,
             quantity,
             status: 'TEMPORARY',
