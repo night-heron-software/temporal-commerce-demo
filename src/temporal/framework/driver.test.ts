@@ -39,11 +39,18 @@ vi.mock('@temporalio/workflow', () => ({
   setHandler: (def: unknown, fn: (...a: unknown[]) => void) => {
     handlers.set(def, fn);
   },
-  condition: async (pred: () => boolean) => {
-    for (let i = 0; i < 100_000; i++) {
+  condition: async (pred: () => boolean, timeout?: unknown) => {
+    // Timed condition (the driver's state-input wait): a briefly-unsatisfied predicate
+    // is a timeout, resolving false like the real API. The budget is deliberately small
+    // so a "waiting" state times out before concurrent untimed conditions (the
+    // recorder's flusher loop) exhaust their own safety budget.
+    const budget = timeout !== undefined ? 100 : 100_000;
+    for (let i = 0; i < budget; i++) {
       if (pred()) return true;
       await Promise.resolve();
     }
+    if (timeout !== undefined) return false;
+    // Untimed conditions (update exchanges) hanging forever is a test bug.
     throw new Error('test condition never satisfied');
   },
   continueAsNew: (input: unknown) => {
@@ -191,11 +198,12 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
     await runStateMachine(config, { count: 0 }, [], []);
 
     const records = persistedBatches.flat();
-    // ∅ → a (start), a → b, b → __terminal:done
+    // ∅ → a (start), a → b, b → __terminal:done. Transitional states advance on their
+    // own — recorded 'automatic', never 'timeout' (nothing elapsed).
     expect(records.map((r) => [r.fromState, r.toState, r.triggerKind])).toEqual([
       ['', 'a', 'start'],
-      ['a', 'b', 'timeout'],
-      ['b', '__terminal:done', 'timeout'],
+      ['a', 'b', 'automatic'],
+      ['b', '__terminal:done', 'automatic'],
     ]);
     // Tenant/correlation resolved from the mocked Search Attributes.
     expect(records[0]).toMatchObject({
@@ -208,6 +216,27 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
     expect(records.map((r) => r.seq)).toEqual([0, 1, 2]);
     // Full JSON snapshot of the context stored per transition.
     expect(JSON.parse(records[0].contextSnapshot as string)).toEqual({ count: 0 });
+  });
+
+  it("records a genuine elapsed wait as 'timeout' (distinct from transitional 'automatic')", async () => {
+    const config: StateMachineConfig<RState, never, Ctx, void> = {
+      states: {
+        // Waits for input that never arrives — the timer elapses.
+        a: {
+          timeout: '1 second',
+          fn: async (ctx: Ctx) => ({ context: ctx, next: '__terminal:done' }),
+        },
+      } as Any,
+      initialState: 'a',
+    };
+
+    await runStateMachine(config, { count: 0 }, [], []);
+
+    const records = persistedBatches.flat();
+    expect(records.map((r) => [r.fromState, r.toState, r.triggerKind])).toEqual([
+      ['', 'a', 'start'],
+      ['a', '__terminal:done', 'timeout'],
+    ]);
   });
 
   it('is a no-op when disabled', async () => {

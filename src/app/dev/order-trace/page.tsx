@@ -400,6 +400,9 @@ const TRIGGER_STYLE: Record<string, { dot: string; tag: string }> = {
   update: { dot: 'bg-blue-400', tag: 'text-blue-300' },
   signal: { dot: 'bg-amber-400', tag: 'text-amber-300' },
   timeout: { dot: 'bg-cyan-400', tag: 'text-cyan-300' },
+  // Transitional states advancing on their own (recorded 'timeout' before the driver
+  // distinguished them — old rows keep the cyan badge).
+  automatic: { dot: 'bg-emerald-400', tag: 'text-emerald-300' },
 };
 
 const CHANGE_STYLE: Record<SnapshotChange['kind'], string> = {

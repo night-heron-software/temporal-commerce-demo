@@ -132,7 +132,10 @@ export interface StateMachineConfig<
   onTransition?: (
     from: TState,
     to: TState | `__terminal:${string}`,
-    event: TEvent | 'timeout' | 'signal',
+    // 'automatic' = a transitional state advancing on its own; 'timeout' = a waiting
+    // state's timer actually elapsed. Distinct so persisted transitions (ADR-0010)
+    // and the order-trace display don't misreport self-advancement as a timeout.
+    event: TEvent | 'timeout' | 'signal' | 'automatic',
     ctx: TContext,
     /** Deterministic ISO event-time of the transition — use this instead of reading the clock. */
     at: string,
@@ -174,9 +177,9 @@ export interface ProjectionCompletionRef {
 /** How the workflow closed, as recorded on its projection docs. */
 export type ProjectionWorkflowOutcome = 'completed' | 'canceled' | 'failed';
 
-/** What drove a transition. */
+/** What drove a transition. 'automatic' = a transitional state advancing by design. */
 export interface TransitionTrigger {
-  kind: 'start' | 'signal' | 'update' | 'timeout';
+  kind: 'start' | 'signal' | 'update' | 'timeout' | 'automatic';
   /** The update/signal event `type`, when the command carries one. */
   name?: string;
 }

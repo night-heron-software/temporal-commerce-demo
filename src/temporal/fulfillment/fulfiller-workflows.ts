@@ -149,7 +149,7 @@ export async function fulfillerOrderWorkflow(
     onTransition: async (
       from: FulfillerOrderStateName,
       to: FulfillerOrderStateName | `__terminal:${string}`,
-      event: 'timeout' | 'signal',
+      event: 'timeout' | 'signal' | 'automatic',
       currentCtx: FulfillerOrderWorkflowContext,
     ) => {
       await notifyParent(currentCtx.so, currentCtx.orderId);

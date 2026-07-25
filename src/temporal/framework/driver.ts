@@ -206,11 +206,14 @@ export async function runStateMachine<
       // 3. Wait for input (update, signal, or timeout)
       let input: StateInput<TEvent, TSignal>;
       let activeExchange: UpdateExchange<TEvent, TResponse> | null = null;
-      let inputEventDesc: TEvent | 'timeout' | 'signal';
+      let inputEventDesc: TEvent | 'timeout' | 'signal' | 'automatic';
 
       if (stateConfig.transitional) {
+        // Transitional states never wait: the synthesized timeout-shaped input keeps the
+        // state-function contract uniform, but the transition is recorded as 'automatic' —
+        // nothing timed out, the state advances by design.
         input = { kind: 'timeout', timestamp: new Date().toISOString() };
-        inputEventDesc = 'timeout';
+        inputEventDesc = 'automatic';
       } else {
         const timeout = stateConfig.timeout ?? '1 millisecond';
         const woke = await condition(
@@ -307,7 +310,9 @@ export async function runStateMachine<
         recorder.record({
           from: previousStateName,
           to: output.next,
-          trigger: describeTrigger(input),
+          // Transitional states get a timeout-SHAPED input (uniform state-fn contract)
+          // but nothing elapsed — record 'automatic' so the trace tells the truth.
+          trigger: stateConfig.transitional ? { kind: 'automatic' } : describeTrigger(input),
           triggerPayload: triggerPayload(input),
           context: ctx,
           at: input.timestamp,
