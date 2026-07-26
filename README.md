@@ -12,7 +12,7 @@ Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasti
 
 ![Order Trace tool showing one order's journey across five parallel workflows](docs/images/order-trace.png)
 
-*The built-in Order Trace tool: one order's full cross-domain lifecycle — cart → checkout → OMS → fulfillment → fulfiller order — reconstructed from workflow state transitions recorded to Cassandra.*
+_The built-in Order Trace tool: one order's full cross-domain lifecycle — cart → checkout → OMS → fulfillment → fulfiller order — reconstructed from workflow state transitions recorded to Cassandra._
 
 > **Note:** This demo is derived from a much more comprehensive e-commerce platform currently under active development. It is a standalone extraction designed to showcase Temporal patterns without the full platform's multi-tenant, multi-supplier, and plugin architecture.
 
@@ -25,29 +25,34 @@ Every e-commerce system is a distributed state machine. The traditional approach
 - **No message queue** — workflow signals replace all async messaging.
 - **No cron jobs** — scheduled behavior is a workflow timer: a cart's 30-day expiry and a checkout's 1-hour timeout are declarations in the state machine, not jobs scanning for stale rows.
 - **No dead-letter queues** — Temporal retry policies and activity timeouts absorb transient failures.
-- **No saga orchestrator** — the checkout workflow *is* the saga.
+- **No saga orchestrator** — the checkout workflow _is_ the saga.
 - **No distributed transaction coordinator** — `updateWithStart` gives atomic create-or-update.
 
-**Scale:** ~25,700 LOC · 6 Temporal workflow domains · 260 products · 10,411 variants
+**Scale:** ~30,700 LOC (non-test TypeScript) · 6 Temporal domains · 260 products · 10,411 variants
 
 ## What This Demonstrates
 
 - **Workflows as state machines** — domain workflows are authored as **prepare → decide → finalize** loops around pure, unit-tested deciders (`src/temporal/framework`).
-- **Cross-domain correlation** — every workflow carries a parseable `demo.{domain}.{entityId}` ID plus correlation Search Attributes, so one Temporal visibility query (`CorrelationId = '<cartId>'`) returns the whole cart → checkout → order → fulfillment journey.
+- **Cross-domain correlation** — every workflow carries a parseable `demo.{domain}.{entityId}` ID plus correlation Search Attributes keyed by a journey UUID minted at cart creation, so one Temporal visibility query (`CorrelationId = '<correlationId>'`) returns the whole cart → checkout → order → fulfillment journey.
+- **Ambient activity correlation** — worker interceptors thread the correlationId to every activity via `AsyncLocalStorage`, so projections, journal writes, and log lines carry the journey key without hand-passing it.
 - **Transition recording** — every state transition is snapshotted to Cassandra with full context, powering the Order Trace dev tool shown above.
+- **Correlation-keyed inventory journal** — every inventory mutation (including expiry sweeps and drift corrections) is journaled to an append-only Cassandra table partitioned by the journey correlationId.
+- **Projection lifecycle stamping** — ES documents are marked `workflowStatus: 'completed'` when their owning workflow closes, and the admin Explorer filters live vs completed.
+- **Customer communications as domain objects** — every email sent is persisted to Cassandra and Elasticsearch and surfaced on the order trace, admin order detail, and shopper order history.
+- **Pay-after-expiry handled correctly** — a payment submitted after the reservation TTL triggers a CAS-guarded resurrect-then-confirm; if stock is gone the payment is refunded and the submit fails cleanly before any order exists.
 - **Diagrams generated from source** — every state machine's diagram is auto-generated: see the [State Machine Reference](docs/reference/state-machine-diagrams.md) (Mermaid diagrams, per-state trigger tables, and the cross-domain orchestration graph), regenerated with `npm run docs:diagrams` and kept fresh by CI.
 - **Three-level testing without Docker** — pure decider unit tests, workflow tests on Temporal's time-skipping test server, and a full cart→checkout→OMS→fulfillment e2e (`npm test` needs no containers).
 
 ### Temporal Workflows
 
-| Workflow | Purpose | Key Patterns |
-| ---------- | --------- | -------------- |
-| **Cart** | Manages shopping cart state as a long-running workflow | `updateWithStart`, Query/Update handlers, entity lifecycle |
-| **Checkout** | Orchestrates shipping → payment → order submission | State machine, step validation, `continueAsNew` |
-| **Order** | Processes order from placement through fulfillment | Fulfiller routing, assignment tracking, status projections |
-| **Fulfillment** | Simulates fulfiller order submission and shipping | Timer-based simulation, shipment tracking |
-| **Inventory** | CQRS inventory management with reservations | Write-side mutations, read-side projections |
-| **Identity** | Email-based shopper auth and address persistence | Cookie sessions, auto-create accounts, address pre-fill |
+| Workflow        | Purpose                                                | Key Patterns                                                                |
+| --------------- | ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| **Cart**        | Manages shopping cart state as a long-running workflow | `updateWithStart`, Query/Update handlers, entity lifecycle, `continueAsNew` |
+| **Checkout**    | Orchestrates shipping → payment → order submission     | State machine, step validation, update handlers as events                   |
+| **Order**       | Processes order from placement through fulfillment     | Fulfiller routing, assignment tracking, status projections                  |
+| **Fulfillment** | Simulates fulfiller order submission and shipping      | Timer-based simulation, shipment tracking                                   |
+| **Inventory**   | CQRS inventory management with reservations            | Singleton service workflow, `continueAsNew`, read-side projections          |
+| **Identity**    | Email-based shopper auth and address persistence       | Standalone activities (no wrapper workflows, ADR-0006), cookie sessions     |
 
 ## Architecture
 
@@ -72,15 +77,15 @@ graph TB
 
 ## See It in Action
 
-| Storefront | Checkout |
-| --- | --- |
+| Storefront                                                                          | Checkout                                                                       |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | ![Storefront catalog with faceted Elasticsearch search](docs/images/storefront.png) | ![Multi-step checkout backed by a Temporal workflow](docs/images/checkout.png) |
 
-*Left: the storefront catalog — faceted search served by Elasticsearch. Right: the multi-step checkout; every step is a Temporal Update with validation guards enforcing the state machine.*
+_Left: the storefront catalog — faceted search served by Elasticsearch. Right: the multi-step checkout; every step is a Temporal Update with validation guards enforcing the state machine._
 
 ![Temporal UI listing all five workflows of one order via a CorrelationId query](docs/images/temporal-ui.png)
 
-*One visibility query in the Temporal UI (`CorrelationId = "<cartId>"`) returns the entire journey: cart, checkout, order, fulfillment, and fulfiller-order workflows.*
+_One visibility query in the Temporal UI (`CorrelationId = "<correlationId>"` — the journey UUID minted at cart creation) returns the entire journey: cart, checkout, order, fulfillment, and fulfiller-order workflows._
 
 ## Quick Start
 
@@ -124,49 +129,57 @@ This starts the Next.js dev server and Temporal workers concurrently.
 
 ## NPM Scripts
 
-| Script | Description |
-| -------- | ------------- |
-| `npm run dev:start-all` | Start infrastructure (Docker) + storefront + workers |
-| `npm run dev:stop-all` | Stop everything (storefront, workers + infrastructure) |
-| `npm run dev:up` | Start storefront app (Next.js) + Temporal workers |
-| `npm run dev:down` | Stop storefront app and Temporal worker processes |
-| `npm run dev:init` | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
-| `npm run dev:status` | Check status of all backend databases, services, and apps |
-| `npm run dev:storefront` | Start storefront app only |
-| `npm run dev:worker` | Start Temporal workers only |
-| `npm run dev:seed` | Populate catalog and inventory data manually |
-| `npm run db:init` | Apply Cassandra schema |
-| `npm run db:verify` | Verify Cassandra schema consistency |
-| `npm run infra:up` | Start Docker database infrastructure only |
-| `npm run infra:up:obs` | Start infrastructure + observability (Jaeger, Prometheus, Grafana) |
-| `npm run infra:down` | Stop Docker containers |
-| `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
-| `npm run infra:ps` | List running Docker containers |
-| `npm test` | Run the vitest unit/workflow test suite (no Docker required) |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run docs:diagrams` | Regenerate the [State Machine Reference](docs/reference/state-machine-diagrams.md) from source |
+| Script                        | Description                                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| `npm run dev:start-all`       | Start infrastructure (Docker) + storefront + workers                                           |
+| `npm run dev:stop-all`        | Stop everything (storefront, workers + infrastructure)                                         |
+| `npm run dev:up`              | Start storefront app (Next.js) + Temporal workers                                              |
+| `npm run dev:down`            | Stop storefront app and Temporal worker processes                                              |
+| `npm run dev:init`            | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app                          |
+| `npm run dev:status`          | Check status of all backend databases, services, and apps                                      |
+| `npm run dev:storefront`      | Start storefront app only                                                                      |
+| `npm run dev:worker`          | Start Temporal workers only                                                                    |
+| `npm run dev:seed`            | Populate catalog and inventory data manually                                                   |
+| `npm run db:init`             | Apply Cassandra schema                                                                         |
+| `npm run db:verify`           | Verify Cassandra schema consistency                                                            |
+| `npm run infra:up`            | Start Docker database infrastructure only                                                      |
+| `npm run infra:up:obs`        | Start infrastructure + observability (Jaeger, Prometheus, Grafana)                             |
+| `npm run infra:down`          | Stop Docker containers                                                                         |
+| `npm run infra:clean`         | Stop Docker containers + wipe all data volumes                                                 |
+| `npm run infra:ps`            | List running Docker containers                                                                 |
+| `npm run infra:ready`         | Ensure Docker Desktop is running (starts it if not)                                            |
+| `npm test`                    | Run the vitest unit/workflow test suite (no Docker required)                                   |
+| `npm run test:watch`          | Run tests in watch mode                                                                        |
+| `npm run typecheck`           | TypeScript type checking                                                                       |
+| `npm run lint`                | ESLint over the codebase                                                                       |
+| `npm run format:check`        | Prettier check (CI gate; `npm run format` writes)                                              |
+| `npm run docs:diagrams`       | Regenerate the [State Machine Reference](docs/reference/state-machine-diagrams.md) from source |
+| `npm run docs:diagrams:check` | Fail if the generated diagrams are stale (CI gate)                                             |
+| `npm run dev:validate`        | End-to-end system validation script                                                            |
+| `npm run dev:logs`            | Tail today's per-process log files                                                             |
 
 See [Getting Started](GETTING_STARTED.md) for detailed setup instructions.
 
 ## Documentation
 
-| Document | What's Inside |
-| --- | --- |
-| [Getting Started](GETTING_STARTED.md) | Clone-to-running setup, including Apple Silicon troubleshooting |
-| [Project Description](docs/project-description.md) | The full architecture narrative: why Temporal, domain walkthroughs, diagrams |
-| [Developer Guide](docs/developer-guide.md) | Day-to-day development: conventions, testing, debugging |
-| [Temporal Lessons Learned](docs/temporal-lessons-learned.md) | 26 practical lessons from building on the Temporal TypeScript SDK |
-| [State Machine Reference](docs/reference/state-machine-diagrams.md) | Auto-generated Mermaid diagrams + trigger tables for every workflow |
-| [Demo Instructions](docs/demo-instructions.md) | Script for a 4–5 minute live demonstration |
-| [Deployment Options](docs/cloud-deployment.md) | Survey of hosted options, with a stated bias toward serverless push and away from Kubernetes *(exploratory)* |
-| [Testing Without Containers](docs/testing-guide.md) | The three-level test pyramid — full suite, no Docker |
-| [Data Architecture for Scale](docs/data-architecture.md) | CQRS, Cassandra write side, Elasticsearch as the app's query API |
-| [Worker Topology](docs/worker-scaling.md) | From one dev process to per-domain production scaling |
-| [AI-First Development](docs/ai-development-guide.md) | The agent operating layer, runnable workflows, and gates |
-| [Google App Engine: Scalability by Constraint](docs/google-app-engine-paved-path.md) | Research note: how GAE's paved path to scaling shaped this architecture |
-| [Autoscaling by Push and by Pull](docs/push-vs-pull-autoscaling.md) | Research note: GAE/Cloud Run push scaling vs Temporal's pull model — stickiness, scale-to-zero, Serverless Workers |
-| [Glossary](docs/glossary.md) | Terms of art — fulfiller vs fulfillment, command vs fact, reservation lifecycle |
-| [ADR index](docs/adr/README.md) | Architecture decision records the source code cites by number |
+| Document                                                                             | What's Inside                                                                                                      |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| [Getting Started](GETTING_STARTED.md)                                                | Clone-to-running setup, including Apple Silicon troubleshooting                                                    |
+| [Project Description](docs/project-description.md)                                   | The full architecture narrative: why Temporal, domain walkthroughs, diagrams                                       |
+| [Developer Guide](docs/developer-guide.md)                                           | Day-to-day development: conventions, testing, debugging                                                            |
+| [Temporal Lessons Learned](docs/temporal-lessons-learned.md)                         | 26 practical lessons from building on the Temporal TypeScript SDK                                                  |
+| [State Machine Reference](docs/reference/state-machine-diagrams.md)                  | Auto-generated Mermaid diagrams + trigger tables for every workflow                                                |
+| [Demo Instructions](docs/demo-instructions.md)                                       | Script for a 4–5 minute live demonstration                                                                         |
+| [Deployment Options](docs/cloud-deployment.md)                                       | Survey of hosted options, with a stated bias toward serverless push and away from Kubernetes _(exploratory)_       |
+| [Testing Without Containers](docs/testing-guide.md)                                  | The three-level test pyramid — full suite, no Docker                                                               |
+| [Observability Guide](docs/observability-guide.md)                                   | OpenTelemetry tracing, worker SDK metrics, and the logging fan-out                                                 |
+| [Data Architecture for Scale](docs/data-architecture.md)                             | CQRS, Cassandra write side, Elasticsearch as the app's query API                                                   |
+| [Worker Topology](docs/worker-scaling.md)                                            | From one dev process to per-domain production scaling                                                              |
+| [AI-First Development](docs/ai-development-guide.md)                                 | The agent operating layer, runnable workflows, and gates                                                           |
+| [Google App Engine: Scalability by Constraint](docs/google-app-engine-paved-path.md) | Research note: how GAE's paved path to scaling shaped this architecture                                            |
+| [Autoscaling by Push and by Pull](docs/push-vs-pull-autoscaling.md)                  | Research note: GAE/Cloud Run push scaling vs Temporal's pull model — stickiness, scale-to-zero, Serverless Workers |
+| [Glossary](docs/glossary.md)                                                         | Terms of art — fulfiller vs fulfillment, command vs fact, reservation lifecycle                                    |
+| [ADR index](docs/adr/README.md)                                                      | Architecture decision records the source code cites by number                                                      |
 
 ## Project Structure
 
@@ -180,8 +193,9 @@ temporal-commerce-demo/
 │   │   ├── api/
 │   │   │   ├── auth/shopper/ # Shopper auth (login, logout, me, address)
 │   │   │   ├── search/      # Product search API
-│   │   │   └── dev/         # Developer tools (ES init, reindex)
+│   │   │   └── dev/         # Developer tool APIs (ES init, reindex, order trace, logs)
 │   │   ├── admin/           # Admin dashboard
+│   │   ├── dev/             # Developer tool pages (order-trace, logs, system-errors)
 │   │   └── shop/            # Storefront pages + Server Actions
 │   │       ├── checkout/    # Multi-step checkout flow
 │   │       └── orders/      # Order lookup by email
@@ -191,6 +205,8 @@ temporal-commerce-demo/
 │   └── temporal/
 │       ├── contracts/      # Shared type definitions
 │       ├── framework/      # prepare → decide → finalize state machine kit
+│       ├── transition-recorder/ # Async state-transition audit recording
+│       ├── projection-completion/ # Lifecycle stamping of ES docs at workflow close
 │       ├── cart/           # Cart workflow + activities
 │       ├── checkout/       # Checkout workflow + activities
 │       ├── oms/            # Order management workflow
@@ -198,7 +214,7 @@ temporal-commerce-demo/
 │       ├── inventory/      # CQRS inventory workflow
 │       ├── identity/       # Shopper auth, users, API tokens, feature flags
 │       └── worker.ts       # Unified Temporal worker
-└── docker-compose.yml      # Core infrastructure (6 containers)
+└── docker-compose.yml      # Core infrastructure (6 long-running containers + 4 bootstrap sidecars)
 └── docker-compose.observability.yml  # Opt-in: Jaeger, Prometheus, Grafana
 ```
 
@@ -215,11 +231,11 @@ OTEL_ENABLED=true
 npm run infra:up:obs
 ```
 
-| Service | URL |
-| --- | --- |
-| Jaeger | [http://localhost:16686](http://localhost:16686) |
-| Prometheus | [http://localhost:9090](http://localhost:9090) |
-| Grafana | [http://localhost:3200](http://localhost:3200) (admin/admin) |
+| Service    | URL                                                          |
+| ---------- | ------------------------------------------------------------ |
+| Jaeger     | [http://localhost:16686](http://localhost:16686)             |
+| Prometheus | [http://localhost:9090](http://localhost:9090)               |
+| Grafana    | [http://localhost:3200](http://localhost:3200) (admin/admin) |
 
 ## Technology Stack
 
@@ -235,7 +251,7 @@ npm run infra:up:obs
 Deliberate simplifications that keep the focus on the Temporal patterns:
 
 - **Payments are mocked** — the payment step exercises the state machine, not a real gateway.
-- **Emails are stubbed** — order confirmation / shipping notifications are activities that log instead of send (`src/lib/email-service.ts`).
+- **Emails are simulated, not sent** — order confirmation / shipping notifications go through a single `sendEmail()` choke point (`src/lib/email-service.ts`) that persists every communication as a domain object (Cassandra + Elasticsearch, surfaced on the order trace, admin order detail, and shopper order history) but delivers nothing.
 - **The `/admin` area is intentionally unauthenticated** — shopper auth is real (bcrypt, cookie sessions, tested); admin auth is out of scope for the demo.
 - **Fulfillment is simulated** — fulfiller processing and shipping are timer-driven workflow simulations.
 

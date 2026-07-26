@@ -2,7 +2,7 @@
 
 Hard-won lessons from building a full e-commerce application on Temporal durable execution. These aren't theoretical best practices — they're patterns that emerged from debugging real workflow failures, performance bottlenecks, and architectural dead ends during the development of the Temporal Commerce Demo.
 
-> *This document was drafted with AI assistance.*
+> _This document was drafted with AI assistance._
 
 ---
 
@@ -38,7 +38,7 @@ const startOp = new WithStartWorkflowOperation('cartWorkflow', {
 });
 return await client.workflow.executeUpdateWithStart(updateDef, {
   startWorkflowOperation: startOp,
-  args: args
+  args: args,
 });
 ```
 
@@ -73,9 +73,9 @@ return state;
 ```typescript
 await continueAsNew<typeof cartWorkflow>({
   cartId,
-  initialCart: cart,         // Full cart state
+  initialCart: cart, // Full cart state
   createdAt: cart.createdAt, // Preserve original timestamp
-  updateCount: 0             // Reset counter
+  updateCount: 0, // Reset counter
 });
 ```
 
@@ -87,10 +87,10 @@ await continueAsNew<typeof cartWorkflow>({
 
 **The lesson:** There are two patterns, each with specific tradeoffs:
 
-| Pattern | Use When | Trade-off |
-| --- | --- | --- |
-| **Parent-child** with `ABANDON` | The child should survive parent destruction but you want the parent to monitor it | Parent can observe child status; child runs independently |
-| **Activity-driven spawning** | The spawned workflow is fully independent and the caller doesn't need lifecycle coupling | Maximum decoupling; no parent-child relationship in Temporal UI |
+| Pattern                         | Use When                                                                                 | Trade-off                                                       |
+| ------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| **Parent-child** with `ABANDON` | The child should survive parent destruction but you want the parent to monitor it        | Parent can observe child status; child runs independently       |
+| **Activity-driven spawning**    | The spawned workflow is fully independent and the caller doesn't need lifecycle coupling | Maximum decoupling; no parent-child relationship in Temporal UI |
 
 We use parent-child for Cart → Checkout (the cart monitors checkout status) and activity-driven for OMS → Fulfillment (fully decoupled, signals back via external workflow handle). Choosing the wrong pattern for OMS → Fulfillment initially caused lifecycle coupling issues where `continueAsNew` on the OMS would terminate the fulfillment child.
 
@@ -212,11 +212,13 @@ This is a TypeScript-specific gotcha that doesn't appear in Go or Java Temporal 
 **The problem:** In workflows representing entity state machines (like Cart, Checkout, or Fulfillment), writing custom loops with signal/update handlers, manual conditional yields (`condition()`), and complex nested transitions is error-prone. Concurrent updates can overwrite state mid-execution, causing race conditions and non-deterministic behavior.
 
 **The lesson:** Model entity workflows using a generic, declarative `runStateMachine` driver. Workflows specify a context, defined states, and transition handlers. The driver executes a single state-machine loop that:
+
 - Queues incoming updates/signals in a strict FIFO queue.
 - Dispatches inputs sequentially to state configuration functions.
 - Provides standard transition and cancellation hooks (e.g. `onTransition`, `onCancellation`, `onTerminal`).
 
 This dramatically simplifies complex domains:
+
 ```typescript
 const config = {
   states: CHECKOUT_STATES,
@@ -234,11 +236,11 @@ ctx = await runStateMachine(config, ctx, updateHandlers);
 
 **The lesson:** Temporal offers three communication primitives. Choosing the wrong one has real consequences:
 
-| Primitive | Delivery Guarantee | Response | Use Case |
-| --- | --- | --- | --- |
-| **Signal** | At-least-once, fire-and-forget | None | Status notifications, inventory change events |
-| **Update** | Exactly-once, synchronous response | Yes | Cart mutations, checkout step transitions |
-| **Query** | Read-only, no side effects | Yes | Cart state reads, checkout status |
+| Primitive  | Delivery Guarantee                 | Response | Use Case                                      |
+| ---------- | ---------------------------------- | -------- | --------------------------------------------- |
+| **Signal** | At-least-once, fire-and-forget     | None     | Status notifications, inventory change events |
+| **Update** | Exactly-once, synchronous response | Yes      | Cart mutations, checkout step transitions     |
+| **Query**  | Read-only, no side effects         | Yes      | Cart state reads, checkout status             |
 
 **Where we got this wrong initially:** Using signals for cart mutations meant the UI couldn't confirm whether the add-to-cart succeeded — it had to poll the query afterward. Switching to updates gave us synchronous return values, eliminating an entire class of race conditions in the React UI.
 
@@ -254,7 +256,8 @@ ctx = await runStateMachine(config, ctx, updateHandlers);
 export async function signalInventoryChanged(blankSkus: string[]) {
   const client = await getTemporalClient();
   try {
-    await client.workflow.getHandle('demo.inventory.service')
+    await client.workflow
+      .getHandle('demo.inventory.service')
       .signal('inventoryChanged', { blankSkus });
   } catch (e) {
     // Auto-start if not running
@@ -280,10 +283,10 @@ export async function signalInventoryChanged(blankSkus: string[]) {
 
 **The lesson:** Split every domain's activities into two files:
 
-| File | Purpose | Imported By |
-| --- | --- | --- |
-| `activities.ts` | Proxy signatures + timeout/retry config | Workflows |
-| `activities-impl.ts` | Actual implementations with I/O | Workers |
+| File                 | Purpose                                 | Imported By |
+| -------------------- | --------------------------------------- | ----------- |
+| `activities.ts`      | Proxy signatures + timeout/retry config | Workflows   |
+| `activities-impl.ts` | Actual implementations with I/O         | Workers     |
 
 Workflows import from `activities.ts`, which contains only `proxyActivities` calls. Workers register from `activities-impl.ts`, which has the real database and API calls.
 
@@ -294,10 +297,7 @@ Workflows import from `activities.ts`, which contains only `proxyActivities` cal
 **The lesson:** Temporal retries activities, but it does not provide automatic compensation. You must build the undo logic:
 
 ```typescript
-const completedBeforeTimeout = await condition(
-  () => orderComplete || checkoutCancelled,
-  '1 hour'
-);
+const completedBeforeTimeout = await condition(() => orderComplete || checkoutCancelled, '1 hour');
 
 // If checkout times out or is cancelled, release reservations
 if (!orderComplete && reservations.length > 0) {
@@ -339,7 +339,7 @@ await Promise.all([
 - `wf.sleep()` timers that already expired are **instant** during replay
 - Signal handlers that already fired are **re-delivered** from the event history
 
-The implication: workflow code must be deterministic. If you add a new `log.info()` call between two existing activity calls, existing workflows will replay correctly. But if you change the *order* of activity calls, you get a `Non-Determinism` error on replay.
+The implication: workflow code must be deterministic. If you add a new `log.info()` call between two existing activity calls, existing workflows will replay correctly. But if you change the _order_ of activity calls, you get a `Non-Determinism` error on replay.
 
 ---
 
@@ -385,16 +385,18 @@ This gives both event-driven behavior (wake up when signaled) and time-driven be
 
 **The problem:** We initially only indexed products, collections, orders, and fulfiller orders. But the admin dashboard needed visibility into carts, fulfillment status, inventory levels, and customer records — and those entities were invisible to search.
 
-**The lesson:** If a domain entity's state changes via a workflow, it should project to Elasticsearch. We ended up with 11 indices:
+**The lesson:** If a domain entity's state changes via a workflow, it should project to Elasticsearch. We ended up with 13 indices:
 
-| Index | Trigger |
-| --- | --- |
-| `products`, `collections`, `fulfillers` | Reindex API (bulk, from Cassandra) |
-| `orders`, `customers`, `fulfiller_orders` | OMS workflow activities (on every status change) |
-| `carts` | Cart workflow activities (on every mutation) |
-| `reservations` | Cart + checkout activities |
-| `inventory` | Inventory service workflow |
-| `fulfillments`, `shipments` | Fulfillment workflow activities |
+| Index                                     | Trigger                                                     |
+| ----------------------------------------- | ----------------------------------------------------------- |
+| `products`, `collections`, `fulfillers`   | Reindex API (bulk, from Cassandra)                          |
+| `orders`, `customers`, `fulfiller_orders` | OMS workflow activities (on every status change)            |
+| `carts`                                   | Cart workflow activities (on every mutation)                |
+| `reservations`                            | Cart + checkout activities                                  |
+| `inventory`                               | Inventory service workflow                                  |
+| `fulfillments`, `shipments`               | Fulfillment workflow activities                             |
+| `communications`                          | `sendEmail()` write-through (every customer email)          |
+| `system_errors`                           | Logger fan-out (`level >= 50`; own viewer, never reindexed) |
 
 **The Elasticsearch search page** (`/admin/search`) became the single pane of glass for debugging. Searching for an order ID returns results across orders, fulfiller_orders, fulfillments, customers, and inventory — showing the complete system state for that transaction.
 
@@ -411,7 +413,7 @@ const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const uuids = query.match(UUID_REGEX) || [];
 
 // Route UUIDs through keyword-only matching (zero analysis)
-const uuidClauses = uuids.flatMap(uuid => [
+const uuidClauses = uuids.flatMap((uuid) => [
   { ids: { values: [uuid] } },
   { term: { 'orderId.keyword': uuid } },
   { term: { 'cartId.keyword': uuid } },
@@ -432,23 +434,25 @@ const remainingText = query.replace(UUID_REGEX, '').trim();
 
 **How this manifests:**
 
-| Failure | Recovery |
-| --- | --- |
-| Payment fails | Checkout returns to the `payment` step with an error message |
-| Checkout times out | Reservations released, cart returns to `active` |
-| Terminal workflow | Server Action returns `null`, UI clears stale cookie |
-| Worker crash | Temporal replays from last checkpoint — zero state loss |
+| Failure            | Recovery                                                     |
+| ------------------ | ------------------------------------------------------------ |
+| Payment fails      | Checkout returns to the `payment` step with an error message |
+| Checkout times out | Reservations released, cart returns to `active`              |
+| Terminal workflow  | Server Action returns `null`, UI clears stale cookie         |
+| Worker crash       | Temporal replays from last checkpoint — zero state loss      |
 
 ```typescript
 // Server Action wrapper — never throws for terminal workflows
 try {
   return await handle.executeUpdate(updateDef, { args });
 } catch (e) {
-  if (error?.name === 'WorkflowNotFoundError' ||
-      error?.cause?.type === 'AcceptedUpdateCompletedWorkflow') {
-    return null;  // ← graceful degradation
+  if (
+    error?.name === 'WorkflowNotFoundError' ||
+    error?.cause?.type === 'AcceptedUpdateCompletedWorkflow'
+  ) {
+    return null; // ← graceful degradation
   }
-  throw e;        // ← only re-throw unexpected errors
+  throw e; // ← only re-throw unexpected errors
 }
 ```
 
@@ -462,11 +466,11 @@ try {
 
 **The lesson:** We initially considered workflow-per-entity for inventory (one workflow per SKU). With 260 products expanding to more than 10,000 variants, this would have created thousands of concurrent workflows, overwhelming the Temporal UI and creating massive `continueAsNew` overhead.
 
-| Model | Use When | Examples in This Project |
-| --- | --- | --- |
-| **Workflow-per-entity** | Low cardinality, independent lifecycles | Cart, Order, Fulfillment |
-| **Singleton service** | High cardinality, shared infrastructure | Inventory service |
-| **Sharded service** | High cardinality with natural partitions | Per-tenant inventory (future) |
+| Model                   | Use When                                 | Examples in This Project      |
+| ----------------------- | ---------------------------------------- | ----------------------------- |
+| **Workflow-per-entity** | Low cardinality, independent lifecycles  | Cart, Order, Fulfillment      |
+| **Singleton service**   | High cardinality, shared infrastructure  | Inventory service             |
+| **Sharded service**     | High cardinality with natural partitions | Per-tenant inventory (future) |
 
 The singleton inventory service workflow handles all SKUs. Write-side activities signal it with changed SKUs, and it batches projections. One workflow to monitor instead of thousands.
 
@@ -482,7 +486,7 @@ OMS Workflow ─── startChild (ABANDON) ──→ Fulfillment Workflow (inde
                                           └── signal ──→ OMS Workflow
 ```
 
-Activity-spawning is still the right tool when there should be **no parent relationship at all** — checkout → OMS uses exactly that (`workflow.start` inside an activity), because the order must not be a child of a checkout that completes seconds later. The rule of thumb: *ABANDON when you want an independent child; activity-spawn when you don't want a child at all.*
+Activity-spawning is still the right tool when there should be **no parent relationship at all** — checkout → OMS uses exactly that (`workflow.start` inside an activity), because the order must not be a child of a checkout that completes seconds later. The rule of thumb: _ABANDON when you want an independent child; activity-spawn when you don't want a child at all._
 
 ---
 
@@ -529,7 +533,7 @@ The flag check is recorded in Temporal history, so you can debug why a workflow 
 **The lesson:** The seed pipeline must create ES index mappings **before** any data ingestion:
 
 ```
-1. POST /api/dev/init/es-indices  ← Create all 11 index mappings
+1. POST /api/dev/init/es-indices  ← Create all 13 index mappings
 2. POST /api/seed-cassandra       ← Load catalog data
 3. POST /api/seed-inventory       ← Seed stock levels
 4. POST /api/dev/reindex          ← Bulk sync to ES

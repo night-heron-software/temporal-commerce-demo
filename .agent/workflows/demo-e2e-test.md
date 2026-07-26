@@ -7,6 +7,7 @@ description: Complete end-to-end test suite for local temporal-commerce-demo —
 Comprehensive testing workflow that validates the entire temporal-commerce-demo platform from static code integrity through full browser-driven checkout flows. Each phase has explicit pass/fail criteria.
 
 **Agent Instructions:**
+
 - Execute phases in order. Phases 1–3 are hard gates — a failure stops execution and reports before continuing to runtime phases.
 - Phases 4+ can tolerate individual test failures (report and continue).
 - **Before any workers are started**, kill stale worker processes:
@@ -113,14 +114,14 @@ cd /Users/jeffromine/src/portfolio/temporal-commerce-demo && npm run workers-wai
 
 All 6 core task queues must have active pollers:
 
-| Queue | Domain | Validated? |
-| --- | --- | --- |
-| `identity-queue` | Identity | ✅ |
-| `inventory-queue` | Inventory | ✅ |
-| `cart-queue` | Cart | ✅ |
-| `checkout-queue` | Checkout | ✅ |
-| `oms-queue` | OMS | ✅ |
-| `fulfillment-queue` | Fulfillment | ✅ |
+| Queue               | Domain      | Validated? |
+| ------------------- | ----------- | ---------- |
+| `identity-queue`    | Identity    | ✅         |
+| `inventory-queue`   | Inventory   | ✅         |
+| `cart-queue`        | Cart        | ✅         |
+| `checkout-queue`    | Checkout    | ✅         |
+| `oms-queue`         | OMS         | ✅         |
+| `fulfillment-queue` | Fulfillment | ✅         |
 
 - **Pass**: All 6 core queues show `✓`.
 - **Fail**: Any queue missing or timeout reached.
@@ -148,14 +149,14 @@ cd /Users/jeffromine/src/portfolio/temporal-commerce-demo && npm run db:verify
 curl -sf 'http://localhost:9200/_cat/indices?h=index&format=json' | python3 -c "
 import sys, json
 indices = {i['index'] for i in json.load(sys.stdin) if not i['index'].startswith('.')}
-required = {'products','collections','inventory','carts','orders','fulfiller_orders','fulfillments','shipments','reservations','customers'}
+required = {'products','collections','inventory','carts','orders','fulfiller_orders','fulfillments','shipments','reservations','customers','fulfillers','communications','system_errors'}
 missing = required - indices
 if missing: print(f'FAIL: Missing indices: {missing}'); sys.exit(1)
 print(f'PASS: {len(indices)} indices present, all required found')
 "
 ```
 
-- **Pass**: All 10 required indices exist.
+- **Pass**: All 13 required indices exist.
 - **Fail**: Any index missing.
 
 ### 3.3 Seed Data Verification
@@ -193,14 +194,14 @@ cd /Users/jeffromine/src/portfolio/temporal-commerce-demo && npm run dev:validat
 
 This runs `validate-system.ts`, which executes automated checks:
 
-| Check | Description |
-| --- | --- |
-| Environment Configuration | Required env vars present |
-| API Health | `GET /api/health` returns healthy |
-| Search API Endpoint | `GET /api/search?q=*` returns 200 or 404 |
-| Elasticsearch Cluster Health | `GET /_cluster/health` not red |
-| Elasticsearch Index Mapping | `GET /_mapping` contains `products` key |
-| Seed Data — Products in ES | ES products count > 0 |
+| Check                        | Description                              |
+| ---------------------------- | ---------------------------------------- |
+| Environment Configuration    | Required env vars present                |
+| API Health                   | `GET /api/health` returns healthy        |
+| Search API Endpoint          | `GET /api/search?q=*` returns 200 or 404 |
+| Elasticsearch Cluster Health | `GET /_cluster/health` not red           |
+| Elasticsearch Index Mapping  | `GET /_mapping` contains `products` key  |
+| Seed Data — Products in ES   | ES products count > 0                    |
 
 - **Pass**: All checks `[PASS]`.
 - **Fail**: Any check `[FAIL]`.
@@ -524,9 +525,17 @@ Use the Chrome DevTools MCP (browser automation) to verify the shopper-facing st
 
 1. Navigate to `http://localhost:3000/admin/search`.
 2. Verify the ES debug/search page renders.
+3. Search for the order's **correlationId** (visible on the order-trace header): verify hits
+   come back across the journey's indices (orders, carts, reservations, fulfiller_orders,
+   fulfillments, shipments, communications).
+4. Search for a **variant ID** from the ordered product: verify the product surfaces via the
+   nested-variant search.
+5. Search for the order ID and verify **communications** hits appear (order confirmation email
+   at minimum), searchable by recipient email / subject too.
 
-- **Pass**: Page renders without errors.
-- **Fail**: Crash or 404.
+- **Pass**: Page renders without errors; correlationId, variant-id, and communications
+  searches all return the expected hits.
+- **Fail**: Crash, 404, or any of the three search cases returning nothing.
 
 ### 8.5 Dev — ES Index Status
 
@@ -623,6 +632,43 @@ curl -sf http://localhost:9200/orders/_count | python3 -c "import sys,json; prin
 - **Pass**: Counts match and ≥ 1 after checkout.
 - **Fail**: Diverge or 0.
 
+### 9.6 Lifecycle Stamping at Terminal Status
+
+After the Phase 7 order reaches `delivered`:
+
+// turbo
+
+```bash
+curl -sf 'http://localhost:9200/fulfiller_orders/_search?q=workflowStatus:completed' | python3 -c "
+import sys, json
+hits = json.load(sys.stdin)['hits']['total']['value']
+print(f'PASS: {hits} terminal fulfiller_orders stamped completed' if hits >= 1 else 'FAIL: no completed-stamped fulfiller_orders')
+"
+```
+
+- **Pass**: Terminal fulfiller_orders docs carry `workflowStatus: completed` (the admin
+  Explorer's `completed` lifecycle filter shows them).
+- **Fail**: Delivered order's fulfiller_orders still read as live.
+
+### 9.7 Pay-After-Expiry Resurrect Journal (optional, ~16 min)
+
+Exercises the issue #34 fix: park a checkout at the payment step until the 15-minute
+reservation TTL passes and the sweep RELEASEs the hold (journaled under the reservation's
+stored journey key), then submit. Confirm must run resurrect-then-confirm.
+
+1. Add an item to a cart, start checkout, complete shipping, then **wait ≥ 16 minutes** at
+   payment (the singleton's 5-minute sweep must fire after the 15-minute TTL).
+2. Submit the order. If stock is still available it should succeed.
+3. Verify the journal signature for the journey (partition = the order's correlationId):
+   a `release` (actor: expiry sweep) followed by a `resurrect` with reason
+   `post-expiry-resurrect`, then `confirm` — visible in the order-trace Inventory section.
+
+- **Pass**: Journal shows release → resurrect → confirm under the same correlation key; order
+  submits cleanly (or, if stock was taken meanwhile, the submit fails **before** order
+  creation with a refund).
+- **Fail**: Confirm succeeds without resurrect after an expiry, order exists without a held
+  reservation, or the journal rows land under `__platform__` instead of the journey key.
+
 ---
 
 ## Phase 10 — Observability Stack
@@ -686,50 +732,52 @@ After all phases complete, create a results artifact with the following structur
 
 ## Summary
 
-| Phase | Sub-Test | Result | Duration | Notes |
-| --- | --- | --- | --- | --- |
-| 1.1 | TypeScript Type Check | ✅/❌ | | |
-| 1.2 | Linting Compliance | ✅/❌ | | |
-| 1.3 | Code Formatting | ✅/❌ | | |
-| 2.1 | Platform Status | ✅/❌ | | |
-| 2.2 | Deep Health Check | ✅/❌ | | |
-| 2.3 | Worker Registration | ✅/❌ | | |
-| 3.1 | Cassandra Schema | ✅/❌ | | |
-| 3.2 | ES Index Verification | ✅/❌ | | |
-| 3.3 | Seed Data Verification | ✅/❌ | | |
-| 4.1 | System Validation | ✅/❌ | | |
-| 5.1 | Search API | ✅/❌ | | |
-| 5.2 | Product API | ✅/❌ | | |
-| 5.3 | Health API | ✅/❌ | | |
-| 5.4 | Feature Flags API | ✅/❌ | | |
-| 5.5 | Shopper Login API | ✅/❌ | | |
-| 5.6 | Shopper Me Endpoint | ✅/❌ | | |
-| 6.1 | Stale Workflow Cleanup | ✅/❌ | | |
-| 6.2 | Cart Workflow Created | ✅/❌ | | |
-| 6.4 | Post-Checkout Workflow State | ✅/❌/⏭️ | | |
-| 7.1 | Shop Page | ✅/❌ | | |
-| 7.2 | Product Detail Page | ✅/❌ | | |
-| 7.3 | Search Functionality | ✅/❌ | | |
-| 7.4 | Shopper Login | ✅/❌ | | |
-| 7.5 | Add to Cart → Checkout | ✅/❌ | | |
-| 7.6 | Shipping Address | ✅/❌ | | |
-| 7.7 | Payment | ✅/❌ | | |
-| 7.8 | Review & Submit | ✅/❌ | | |
-| 7.9 | Order History | ✅/❌ | | |
-| 8.1 | Admin Orders Page | ✅/❌ | | |
-| 8.2 | Admin Inventory Page | ✅/❌ | | |
-| 8.3 | Admin Carts Page | ✅/❌ | | |
-| 8.4 | Admin Search Page | ✅/❌ | | |
-| 8.5 | Dev ES Index Status | ✅/❌ | | |
-| 9.1 | Product Count Parity | ✅/❌ | | |
-| 9.2 | Collection Count Parity | ✅/❌ | | |
-| 9.3 | Inventory Count Parity | ✅/❌ | | |
-| 9.4 | Zero Stale Reservations | ✅/❌/⏭️ | | |
-| 9.5 | Order in Cassandra & ES | ✅/❌/⏭️ | | |
-| 10.1 | Temporal UI | ✅/❌ | | |
-| 10.2 | Jaeger UI | ✅/❌ | | |
-| 10.3 | Prometheus | ✅/❌ | | |
-| 10.4 | Grafana | ✅/❌ | | |
+| Phase | Sub-Test                     | Result   | Duration | Notes |
+| ----- | ---------------------------- | -------- | -------- | ----- |
+| 1.1   | TypeScript Type Check        | ✅/❌    |          |       |
+| 1.2   | Linting Compliance           | ✅/❌    |          |       |
+| 1.3   | Code Formatting              | ✅/❌    |          |       |
+| 2.1   | Platform Status              | ✅/❌    |          |       |
+| 2.2   | Deep Health Check            | ✅/❌    |          |       |
+| 2.3   | Worker Registration          | ✅/❌    |          |       |
+| 3.1   | Cassandra Schema             | ✅/❌    |          |       |
+| 3.2   | ES Index Verification        | ✅/❌    |          |       |
+| 3.3   | Seed Data Verification       | ✅/❌    |          |       |
+| 4.1   | System Validation            | ✅/❌    |          |       |
+| 5.1   | Search API                   | ✅/❌    |          |       |
+| 5.2   | Product API                  | ✅/❌    |          |       |
+| 5.3   | Health API                   | ✅/❌    |          |       |
+| 5.4   | Feature Flags API            | ✅/❌    |          |       |
+| 5.5   | Shopper Login API            | ✅/❌    |          |       |
+| 5.6   | Shopper Me Endpoint          | ✅/❌    |          |       |
+| 6.1   | Stale Workflow Cleanup       | ✅/❌    |          |       |
+| 6.2   | Cart Workflow Created        | ✅/❌    |          |       |
+| 6.4   | Post-Checkout Workflow State | ✅/❌/⏭️ |          |       |
+| 7.1   | Shop Page                    | ✅/❌    |          |       |
+| 7.2   | Product Detail Page          | ✅/❌    |          |       |
+| 7.3   | Search Functionality         | ✅/❌    |          |       |
+| 7.4   | Shopper Login                | ✅/❌    |          |       |
+| 7.5   | Add to Cart → Checkout       | ✅/❌    |          |       |
+| 7.6   | Shipping Address             | ✅/❌    |          |       |
+| 7.7   | Payment                      | ✅/❌    |          |       |
+| 7.8   | Review & Submit              | ✅/❌    |          |       |
+| 7.9   | Order History                | ✅/❌    |          |       |
+| 8.1   | Admin Orders Page            | ✅/❌    |          |       |
+| 8.2   | Admin Inventory Page         | ✅/❌    |          |       |
+| 8.3   | Admin Carts Page             | ✅/❌    |          |       |
+| 8.4   | Admin Search Page            | ✅/❌    |          |       |
+| 8.5   | Dev ES Index Status          | ✅/❌    |          |       |
+| 9.1   | Product Count Parity         | ✅/❌    |          |       |
+| 9.2   | Collection Count Parity      | ✅/❌    |          |       |
+| 9.3   | Inventory Count Parity       | ✅/❌    |          |       |
+| 9.4   | Zero Stale Reservations      | ✅/❌/⏭️ |          |       |
+| 9.5   | Order in Cassandra & ES      | ✅/❌/⏭️ |          |       |
+| 9.6   | Lifecycle Stamping           | ✅/❌/⏭️ |          |       |
+| 9.7   | Pay-After-Expiry Resurrect   | ✅/❌/⏭️ |          |       |
+| 10.1  | Temporal UI                  | ✅/❌    |          |       |
+| 10.2  | Jaeger UI                    | ✅/❌    |          |       |
+| 10.3  | Prometheus                   | ✅/❌    |          |       |
+| 10.4  | Grafana                      | ✅/❌    |          |       |
 
 ## Failures
 

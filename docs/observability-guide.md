@@ -4,9 +4,9 @@ Everything in this guide is gated behind a single flag: `OTEL_ENABLED=true` in `
 it off (the default), the tracing code paths are complete no-ops — no SDK is loaded, no exporter
 connections are attempted, and the observability containers never start.
 
-> **Status note.** Both halves of this stack are wired end to end: traces (Jaeger) and server
-> metrics (Prometheus → Grafana). The remaining gap is application/worker metrics — see
-> [Metrics](#metrics).
+> **Status note.** Both halves of this stack are wired end to end: traces (Jaeger) and metrics
+> (Prometheus → Grafana) — Temporal server metrics on :9464 and worker SDK metrics on :9466. The
+> remaining gap is Next.js application metrics only — see [Metrics](#metrics).
 
 ---
 
@@ -95,17 +95,22 @@ continue into the workflow's activities.
 `OpenTelemetryActivityInboundInterceptor` to the worker's `activityInbound` chain. Each activity
 execution becomes a span, linked to the client-side parent.
 
-Note that `worker-otel.ts` always registers the ADR-0010 activity-capture **workflow** interceptor
-regardless of the flag — the OTel interceptor is layered into the same `interceptors` object so
-neither clobbers the other. That co-location is deliberate; if you add a third interceptor, extend
+Note that `worker-otel.ts` always registers two things regardless of the flag: the framework
+**workflow** interceptor module via `interceptors.workflowModules` (the ADR-0010 activity capture,
+which also injects the correlation header — see ADR-0011's amendment), and the **correlation
+activity-inbound** interceptor that decodes that header into `AsyncLocalStorage`. With OTel on,
+the OTel activity-inbound interceptor is layered **after** the correlation one, so correlation
+context is outermost and wraps the traced execution. Everything lives in the single
+`interceptors` object so nothing clobbers anything else; if you add another interceptor, extend
 that object rather than spreading a second one into `Worker.create`.
 
 ### Coverage boundaries
 
-- **Workflow spans are not created.** Only `activityInbound` is registered. The OTel package also
-  ships a workflow-side interceptor module that would need to be added to
-  `interceptors.workflowModules` to get spans for workflow execution itself. Today a trace shows
-  the activities a workflow ran, not the workflow as a span.
+- **Workflow spans are not created.** The OTel package ships a workflow-side interceptor module
+  that would need to be **added to** the already-populated `interceptors.workflowModules` list
+  (which today carries the framework's ADR-0010/correlation interceptors) to get spans for
+  workflow execution itself. Today a trace shows the activities a workflow ran, not the workflow
+  as a span.
 - **The Next.js app is not traced.** `initTracing` is called only from the unified worker entry
   point. Storefront page loads, API routes, and Server Actions produce no spans of their own —
   though a Server Action that starts a workflow _will_ propagate context onward through the client
@@ -125,7 +130,8 @@ datastore?"_
 
 For the complementary question — _"what state transitions did this order go through?"_ — the
 [Order Trace tool](/dev/order-trace) is the better instrument. It reads the ADR-0010 transition
-projection rather than spans, so it works with `OTEL_ENABLED=false` and covers the workflow
+projection — plus the correlation-keyed inventory journal and the order's persisted
+communications — rather than spans, so it works with `OTEL_ENABLED=false` and covers the workflow
 topology that traces currently do not.
 
 ### Shutdown

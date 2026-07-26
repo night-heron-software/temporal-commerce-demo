@@ -2,7 +2,7 @@
 
 Get the Temporal Commerce Demo running on your Mac from a fresh clone.
 
-> *This document was drafted with AI assistance.*
+> _This document was drafted with AI assistance._
 
 ---
 
@@ -25,7 +25,7 @@ Verify: `node --version` should show v22 or higher.
 
 ### 2. Docker Desktop
 
-Download and install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/). The app requires ~2.5 GB of RAM for the six core Docker containers (Cassandra, Elasticsearch ×2, Temporal Server, Temporal UI, PostgreSQL). Add ~1 GB if you enable the optional observability stack (Jaeger, Prometheus, Grafana).
+Download and install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/). The app requires ~2.5 GB of RAM for the six long-running Docker containers (Cassandra, Elasticsearch ×2, Temporal Server, Temporal UI, PostgreSQL); four short-lived bootstrap sidecars run alongside them at startup. Add ~1 GB if you enable the optional observability stack (Jaeger, Prometheus, Grafana).
 
 After installation, open Docker Desktop at least once to complete setup. The project scripts will auto-start Docker Desktop if it's installed but not running.
 
@@ -89,11 +89,15 @@ npm run dev:seed
 
 ### 5. Open the app
 
-| Resource | URL |
-| --- | --- |
-| Storefront | [http://localhost:3000/shop](http://localhost:3000/shop) |
-| Admin Panel | [http://localhost:3000/admin](http://localhost:3000/admin) |
-| Temporal UI | [http://localhost:8233](http://localhost:8233) |
+| Resource               | URL                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| Storefront             | [http://localhost:3000/shop](http://localhost:3000/shop)                           |
+| Admin Panel            | [http://localhost:3000/admin](http://localhost:3000/admin)                         |
+| Temporal UI            | [http://localhost:8233](http://localhost:8233)                                     |
+| Order Trace (dev tool) | [http://localhost:3000/dev/order-trace](http://localhost:3000/dev/order-trace)     |
+| System Logs viewer     | [http://localhost:3000/dev/logs](http://localhost:3000/dev/logs)                   |
+| System Errors viewer   | [http://localhost:3000/dev/system-errors](http://localhost:3000/dev/system-errors) |
+| In-app docs browser    | [http://localhost:3000/docs](http://localhost:3000/docs)                           |
 
 ---
 
@@ -119,11 +123,11 @@ npm run infra:up:obs
 
 ### Observability URLs
 
-| Resource | URL |
-| --- | --- |
-| Jaeger UI | [http://localhost:16686](http://localhost:16686) |
-| Prometheus | [http://localhost:9090](http://localhost:9090) |
-| Grafana | [http://localhost:3200](http://localhost:3200) (admin/admin) |
+| Resource   | URL                                                          |
+| ---------- | ------------------------------------------------------------ |
+| Jaeger UI  | [http://localhost:16686](http://localhost:16686)             |
+| Prometheus | [http://localhost:9090](http://localhost:9090)               |
+| Grafana    | [http://localhost:3200](http://localhost:3200) (admin/admin) |
 
 ---
 
@@ -179,47 +183,60 @@ Wipes all data volumes, recreates the Cassandra schemas, and re-seeds the catalo
 
 ## NPM Scripts Reference
 
-| Script | Description |
-| --- | --- |
-| `npm run dev:start-all` | Start infrastructure (Docker) + storefront + workers |
-| `npm run dev:stop-all` | Stop everything (storefront, workers + infrastructure) |
-| `npm run dev:up` | Start storefront app (Next.js) + Temporal workers |
-| `npm run dev:down` | Stop storefront app and Temporal worker processes |
-| `npm run dev:init` | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
-| `npm run dev:status` | Check status of all backend databases, services, and apps |
-| `npm run dev:storefront` | Start storefront app only |
-| `npm run dev:worker` | Start Temporal workers only |
-| `npm run dev:seed` | Populate catalog and inventory data manually |
-| `npm run db:init` | Apply Cassandra schema |
-| `npm run db:verify` | Verify Cassandra schema consistency |
-| `npm run infra:up` | Start Docker database infrastructure only |
-| `npm run infra:up:obs` | Start infrastructure + observability (Jaeger, Prometheus, Grafana) |
-| `npm run infra:down` | Stop Docker containers |
-| `npm run infra:clean` | Stop Docker containers + wipe all data volumes |
-| `npm run infra:ps` | List running Docker containers |
+| Script                   | Description                                                           |
+| ------------------------ | --------------------------------------------------------------------- |
+| `npm run dev:start-all`  | Start infrastructure (Docker) + storefront + workers                  |
+| `npm run dev:stop-all`   | Stop everything (storefront, workers + infrastructure)                |
+| `npm run dev:up`         | Start storefront app (Next.js) + Temporal workers                     |
+| `npm run dev:down`       | Stop storefront app and Temporal worker processes                     |
+| `npm run dev:init`       | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
+| `npm run dev:status`     | Check status of all backend databases, services, and apps             |
+| `npm run dev:storefront` | Start storefront app only                                             |
+| `npm run dev:worker`     | Start Temporal workers only                                           |
+| `npm run dev:seed`       | Populate catalog and inventory data manually                          |
+| `npm run db:init`        | Apply Cassandra schema                                                |
+| `npm run db:verify`      | Verify Cassandra schema consistency                                   |
+| `npm run infra:up`       | Start Docker database infrastructure only                             |
+| `npm run infra:up:obs`   | Start infrastructure + observability (Jaeger, Prometheus, Grafana)    |
+| `npm run infra:down`     | Stop Docker containers                                                |
+| `npm run infra:clean`    | Stop Docker containers + wipe all data volumes                        |
+| `npm run infra:ps`       | List running Docker containers                                        |
+| `npm run infra:ready`    | Ensure Docker Desktop is running (starts it if not)                   |
+| `npm run dev:validate`   | End-to-end system validation script                                   |
+| `npm run dev:logs`       | Tail today's per-process log files                                    |
+| `npm test`               | Run the test suite (no Docker required)                               |
+| `npm run typecheck`      | TypeScript type checking                                              |
+| `npm run lint`           | ESLint over the codebase                                              |
+| `npm run docs:diagrams`  | Regenerate the state-machine diagram reference                        |
 
 ---
 
 ## Infrastructure Services
 
-The project runs six core Docker containers via `docker-compose.yml`:
+The project runs six long-running Docker containers via `docker-compose.yml`:
 
-| Service | Port | Container | Purpose |
-| --- | --- | --- | --- |
-| Cassandra | 9042 | `demo-cassandra` | Product catalog, orders, inventory |
-| Elasticsearch | 9200 | `demo-elasticsearch` | Product search + read-side projections |
-| Temporal Server | 7233 | `demo-temporal` | Workflow orchestration engine |
-| Temporal UI | 8233 | `demo-temporal-ui` | Workflow visualization and debugging |
-| Temporal PostgreSQL | 5432 | `demo-temporal-postgresql` | Temporal's internal persistence |
-| Temporal Elasticsearch | 9201 | `demo-temporal-elasticsearch` | Temporal's internal visibility store |
+| Service                | Port | Container                     | Purpose                                |
+| ---------------------- | ---- | ----------------------------- | -------------------------------------- |
+| Cassandra              | 9042 | `demo-cassandra`              | Product catalog, orders, inventory     |
+| Elasticsearch          | 9200 | `demo-elasticsearch`          | Product search + read-side projections |
+| Temporal Server        | 7233 | `demo-temporal`               | Workflow orchestration engine          |
+| Temporal UI            | 8233 | `demo-temporal-ui`            | Workflow visualization and debugging   |
+| Temporal PostgreSQL    | 5432 | `demo-temporal-postgresql`    | Temporal's internal persistence        |
+| Temporal Elasticsearch | 9201 | `demo-temporal-elasticsearch` | Temporal's internal visibility store   |
+
+Four short-lived **bootstrap sidecars** run alongside them at startup and exit when done:
+`demo-temporal-schema-setup`, `demo-temporal-es-setup`, `demo-temporal-create-namespace`, and
+`demo-temporal-register-search-attributes`. The last one is a hard prerequisite — workflow
+starts are rejected until the correlation Search Attributes are registered on the namespace
+(see ADR-0011).
 
 Three additional containers are available via `docker-compose.observability.yml` (opt-in):
 
-| Service | Port | Container | Purpose |
-| --- | --- | --- | --- |
-| Jaeger | 16686 | `demo-jaeger` | Distributed tracing UI + OTLP collector |
-| Prometheus | 9090 | `demo-prometheus` | Metrics scraping |
-| Grafana | 3200 | `demo-grafana` | Metrics dashboards (admin/admin) |
+| Service    | Port  | Container         | Purpose                                 |
+| ---------- | ----- | ----------------- | --------------------------------------- |
+| Jaeger     | 16686 | `demo-jaeger`     | Distributed tracing UI + OTLP collector |
+| Prometheus | 9090  | `demo-prometheus` | Metrics scraping                        |
+| Grafana    | 3200  | `demo-grafana`    | Metrics dashboards (admin/admin)        |
 
 ---
 
@@ -279,17 +296,20 @@ demo-temporal-elasticsearch   Exited (134)
 
 ### Port conflicts
 
-| Port | Service | Check with |
-| --- | --- | --- |
-| 3000 | Next.js | `lsof -i :3000` |
-| 7233 | Temporal Server | `lsof -i :7233` |
-| 8233 | Temporal UI | `lsof -i :8233` |
-| 9042 | Cassandra | `lsof -i :9042` |
-| 9200 | Elasticsearch | `lsof -i :9200` |
-| 5432 | PostgreSQL | `lsof -i :5432` |
-| 16686 | Jaeger (observability) | `lsof -i :16686` |
-| 9090 | Prometheus (observability) | `lsof -i :9090` |
-| 3200 | Grafana (observability) | `lsof -i :3200` |
+| Port  | Service                    | Check with       |
+| ----- | -------------------------- | ---------------- |
+| 3000  | Next.js                    | `lsof -i :3000`  |
+| 7233  | Temporal Server            | `lsof -i :7233`  |
+| 8233  | Temporal UI                | `lsof -i :8233`  |
+| 9042  | Cassandra                  | `lsof -i :9042`  |
+| 9200  | Elasticsearch              | `lsof -i :9200`  |
+| 9201  | Temporal Elasticsearch     | `lsof -i :9201`  |
+| 5432  | PostgreSQL                 | `lsof -i :5432`  |
+| 9464  | Temporal server metrics    | `lsof -i :9464`  |
+| 9466  | Worker SDK metrics         | `lsof -i :9466`  |
+| 16686 | Jaeger (observability)     | `lsof -i :16686` |
+| 9090  | Prometheus (observability) | `lsof -i :9090`  |
+| 3200  | Grafana (observability)    | `lsof -i :3200`  |
 
 Kill the conflicting process or stop the other service before starting the demo.
 

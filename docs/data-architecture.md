@@ -28,7 +28,7 @@ workflows instead — a saga is a workflow, not a distributed transaction.
 
 ## The workflow is the entity
 
-A cart is not a row that three services race over; it is a workflow whose in-memory context *is*
+A cart is not a row that three services race over; it is a workflow whose in-memory context _is_
 the cart, durably backed by Temporal's event history. Cassandra holds **records** (orders placed,
 transitions taken, stock levels), never **coordination state**. Nothing reads Cassandra to decide
 what a cart may do next — the workflow already knows.
@@ -60,7 +60,7 @@ locks, and losers of the race get a clean `applied = false` rather than a deadlo
 to end.
 
 **The lineage, named:** Cassandra plays the role Datastore played on Google App Engine — a store
-whose query model *disallows queries that won't scale* (partition-key access only; cost tracks the
+whose query model _disallows queries that won't scale_ (partition-key access only; cost tracks the
 result set, not the table). And as with Datastore's entity-group transactions, the simple
 transactional capability (LWT) reintroduces a small serialized hot spot exactly where it's used —
 residual contention that is handled by convention rather than machinery. Those conventions are
@@ -98,7 +98,7 @@ The inventory singleton's projection loop batches with a dirty-flag sweep
 await condition(() => dirtySkus.size > 0, CONSISTENCY_SWEEP_INTERVAL);
 ```
 
-Wake when there's work *or* when the sweep interval passes — event-driven and time-driven behavior
+Wake when there's work _or_ when the sweep interval passes — event-driven and time-driven behavior
 in one expression, so five rapid cart additions become one Elasticsearch write.
 
 **Scope this honestly:** the mechanism is purpose-built for this demo's reservation functionality,
@@ -113,8 +113,37 @@ A consequence of CQRS worth making explicit, because it deletes a whole tier: **
 application reads Elasticsearch directly.** Next.js server code queries projections through
 [es-client.ts](../src/lib/es-client.ts) — faceted catalog search, order history, admin views —
 with no BFF service, no API gateway, and no cache layer to invalidate in front of it. The
-projection *is* the cache, kept warm by the workflows that own the data. Read scaling is
+projection _is_ the cache, kept warm by the workflows that own the data. Read scaling is
 Elasticsearch scaling, which is a solved problem you can buy.
+
+## The correlation join key
+
+There are no relational joins in either store, so cross-projection joining happens on a shared
+key: the **correlationId**, a journey UUID minted at cart creation
+([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md)). Every order-flow projection
+carries it — `orders`, `carts`, `reservations`, `fulfiller_orders`, `fulfillments`, `shipments`,
+and `communications` docs in Elasticsearch — and on the Cassandra side the `inventory_history`
+journal is _partitioned_ by it, while write-side reservation rows and `customer_communications`
+rows store it as a column. One value threads a shopper's entire journey through both stores; the
+Order Trace tool and the admin explorer's correlationId search are just reads over that key.
+
+`customer_communications` is worth calling out as a projection source: the Cassandra table
+(`((order_id), sent_at, seq)`) is the source of truth for every email sent, written through the
+`sendEmail()` choke point, and the `communications` ES index is a rebuildable projection of it.
+
+## Rebuildability: the reindex matrix
+
+Not every ES index can be rebuilt, and the differences are load-bearing for `/api/dev/reindex`:
+
+| Class                                   | Indices                                                                                                                           | On reindex                                                                                              |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Rebuildable from Cassandra**          | `products`, `collections`, `fulfillers`, `inventory`, `customers`, `orders`, `fulfiller_orders`, `reservations`, `communications` | Delete, recreate, bulk-repopulate from the source tables                                                |
+| **Source-less (workflow-written only)** | `carts`, `fulfillments`, `shipments`                                                                                              | Recreated **empty** — live workflows repopulate them as they flush                                      |
+| **Never reindex**                       | `system_errors`                                                                                                                   | `NEVER_REINDEX` in `src/lib/es-index-mappings.ts`; the reindex API refuses — the index is the only copy |
+
+The same distinction applies on the Cassandra side: the `inventory_history` journal and
+`workflow_state_transitions` are append-only audit records with no upstream source — losing them
+loses history, which is why both carry TTLs rather than truncation jobs.
 
 ## Consistency model
 
@@ -128,5 +157,5 @@ Two different guarantees, each used where it's the right one:
   transition-recording audit trail ([ADR-0010](adr/0010-async-transition-recording-projection.md))
   is likewise deferred + batched + retried — durable, but off the hot path.
 
-The boundary is the interaction model: *updates when a caller needs an answer, projections when
-nobody's waiting* — the same rule that governs updates vs. signals.
+The boundary is the interaction model: _updates when a caller needs an answer, projections when
+nobody's waiting_ — the same rule that governs updates vs. signals.

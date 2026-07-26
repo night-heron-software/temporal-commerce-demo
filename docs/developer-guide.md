@@ -12,7 +12,9 @@ A comprehensive guide for developers working on the Temporal Commerce Demo — a
 - [Local Development Setup](#local-development-setup)
 - [Project Structure](#project-structure)
 - [Domain Workflows](#domain-workflows)
+  - [Pay-after-expiry (issue #34)](#pay-after-expiry-issue-34)
 - [Data Layer](#data-layer)
+  - [Customer communications](#customer-communications)
 - [Next.js Application Layer](#nextjs-application-layer)
 - [Temporal Patterns & Conventions](#temporal-patterns--conventions)
 - [Code Organization Patterns](#code-organization-patterns)
@@ -49,14 +51,14 @@ graph TB
 
 ### Infrastructure Components
 
-| Service                    | Port | Purpose                                                |
-| -------------------------- | ---- | ------------------------------------------------------ |
-| **Cassandra**              | 9042 | Primary data store (catalog, orders, inventory)        |
-| **Elasticsearch**          | 9200 | Search + read-side projections (all 11 domain indices) |
-| **Temporal Server**        | 7233 | Workflow orchestration engine                          |
-| **Temporal UI**            | 8233 | Workflow visualization and debugging                   |
-| **Temporal PostgreSQL**    | 5432 | Temporal's internal persistence                        |
-| **Temporal Elasticsearch** | 9201 | Temporal's internal visibility (separate from app ES)  |
+| Service                    | Port | Purpose                                               |
+| -------------------------- | ---- | ----------------------------------------------------- |
+| **Cassandra**              | 9042 | Primary data store (catalog, orders, inventory)       |
+| **Elasticsearch**          | 9200 | Search + read-side projections (13 indices defined)   |
+| **Temporal Server**        | 7233 | Workflow orchestration engine                         |
+| **Temporal UI**            | 8233 | Workflow visualization and debugging                  |
+| **Temporal PostgreSQL**    | 5432 | Temporal's internal persistence                       |
+| **Temporal Elasticsearch** | 9201 | Temporal's internal visibility (separate from app ES) |
 
 **Observability (opt-in — set `OTEL_ENABLED=true` or run `npm run infra:up:obs`):**
 
@@ -125,25 +127,41 @@ npm run dev:init         # Nuclear reset: wipe databases, recreate schema, start
 
 ### NPM Scripts
 
-| Script                   | Category       | Description                                                           |
-| ------------------------ | -------------- | --------------------------------------------------------------------- |
-| `npm run dev:start-all`  | Developer      | Start infrastructure (Docker) + storefront + workers                  |
-| `npm run dev:stop-all`   | Developer      | Stop everything (storefront, workers + infrastructure)                |
-| `npm run dev:up`         | Developer      | Start storefront app (Next.js) + Temporal workers                     |
-| `npm run dev:down`       | Developer      | Stop storefront app and Temporal worker processes                     |
-| `npm run dev:init`       | Developer      | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
-| `npm run dev:status`     | Developer      | Check status of all backend databases, services, and apps             |
-| `npm run dev:storefront` | Application    | Start storefront app only                                             |
-| `npm run dev:worker`     | Application    | Start Temporal workers only                                           |
-| `npm run dev:seed`       | Database       | Populate catalog and inventory data manually                          |
-| `npm run db:init`        | Database       | Create Cassandra keyspace and tables                                  |
-| `npm run db:verify`      | Database       | Verify Cassandra schema consistency                                   |
-| `npm run infra:up`       | Infrastructure | Start Docker infrastructure containers and verify health              |
-| `npm run infra:up:obs`   | Infrastructure | Start infrastructure + observability (Jaeger, Prometheus, Grafana)    |
-| `npm run infra:down`     | Infrastructure | Stop infrastructure containers                                        |
-| `npm run infra:clean`    | Infrastructure | Stop containers and wipe all persistent volumes                       |
-| `npm run infra:ps`       | Infrastructure | List running infrastructure containers                                |
-| `npm run infra:ready`    | Infrastructure | Ensure Docker Desktop is running (starts it if not)                   |
+| Script                        | Category       | Description                                                           |
+| ----------------------------- | -------------- | --------------------------------------------------------------------- |
+| `npm run dev:start-all`       | Developer      | Start infrastructure (Docker) + storefront + workers                  |
+| `npm run dev:stop-all`        | Developer      | Stop everything (storefront, workers + infrastructure)                |
+| `npm run dev:up`              | Developer      | Start storefront app (Next.js) + Temporal workers                     |
+| `npm run dev:down`            | Developer      | Stop storefront app and Temporal worker processes                     |
+| `npm run dev:init`            | Developer      | Full reset: wipe volumes ➔ start containers ➔ seed catalog ➔ stop app |
+| `npm run dev:status`          | Developer      | Check status of all backend databases, services, and apps             |
+| `npm run dev:storefront`      | Application    | Start storefront app only                                             |
+| `npm run dev:worker`          | Application    | Start Temporal workers only                                           |
+| `npm run dev:seed`            | Database       | Populate catalog and inventory data manually                          |
+| `npm run db:init`             | Database       | Create Cassandra keyspace and tables                                  |
+| `npm run db:verify`           | Database       | Verify Cassandra schema consistency                                   |
+| `npm run infra:up`            | Infrastructure | Start Docker infrastructure containers and verify health              |
+| `npm run infra:up:obs`        | Infrastructure | Start infrastructure + observability (Jaeger, Prometheus, Grafana)    |
+| `npm run infra:down`          | Infrastructure | Stop infrastructure containers                                        |
+| `npm run infra:clean`         | Infrastructure | Stop containers and wipe all persistent volumes                       |
+| `npm run infra:ps`            | Infrastructure | List running infrastructure containers                                |
+| `npm run infra:ready`         | Infrastructure | Ensure Docker Desktop is running (starts it if not)                   |
+| `npm run dev`                 | Application    | Start the Next.js app directly (what `dev:storefront` wraps)          |
+| `npm run build`               | Quality        | Production Next.js build                                              |
+| `npm run start`               | Application    | Serve the production build                                            |
+| `npm run typecheck`           | Quality        | TypeScript type checking (`tsc --noEmit`)                             |
+| `npm run lint`                | Quality        | ESLint over the codebase                                              |
+| `npm test`                    | Quality        | Run the Vitest suite once                                             |
+| `npm run test:watch`          | Quality        | Vitest in watch mode                                                  |
+| `npm run coverage`            | Quality        | Vitest with coverage report                                           |
+| `npm run format`              | Quality        | Prettier write over `src/` and `scripts/`                             |
+| `npm run format:check`        | Quality        | Prettier check (CI gate)                                              |
+| `npm run docs:diagrams`       | Docs           | Regenerate the state-machine diagram reference from source            |
+| `npm run docs:diagrams:check` | Docs           | Fail if generated diagrams are stale (CI gate)                        |
+| `npm run dev:validate`        | Developer      | End-to-end system validation script                                   |
+| `npm run dev:logs`            | Developer      | Tail today's per-process log files                                    |
+| `npm run workers-wait`        | Developer      | Block until Temporal workers are polling                              |
+| `npm run smoke:standalone`    | Developer      | Smoke-test the standalone-activity path                               |
 
 ---
 
@@ -171,11 +189,12 @@ temporal-commerce-demo/
 │   │   │   ├── orders/        # Order management pages
 │   │   │   ├── inventory/     # Inventory monitoring
 │   │   │   ├── carts/         # Active cart monitoring
-│   │   │   ├── search/        # Elasticsearch explorer (all 11 indices)
+│   │   │   ├── search/        # Elasticsearch explorer (12 searchable indices)
 │   │   │   ├── admin-order-actions.ts
 │   │   │   ├── admin-inventory-actions.ts
 │   │   │   ├── admin-cart-actions.ts
 │   │   │   └── admin-search-actions.ts
+│   │   ├── dev/               # Developer tool pages (order-trace, logs, system-errors)
 │   │   ├── shop/              # Customer-facing storefront
 │   │       ├── cart-actions.ts # Server Actions for cart/checkout
 │   │       ├── order-actions.ts # Server Actions for order lookup
@@ -219,6 +238,9 @@ temporal-commerce-demo/
 │       │   ├── constants.ts      # Task queues, workflow types, ID builders
 │       │   ├── product-type.ts
 │       │   └── plugin-registry.ts
+│       ├── framework/         # Declarative state-machine driver + interceptors
+│       ├── transition-recorder/ # Async state-transition audit recording
+│       ├── projection-completion/ # Lifecycle stamping of ES docs at workflow close
 │       ├── cart/              # Cart domain
 │       ├── checkout/          # Checkout domain
 │       ├── oms/               # Order Management System
@@ -226,7 +248,7 @@ temporal-commerce-demo/
 │       ├── inventory/         # CQRS inventory
 │       ├── identity/          # Users, shoppers, API tokens, feature flags
 │       └── worker.ts          # Unified worker launcher
-├── docker-compose.yml         # Core infrastructure (6 containers)
+├── docker-compose.yml         # Core infrastructure (6 long-running containers + 4 bootstrap sidecars)
 ├── docker-compose.observability.yml  # Opt-in: Jaeger, Prometheus, Grafana
 └── .env.example               # Environment variable template
 ```
@@ -371,18 +393,19 @@ Stock reservations are the write-side mechanism that prevents oversell. They are
 
 **Available stock is computed, never stored:** `available = Σ(total_stock − reserved_stock)` across a SKU's fulfiller rows, with `UNLIMITED_STOCK = -1` treated as infinite. The materialized `available_stock` on the read side is a projection of that formula.
 
-**Lifecycle.** A reservation moves `TEMPORARY → CONFIRMED → FULFILLED`, or exits early via `RELEASED` / `CANCELLED`:
+**Lifecycle.** A reservation moves `TEMPORARY → CONFIRMED → FULFILLED`, or exits early via `RELEASED` / `CANCELLED` — and a `RELEASED` hold can be brought back via `resurrect` (see [Pay-after-expiry](#pay-after-expiry-issue-34)):
 
-| Operation | Repo method                     | Effect                                                                                                                         | Triggered by                                            |
-| --------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| Reserve   | `reserve` / `reserveAll`        | LWT-bump `reserved_stock`; insert `TEMPORARY` rows                                                                             | cart add/update item (`reserveCartItem`)                |
-| Renew     | `renewAllForCheckout`           | extend `expires_at` in place; adjust counters for quantity changes; reserve fresh (with a warning) only when a hold is missing | checkout start (`renewReservationsForCheckout`)         |
-| Confirm   | `confirm`                       | `status = CONFIRMED`, `expires_at = null` (no longer expirable)                                                                | checkout after payment succeeds (`confirmReservations`) |
-| Release   | `release` / `releaseAllForCart` | decrement `reserved_stock`; `status = RELEASED`                                                                                | cart remove/cancel; checkout cancel/timeout; TTL sweep  |
-| Cancel    | `cancel`                        | decrement from the assigned fulfiller; `status = CANCELLED`                                                                    | order cancelled post-confirm (fulfillment)              |
-| Fulfill   | `fulfill`                       | decrement **both** `total_stock` and `reserved_stock`; `status = FULFILLED`                                                    | fulfillment on delivery                                 |
-| Transfer  | `transferToFulfiller`           | assign `fulfiller_id` for routing                                                                                              | fulfillment start                                       |
-| Expire    | `expireReservations`            | release `TEMPORARY` rows past `expires_at`                                                                                     | inventory singleton's 5-minute sweep                    |
+| Operation | Repo method                     | Effect                                                                                                                                                                                                | Triggered by                                                                              |
+| --------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Reserve   | `reserve` / `reserveAll`        | LWT-bump `reserved_stock`; insert `TEMPORARY` rows                                                                                                                                                    | cart add/update item (`reserveCartItem`)                                                  |
+| Renew     | `renewAllForCheckout`           | extend `expires_at` in place; adjust counters for quantity changes; reserve fresh (with a warning) only when a hold is missing                                                                        | checkout start (`renewReservationsForCheckout`)                                           |
+| Resurrect | `resurrect`                     | re-acquire a `RELEASED` hold: availability re-checked, CAS-guarded counter bump, back to `TEMPORARY` with a fresh TTL; returns `ResurrectOutcome` (`active` / `resurrected` / `unavailable`)          | confirm phase 1 when a hold expired at the payment step                                   |
+| Confirm   | `confirm`                       | `status = CONFIRMED`, `expires_at = null` (no longer expirable); returns `ConfirmOutcome` (`confirmed` / `already-confirmed` / `lost` / `missing`) so callers can tell a secured hold from a lost one | checkout after payment succeeds (`confirmReservations`, two-phase resurrect-then-confirm) |
+| Release   | `release` / `releaseAllForCart` | decrement `reserved_stock`; `status = RELEASED`                                                                                                                                                       | cart remove/cancel; checkout cancel/timeout; TTL sweep                                    |
+| Cancel    | `cancel`                        | decrement from the assigned fulfiller; `status = CANCELLED`                                                                                                                                           | order cancelled post-confirm (fulfillment)                                                |
+| Fulfill   | `fulfill`                       | decrement **both** `total_stock` and `reserved_stock`; `status = FULFILLED`                                                                                                                           | fulfillment on delivery                                                                   |
+| Transfer  | `transferToFulfiller`           | assign `fulfiller_id` for routing                                                                                                                                                                     | fulfillment start                                                                         |
+| Expire    | `expireReservations`            | release `TEMPORARY` rows past `expires_at`                                                                                                                                                            | inventory singleton's 5-minute sweep                                                      |
 
 **Oversell safety is a Cassandra lightweight transaction (LWT)**, not workflow serialization. `reserve()` reads current availability, then commits the new `reserved_stock` with a compare-and-set guard:
 
@@ -392,11 +415,21 @@ WHERE blank_sku = ? AND fulfiller_id = ?
 IF reserved_stock = ?          -- fails if another writer moved it first
 ```
 
-If `[applied]` comes back false, the reserve returns `{ success: false }` and the caller treats the item as unavailable. When availability is tight, `reserve()` first **preempts** stale `TEMPORARY` reservations held longer than `MIN_HOLD_MS` (15 minutes), oldest-first, never preempting the requesting cart's own holds.
+If `[applied]` comes back false, the reserve returns `{ success: false }` and the caller treats the item as unavailable. When availability is tight, `reserve()` first runs an **inline expiry sweep**: `TEMPORARY` reservations already past their `expires_at` are released oldest-first (FIFO) until enough stock frees up — live holds are never preempted.
 
-**Expiry runs on two independent clocks.** A reservation carries a 15-minute TTL in `expires_at`, swept by the inventory singleton every 5 minutes (`CONSISTENCY_SWEEP_INTERVAL`). That is separate from the cart workflow's 30-day and the checkout's 1-hour timeouts — so a long-idle cart's holds are reclaimed by the sweep (or by preemption) well before the cart itself is abandoned. `confirm()` sets `expires_at = null`, so a paid reservation never expires.
+**Expiry runs on two independent clocks.** A reservation carries a 15-minute TTL in `expires_at`, swept by the inventory singleton every 5 minutes (`CONSISTENCY_SWEEP_INTERVAL`). That is separate from the cart workflow's 30-day and the checkout's 1-hour timeouts — so a long-idle cart's holds are reclaimed by the sweep (or by a contending reserve's inline expiry sweep) well before the cart itself is abandoned. `confirm()` sets `expires_at = null`, so a paid reservation never expires.
 
-**Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller _before_ the single-row LWT, so only the `reserved_stock` bump is atomic — there is no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries and firmer per-SKU routing. Two artifacts hint at an earlier design and should not be taken as the live path: the single-item `renewReservation()` exists but is unused (checkout renews in bulk via `renewAllForCheckout`), and `reserveInventoryUpdate` — a Temporal Update definition in `contracts/inventory.ts` — is declared but never handled. Reserves do **not** flow through a workflow update.
+**Known simplifications (kept honest for a demo).** The availability read spans a SKU's fulfiller rows and selects one fulfiller _before_ the single-row LWT, so only the `reserved_stock` bump is atomic — `reserve()` has no retry loop on a failed LWT, and fulfiller selection is not strictly serializable. That is adequate for a single-node demo; a production system would add bounded retries on the reserve path and firmer per-SKU routing. (Two hardening pieces do exist: `resurrect()` retries its counter CAS on contention, and the inventory singleton's sweep runs a drift reconciler — `reconcileStockCounters` recomputes `reserved_stock` from live reservation rows and journals any correction.) One artifact hints at an earlier design and should not be taken as the live path: the single-item `renewReservation()` exists but is unused (checkout renews in bulk via `renewAllForCheckout`). Reserves do **not** flow through a workflow update.
+
+#### Pay-after-expiry (issue #34)
+
+The one place the two expiry clocks used to bite: a shopper parks at the payment step past the 15-minute reservation TTL. The expiry sweep RELEASEs the hold — journaled under the reservation row's stored journey key — while the checkout workflow is still alive and the shopper eventually clicks submit. Fixed in [PR #35](https://github.com/night-heron-software/temporal-commerce-demo/pull/35) (issue #34), live-verified 2026-07-25:
+
+1. **Two-phase confirm.** After payment succeeds, `confirmReservations` first `resurrect()`s every hold (phase 1): live holds pass through; `RELEASED` holds are re-acquired — availability re-checked, CAS-guarded counter bump — back to `TEMPORARY` with a fresh TTL, so a later failure strands nothing (every live hold is still TTL-bound, never a half-confirmed set). Only when all holds are live does phase 2 `confirm()` them.
+2. **Stock gone → clean failure.** If any item comes back `unavailable`, nothing is confirmed: the checkout calls the mock `refundPayment` and the submit fails **before** `createOrder` — no order ever exists for stock that isn't held.
+3. **Physical-accounting backstop.** `fulfill()` decrements `total_stock` even when the row's status is `RELEASED` — physical goods leave the warehouse regardless of what the reservation ledger thinks, so the counters can't drift from reality even if a released hold somehow reaches fulfillment.
+
+Related: `transferToFulfiller` skips rows already in a terminal state rather than resurrecting them.
 
 ### Inventory Service — Limitations & Production Gaps
 
@@ -479,21 +512,47 @@ Elasticsearch serves as the read-side projection store and powers product search
 
 **Indices:**
 
-| Index              | Document Type            | Purpose                                         |
-| ------------------ | ------------------------ | ----------------------------------------------- |
-| `products`         | `ProductDocument`        | Product search with nested variants and options |
-| `collections`      | `CollectionDocument`     | Collection browsing                             |
-| `orders`           | `OrderDocument`          | Order search and admin views                    |
-| `customers`        | `CustomerDocument`       | Customer search                                 |
-| `fulfillers`       | `FulfillerDocument`      | Fulfiller search                                |
-| `inventory`        | `InventoryDocument`      | Inventory read-side views                       |
-| `fulfiller_orders` | `FulfillerOrderDocument` | Fulfiller order tracking                        |
-| `carts`            | `CartDocument`           | Active cart visibility                          |
-| `reservations`     | `ReservationDocument`    | Reservation tracking                            |
-| `fulfillments`     | `FulfillmentDocument`    | Fulfillment workflow state                      |
-| `shipments`        | `ShipmentDocument`       | Shipment tracking                               |
+| Index              | Document Type            | Purpose                                             |
+| ------------------ | ------------------------ | --------------------------------------------------- |
+| `products`         | `ProductDocument`        | Product search with nested variants and options     |
+| `collections`      | `CollectionDocument`     | Collection browsing                                 |
+| `orders`           | `OrderDocument`          | Order search and admin views                        |
+| `customers`        | `CustomerDocument`       | Customer search                                     |
+| `fulfillers`       | `FulfillerDocument`      | Fulfiller search                                    |
+| `inventory`        | `InventoryDocument`      | Inventory read-side views                           |
+| `fulfiller_orders` | `FulfillerOrderDocument` | Fulfiller order tracking                            |
+| `carts`            | `CartDocument`           | Active cart visibility                              |
+| `reservations`     | `ReservationDocument`    | Reservation tracking                                |
+| `fulfillments`     | `FulfillmentDocument`    | Fulfillment workflow state                          |
+| `shipments`        | `ShipmentDocument`       | Shipment tracking                                   |
+| `communications`   | `CommunicationDocument`  | Customer emails (searchable audit of every send)    |
+| `system_errors`    | (log line)               | Server-side error/fatal log lines (never reindexed) |
 
-All ES document types are defined in `src/temporal/contracts/elasticsearch.ts`.
+13 indices are defined in `src/lib/es-index-mappings.ts`; the first 12 are searchable in
+the admin Elasticsearch explorer (`ALL_INDICES`), while `system_errors` has its own
+viewer at `/dev/system-errors`. All ES document types are defined in
+`src/temporal/contracts/elasticsearch.ts`. Order-flow documents (`orders`, `carts`,
+`reservations`, `fulfiller_orders`, `fulfillments`, `shipments`, `communications`) carry
+the journey `correlationId` as their cross-projection join key.
+
+### Customer communications
+
+Customer-facing emails are persisted domain objects, not just log lines (see
+[`specs/order-communications.md`](../specs/order-communications.md) for the full spec):
+
+- **Source of truth** — the `customer_communications` Cassandra table, partitioned
+  `((order_id), sent_at, seq)`, so one partition read returns an order's full
+  communication history in send order.
+- **Choke point** — `sendEmail()` in `src/lib/email-service.ts` is the single send
+  surface; it persists every send to Cassandra plus a write-through doc in the
+  `communications` ES index. Persistence is best-effort and **never fails the send**.
+- **Search** — the `communications` index is searchable in the admin explorer by
+  `orderId`, `correlationId`, recipient email, subject, and body; `orders` docs also
+  carry nested communication summaries.
+- **Surfaces** — the order-trace Communications section, the
+  `/admin/orders/[orderId]` Communications card, and the `/shop/orders` "Emails about
+  this order" panel.
+- **Rebuildable** — the ES index is reindexable from Cassandra via `/api/dev/reindex`.
 
 ---
 
@@ -582,6 +641,7 @@ await client.workflow.start('orderWorkflow', {
     storeId: DEMO_STORE_ID,
     domain: 'order',
     entityId: orderId,
+    correlationId, // REQUIRED — the journey UUID, threaded from the cart
     orderId,
     cartId,
   }),
@@ -590,10 +650,27 @@ await client.workflow.start('orderWorkflow', {
 });
 ```
 
-With these tags, one Temporal visibility query — `CorrelationId = '<cartId>'` — returns
-the entire cart → checkout → order → fulfillment → fulfiller-order journey. The Search
-Attributes are registered on the namespace by `scripts/register-search-attributes.sh`
-(run automatically from `infra-start.sh`).
+The `correlationId` is a **dedicated journey UUID minted at cart creation** — it is _not_
+the cartId (the cartId identifies one entity in the journey; the correlationId identifies
+the journey itself). The field is required on `BuildWorkflowStartOptionsInput` so no
+caller silently falls back; correlation-less singletons (the inventory service workflow)
+opt out by passing `undefined` explicitly.
+
+With these tags, one Temporal visibility query — `CorrelationId = '<correlationId>'` —
+returns the entire cart → checkout → order → fulfillment → fulfiller-order journey. The
+Search Attributes are registered on the namespace by
+`scripts/register-search-attributes.sh` (run automatically from `infra-start.sh`).
+
+**Ambient activity correlation.** Activities never pass the correlationId around by hand.
+The worker's outbound interceptor (`src/temporal/framework/correlation-header.ts` +
+`interceptors.ts`) stamps a correlation header on every activity invocation from the
+workflow's own `CorrelationId` Search Attribute; the activity-inbound interceptor decodes
+it and seeds an `AsyncLocalStorage` context (`src/lib/correlation-context.ts`), so any
+code running inside an activity can call `currentCorrelationId()`. A pino mixin stamps
+the ambient value onto every activity log line, and all order-flow projections join on
+it — `orders`, `carts`, `reservations`, `fulfiller_orders`, `fulfillments`, `shipments`,
+and `communications` ES docs all carry `correlationId`, and the inventory journal is
+partitioned by it.
 
 ### State-Transition Recording & Order Trace
 
@@ -604,10 +681,14 @@ workflow hot path, with a 90-day TTL. The **order-trace dev tool** at
 [`/dev/order-trace`](http://localhost:3000/dev/order-trace) (API:
 `GET /api/dev/order-trace?orderId=…|confirmation=…|email=…`) assembles the full
 cross-domain journey from the CorrelationId visibility query plus those persisted
-transitions, presented in two tabs: **State Machines** (Gantt timeline, per-workflow
-transition timelines, inventory journal) and **Status History** (the Cassandra audit
-trail). Raw Temporal execution history is not rendered in the tool — each workflow row
-deep-links to the Temporal Web UI for that.
+transitions, presented in two tabs: **State Machines** (a windowed Gantt timeline with
+pan/zoom controls, per-workflow transition timelines, the inventory journal, and a
+**Communications** section listing every email sent about the order) and **Status
+History** (the Cassandra audit trail). Transitional states advanced by the framework
+carry an `automatic` trigger badge (recorded as trigger kind `'automatic'`, distinct from
+`'timeout'`). The journey's correlationId is surfaced on the trace header. Raw Temporal
+execution history is not rendered in the tool — each workflow row deep-links to the
+Temporal Web UI for that.
 
 ### Unified Worker
 
@@ -840,7 +921,7 @@ npx tsx scripts/seed.ts https://app.example.com  # Target a remote deployment
 
 **Seed Pipeline:**
 
-1. `POST /api/dev/init/es-indices` — Create ES index mappings for all 11 indices
+1. `POST /api/dev/init/es-indices` — Create ES index mappings for all 13 indices
 2. `POST /api/seed-cassandra` — Load `sample-data/catalog.json` into Cassandra
 3. `POST /api/seed-inventory` — Seed inventory stock for all variants
 4. `POST /api/dev/reindex` (`{index: "all"}`) — Sync all Cassandra-backed data to Elasticsearch
@@ -885,6 +966,9 @@ npm run dev:logs    # tail today's log files from every process
 
 Temporal's own Core runtime logs are bridged into the same logger by `Runtime.install` in
 `src/temporal/worker.ts`, so workflow-side `log.*` calls land in all three streams too.
+A pino mixin stamps the ambient `correlationId` (seeded by the worker's activity-inbound
+interceptor, see [Workflow IDs & Correlation Tagging](#workflow-ids--correlation-tagging))
+onto every log line written from inside an activity.
 
 Key log namespaces (the `component` binding):
 
@@ -906,18 +990,31 @@ Error and fatal lines are queryable at **`/dev/system-errors`** — filter by le
 message, and time window; expand a row for the stack trace and structured context. The index is
 created by the first error logged, so an empty view on a healthy system is expected.
 
-`system_errors` is the one index with no Cassandra source to rebuild from, so `/api/dev/reindex`
-refuses to touch it — a delete-and-recreate would destroy the only copy. Use the viewer's
+The index is reserved for **genuine server-side failures**: API routes log 5xx responses at
+`error` (which forwards to `system_errors`), while expected client errors — 4xx validation
+failures, not-found lookups, terminal-workflow rejections — log at `warn` and stay out of it.
+
+`system_errors` is the one index that must **never** be reindexed (`NEVER_REINDEX` in
+`src/lib/es-index-mappings.ts`): a delete-and-recreate would destroy the only copy, so
+`/api/dev/reindex` refuses to touch it. (It is not alone in lacking a Cassandra source —
+`carts`, `fulfillments`, and `shipments` are source-less too and are recreated empty on
+reindex — but only `system_errors` is guarded against reindexing entirely.) Use the viewer's
 **Clear all** button to empty it instead.
 
 #### Inventory history
 
-Every inventory mutation — reserve, failed reserve, renew, confirm, release, cancel, fulfill,
-transfer, drift correction — is journaled at mutation time to the append-only
-`inventory_history` Cassandra table, keyed by cartId (= the correlationId, ADR-0011;
-`__platform__` for cart-less drift corrections) with the same 90-day TTL as
-`workflow_state_transitions`. Unlike the read tables it is not rebuildable: expiry sweeps,
-preemptions, failed reserves and drift corrections leave no other operation-level record. The
+Every inventory mutation — reserve, failed reserve, renew, resurrect, confirm, release, cancel,
+fulfill, transfer, drift correction — is journaled at mutation time to the append-only
+`inventory_history` Cassandra table, partitioned by `correlation_id` — the journey UUID
+(ADR-0011; `__platform__` for correlation-less ops like drift corrections) — with the same
+90-day TTL as `workflow_state_transitions`. System actors (the expiry sweep, a contending
+reserve's inline sweep) journal under the reservation row's **stored** journey key
+(`rowJournalKey`: the row's `correlation_id`, falling back to `cart_id` for legacy rows), never
+an ambient one — so a release performed on the system's behalf still lands in the owning
+journey's partition. The read path is `getHistoryByCorrelation`; the order-trace tool merges
+the correlation and legacy cart-id partitions read-side so pre-migration journeys still
+render. Unlike the read tables the journal is not rebuildable: expiry sweeps, failed reserves
+and drift corrections leave no other operation-level record. The
 journal is surfaced in the order-trace tool at
 [`/dev/order-trace`](http://localhost:3000/dev/order-trace) (State Machines tab → Inventory
 section), where each row's actor badge links back to the workflow that performed the operation.
@@ -952,7 +1049,10 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f
 | 8233  | Temporal UI                | `docker ps`     |
 | 9042  | Cassandra                  | `lsof -i :9042` |
 | 9200  | Elasticsearch              | `lsof -i :9200` |
+| 9201  | Temporal Elasticsearch     | `docker ps`     |
 | 5432  | Temporal PostgreSQL        | `docker ps`     |
+| 9464  | Temporal server metrics    | `docker ps`     |
+| 9466  | Worker SDK metrics         | `lsof -i :9466` |
 | 16686 | Jaeger (observability)     | `docker ps`     |
 | 9090  | Prometheus (observability) | `docker ps`     |
 | 3200  | Grafana (observability)    | `docker ps`     |

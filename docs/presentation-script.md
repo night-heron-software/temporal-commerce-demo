@@ -5,7 +5,7 @@ A walkthrough script for demonstrating how Temporal durable execution powers a f
 **Estimated total duration:** 30–40 minutes (with live demo)
 **Audience:** Developers evaluating Temporal, conference attendees, or technical stakeholders
 
-> *This document was drafted with AI assistance.*
+> _This document was drafted with AI assistance._
 
 ---
 
@@ -63,7 +63,7 @@ graph TB
     temporal -->|"Activities"| elasticsearch[("Elasticsearch")]
 ```
 
-> **Key insight:** The Temporal client in our Next.js server actions is the *only* integration point. There are no message queues, no event buses, no webhook endpoints between domains. Workflows communicate via signals and child workflow relationships.
+> **Key insight:** The Temporal client in our Next.js server actions is the _only_ integration point. There are no message queues, no event buses, no webhook endpoints between domains. Workflows communicate via signals and child workflow relationships.
 
 ---
 
@@ -85,10 +85,17 @@ The cart is the best entry point because everyone understands shopping carts, an
 // Use updateWithStart to lazily create the workflow
 const startOp = new WithStartWorkflowOperation('cartWorkflow', {
   // buildWorkflowStartOptions → workflowId `demo.cart.{cartId}` + correlation Search Attributes
-  ...buildWorkflowStartOptions({ storeId: DEMO_STORE_ID, domain: 'cart', entityId: cartId, cartId }),
+  // correlationId is REQUIRED — the journey UUID minted at cart creation (ADR-0011)
+  ...buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'cart',
+    entityId: cartId,
+    correlationId,
+    cartId,
+  }),
   args: [{ cartId }],
   taskQueue: Constants.CART_TASK_QUEUE,
-  workflowIdConflictPolicy: 'USE_EXISTING',  // ← idempotent
+  workflowIdConflictPolicy: 'USE_EXISTING', // ← idempotent
   workflowExecutionTimeout: '30 days',
 });
 return await client.workflow.executeUpdateWithStart(updateDef, {
@@ -110,7 +117,7 @@ const cart = await handle.query(getCartQuery);
 // Mutating cart state — one consolidated update, dispatched by event type;
 // returns the updated cart synchronously
 const updatedCart = await handle.executeUpdate(cartUpdate, {
-  args: [{ type: 'addItem', variantId, quantity, price }]
+  args: [{ type: 'addItem', variantId, quantity, price }],
 });
 ```
 
@@ -124,12 +131,12 @@ const updatedCart = await handle.executeUpdate(cartUpdate, {
 const incrementUpdateCount = async () => {
   updateCount++;
   if (updateCount >= CONTINUE_AS_NEW_THRESHOLD) {
-    await condition(allHandlersFinished);       // ← drain handlers first
+    await condition(allHandlersFinished); // ← drain handlers first
     await continueAsNew<typeof cartWorkflow>({
       cartId,
-      initialCart: cart,                        // ← full state preserved
+      initialCart: cart, // ← full state preserved
       createdAt: cart.createdAt,
-      updateCount: 0                            // ← reset counter
+      updateCount: 0, // ← reset counter
     });
   }
 };
@@ -163,10 +170,12 @@ await startChild('checkoutWorkflow', {
   ...checkoutStart,
   taskQueue: 'checkout-queue',
   parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
-  args: [{
-    ...buildCheckoutInput(ctx.cart, parentCartWorkflowId),
-    checkoutVersion: newCheckoutVersion,
-  }],
+  args: [
+    {
+      ...buildCheckoutInput(ctx.cart, parentCartWorkflowId),
+      checkoutVersion: newCheckoutVersion,
+    },
+  ],
   workflowExecutionTimeout: '2 hours',
 });
 ```
@@ -199,14 +208,11 @@ setShipping: {
 
 ### Pattern 6: Timeout-Based Reservation Management
 
-> The checkout workflow has a 1-hour timeout. When checkout starts, we renew all inventory reservations with a fresh TTL. If the checkout times out or is cancelled, we release them. If it succeeds, we confirm them.
+> The checkout workflow has a 1-hour timeout. When checkout starts, we renew the cart's existing inventory reservations **in place** with a fresh TTL (`renewAllForCheckout`) — no release/re-reserve window in which a concurrent cart could steal the stock. If the checkout times out or is cancelled, we release them. If it succeeds, we confirm them.
 
 ```typescript
 // Wait for order completion or cancellation (1 hour timeout)
-const completedBeforeTimeout = await condition(
-  () => orderComplete || checkoutCancelled,
-  '1 hour'
-);
+const completedBeforeTimeout = await condition(() => orderComplete || checkoutCancelled, '1 hour');
 
 // If checkout times out or is cancelled, release reservations
 if (!orderComplete && reservations.length > 0) {
@@ -226,10 +232,7 @@ const parentHandle = getExternalWorkflowHandle(parentCartWorkflowId);
 await parentHandle.signal(checkoutCompletedSignal, result);
 
 // Cart workflow → waiting for signal
-await condition(
-  () => checkoutResult !== null || orderComplete || shouldExit,
-  '1 hour'
-);
+await condition(() => checkoutResult !== null || orderComplete || shouldExit, '1 hour');
 ```
 
 > This is coordination without coupling. The checkout workflow doesn't import the cart workflow's code — it just sends a signal by workflow ID. They can be deployed and versioned independently.
@@ -257,23 +260,29 @@ await condition(
 ```typescript
 // OMS workflow — oms/states.ts, condensed
 await startChild('fulfillmentWorkflow', {
-  ...buildWorkflowStartOptions({ storeId: DEMO_STORE_ID, domain: 'fulfillment',
-    entityId: order.orderId, orderId: order.orderId, cartId: order.cartId }),
-  parentClosePolicy: 'ABANDON',   // survives OMS closure; tracks its own cancellation
+  ...buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'fulfillment',
+    entityId: order.orderId,
+    correlationId,
+    orderId: order.orderId,
+    cartId: order.cartId,
+  }),
+  parentClosePolicy: 'ABANDON', // survives OMS closure; tracks its own cancellation
   args: [fulfillmentInput],
 });
 
 // Later, fulfillment signals OMS with status updates
 setHandler(fulfillmentStatusSignal, async (update) => {
   const fulfillerOrder = state.fulfillerOrders.find(
-    so => so.fulfillerOrderId === update.fulfillerOrderId
+    (so) => so.fulfillerOrderId === update.fulfillerOrderId,
   );
   fulfillerOrder.status = update.status;
   // ... propagate to order-level status
 });
 ```
 
-> Why not use a child workflow? Because the fulfillment workflow may outlive the current OMS execution if the OMS needs to `continueAsNew`. With activity-based spawning, the fulfillment workflow is truly independent — it runs on its own task queue, has its own lifecycle, and communicates only via signals.
+> Fulfillment IS a child workflow — of the OMS, started with `startChild` + `ABANDON`, so it survives OMS closure (and `continueAsNew`) while keeping the parent link visible in the Temporal UI. The **activity-spawn** is the other tool, used one hop earlier: checkout starts the OMS via an activity precisely so the order has _no parent link at all_ to a checkout that completes seconds later. Two decoupling tools, two different jobs.
 
 ### Pattern 9: Fulfiller Strategy Routing
 
@@ -345,9 +354,9 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput) {
     if (dirtySkus.size > 0) {
       const skus = Array.from(dirtySkus);
       dirtySkus.clear();
-      await projectStockForSkus(skus);          // Write → Read projection
+      await projectStockForSkus(skus); // Write → Read projection
       await projectReservationsForSkus(skus);
-      await syncInventoryToESForSkus(skus);      // Read → Elasticsearch
+      await syncInventoryToESForSkus(skus); // Read → Elasticsearch
     } else {
       // Periodic full consistency sweep
       await expireReservations();
@@ -360,7 +369,7 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput) {
       await condition(allHandlersFinished);
       await continueAsNew<typeof inventoryServiceWorkflow>({
         signalCount: 0,
-        pendingSkus: Array.from(dirtySkus),     // ← preserve in-flight
+        pendingSkus: Array.from(dirtySkus), // ← preserve in-flight
       });
     }
   }
@@ -388,12 +397,12 @@ async function run() {
   const connection = await NativeConnection.connect({ address: TEMPORAL_ADDRESS, tls });
 
   await Promise.all([
-    cartWorker(connection),        // cart-queue
-    checkoutWorker(connection),    // checkout-queue
+    cartWorker(connection), // cart-queue
+    checkoutWorker(connection), // checkout-queue
     fulfillmentWorker(connection), // fulfillment-queue
-    identityWorker(connection),    // identity-queue
-    inventoryWorker(connection),   // inventory-queue
-    omsWorker(connection),         // oms-queue
+    identityWorker(connection), // identity-queue
+    inventoryWorker(connection), // inventory-queue
+    omsWorker(connection), // oms-queue
   ]);
 }
 ```
@@ -449,11 +458,13 @@ while (!isComplete) {
 try {
   return await handle.executeUpdate(updateDef, { args });
 } catch (e) {
-  if (error?.name === 'WorkflowNotFoundError' ||
-      error?.cause?.type === 'AcceptedUpdateCompletedWorkflow') {
-    return null;  // ← graceful degradation, not a crash
+  if (
+    error?.name === 'WorkflowNotFoundError' ||
+    error?.cause?.type === 'AcceptedUpdateCompletedWorkflow'
+  ) {
+    return null; // ← graceful degradation, not a crash
   }
-  throw e;        // ← only re-throw unexpected errors
+  throw e; // ← only re-throw unexpected errors
 }
 ```
 
@@ -467,7 +478,7 @@ try {
 
 **Duration:** 2–3 minutes
 
-> Let's talk about what's *not* in this codebase:
+> Let's talk about what's _not_ in this codebase:
 >
 > - **No message queue** — no Kafka, no RabbitMQ, no SQS. Workflow signals replace all async messaging.
 > - **No cron jobs** — the inventory service workflow replaces the "run every 5 minutes" cron with `condition(() => dirty, '5m')`.
@@ -495,11 +506,11 @@ npm run dev:up                       # Start Next.js + Temporal workers
 
 ### Demo URLs
 
-| Resource | URL |
-| --- | --- |
-| Storefront | `http://localhost:3000/shop` |
+| Resource    | URL                           |
+| ----------- | ----------------------------- |
+| Storefront  | `http://localhost:3000/shop`  |
 | Admin Panel | `http://localhost:3000/admin` |
-| Temporal UI | `http://localhost:8233` |
+| Temporal UI | `http://localhost:8233`       |
 
 ### Recommended Demo Flow
 
@@ -526,9 +537,9 @@ npm run dev:up                       # Start Next.js + Temporal workers
 
 ### Failure Scenarios to Demonstrate
 
-| Scenario | How to Trigger | What Happens |
-| --- | --- | --- |
-| Cart survives server restart | Kill and restart workers mid-cart | Cart state is durable — query returns same items |
-| Checkout timeout | Wait 1 hour (or shorten timeout) | Reservations released, cart returns to `active` |
-| Payment failure | Use a mock failure token | Checkout returns to `payment` step with error |
-| Worker crash during fulfillment | Kill worker mid-fulfillment | Worker restarts, fulfillment resumes from last activity |
+| Scenario                        | How to Trigger                    | What Happens                                            |
+| ------------------------------- | --------------------------------- | ------------------------------------------------------- |
+| Cart survives server restart    | Kill and restart workers mid-cart | Cart state is durable — query returns same items        |
+| Checkout timeout                | Wait 1 hour (or shorten timeout)  | Reservations released, cart returns to `active`         |
+| Payment failure                 | Use a mock failure token          | Checkout returns to `payment` step with error           |
+| Worker crash during fulfillment | Kill worker mid-fulfillment       | Worker restarts, fulfillment resumes from last activity |
