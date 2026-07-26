@@ -288,7 +288,7 @@ export async function fulfillmentWorkflow(
     onTransition: async (
       from: FulfillmentStateName,
       to: FulfillmentStateName | `__terminal:${string}`,
-      eventDesc: 'timeout' | 'signal',
+      eventDesc: 'timeout' | 'signal' | 'automatic',
       currentCtx: FulfillmentWorkflowState,
     ) => {
       await syncProjections(currentCtx);

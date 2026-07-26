@@ -124,7 +124,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         let note = 'State transition';
         let updatedBy: 'system' | 'admin' | 'customer' = 'system';
 
-        if (eventDesc !== 'timeout' && eventDesc !== 'signal') {
+        if (typeof eventDesc !== 'string') {
           if (eventDesc.type === 'updateStatus') {
             note = eventDesc.note || 'Status updated';
             updatedBy = eventDesc.updatedBy;
