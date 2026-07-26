@@ -30,7 +30,7 @@ JSON snapshot of the workflow context — to the `workflow_state_transitions` Ca
 - **Non-blocking enqueue.** The driver's `onTransition` point does an O(1) push to a `pending[]`
   buffer; a sibling coroutine loops `await condition(() => pending.length || closing)`, drains a
   bounded batch, and calls the (Temporal-retried) activity. The entity workflow never awaits the
-  write — *deferred + batched + retried*, not fire-and-forget: the buffer is replay-safe workflow
+  write — _deferred + batched + retried_, not fire-and-forget: the buffer is replay-safe workflow
   state and the activity is durable.
 - **Correlation from Search Attributes.** The recorder reads `StoreId`, `CorrelationId`, `Domain`,
   `OrderId`, `CartId` from `workflowInfo()` — the tags [ADR-0011](0011-workflow-id-and-correlation-tagging.md)
@@ -58,3 +58,22 @@ JSON snapshot of the workflow context — to the `workflow_state_transitions` Ca
 - **Fire-and-forget** — no ordering/durability guarantee, orphaned activities. Rejected.
 - **External projector tailing Temporal history** — cannot capture the in-memory context snapshot
   without replaying domain logic. Possible long-term evolution, not the starting point.
+
+## Amendment (2026-07-25)
+
+What has changed around this decision since acceptance (the mechanism itself is unchanged):
+
+- **Trigger-kind taxonomy now includes `'automatic'`** (PR #45). Recorded trigger kinds are
+  `start` / `update` / `signal` / `timeout` / `automatic`: when the framework advances a
+  transitional state on its own (no event, no timer firing), the transition is **recorded** in
+  `workflow_state_transitions` with trigger kind `'automatic'` — previously such transitions were
+  mislabeled `'timeout'`. The Order Trace tool and the generated state-machine diagrams use the
+  same vocabulary.
+- **The interceptor module does double duty.** The framework interceptors that serve this
+  recorder also inject the correlation header that powers ambient activity correlation — see
+  [ADR-0011's amendment](0011-workflow-id-and-correlation-tagging.md#amendment-2026-07-25).
+- **Lifecycle stamping (adjacent mechanism).** Alongside transition recording, projections are
+  now lifecycle-stamped: ES docs owned by a workflow get `workflowStatus` / `workflowOutcome` /
+  `workflowClosedAt` when the workflow closes (PR #37, `src/temporal/projection-completion/`),
+  and `fulfiller_orders` docs are stamped when the fulfiller order reaches a terminal status
+  (PR #41). The admin Explorer's lifecycle filter (live / completed / both) reads these fields.

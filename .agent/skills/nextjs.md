@@ -48,12 +48,12 @@ export default function ShopPage() {
 
 ## Route Handler Segmentation
 
-| Path Prefix | Purpose | Example |
-| --- | --- | --- |
-| `/api/admin/*` | Store management | `/api/admin/orders` |
-| `/api/dev/*` | Developer instrumentation | `/api/dev/reindex`, `/api/dev/init/es-indices` |
-| `/api/seed-*` | Database seeding | `/api/seed-cassandra`, `/api/seed-inventory` |
-| `/api/*` (root) | Public/shopper-facing | `/api/search`, `/api/health` |
+| Path Prefix     | Purpose                   | Example                                                                                                                                  |
+| --------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/admin/*`  | Store management          | `/api/admin/orders`                                                                                                                      |
+| `/api/dev/*`    | Developer instrumentation | `/api/dev/reindex`, `/api/dev/init/es-indices`, plus the APIs behind the `/dev/order-trace`, `/dev/logs`, and `/dev/system-errors` pages |
+| `/api/seed-*`   | Database seeding          | `/api/seed-cassandra`, `/api/seed-inventory`                                                                                             |
+| `/api/*` (root) | Public/shopper-facing     | `/api/search`, `/api/health`                                                                                                             |
 
 ## Cross-Runtime Import Boundary (CRITICAL)
 

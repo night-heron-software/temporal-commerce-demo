@@ -71,7 +71,7 @@ export const {
   expireReservations,
 } = proxyActivities<InventoryActivities>({
   startToCloseTimeout: '30s',
-  retry: { maximumAttempts: 3, initialInterval: '1s', backoffCoefficient: 2 }
+  retry: { maximumAttempts: 3, initialInterval: '1s', backoffCoefficient: 2 },
 });
 ```
 
@@ -124,10 +124,11 @@ async function executeCartUpdate<TReturn, TArgs extends any[]>(
   cartId: string,
   updateDef: UpdateDefinition<TReturn, TArgs>,
   args: TArgs,
-  options: ExecuteOptions = {}
+  options: ExecuteOptions = {},
 ): Promise<TReturn | null> {
   const client = await getTemporalClient();
-  const workflowId = `cart-${cartId}`;
+  // Never inline workflow-ID strings (lint-enforced) — ADR-0011
+  const workflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', cartId); // 'demo.cart.<uuid>'
 
   try {
     const handle = client.workflow.getHandle(workflowId);

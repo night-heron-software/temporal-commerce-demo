@@ -7,7 +7,7 @@
 
 Reference for every domain state machine in `temporal-commerce-demo`. Regenerated from source by `npm run docs:diagrams`.
 
-> **Trigger kinds** — `update:` (Temporal Update, synchronous), `signal` (fire-and-forget Signal), `timeout` (wall-clock deadline), *(auto)* (transitional state, no input). Self-loops (event processed but state stays the same) are shown as looping arcs on the state. Notes show `prepare:` activities (I/O), `if:` conditions tested in `decide`, and `finalize:` activities (side-effects).
+> **Trigger kinds** — `update:` (Temporal Update, synchronous), `signal` (fire-and-forget Signal), `timeout` (wall-clock deadline), *(auto)* (transitional state, no input). The auto-vs-timeout distinction is recorded, not just displayed: transitional advancement is persisted to `workflow_state_transitions` as trigger kind `automatic` (PR #45). Self-loops (event processed but state stays the same) are shown as looping arcs on the state. Notes show `prepare:` activities (I/O), `if:` conditions tested in `decide`, and `finalize:` activities (side-effects).
 
 ## Cross-Domain Orchestration
 
@@ -517,9 +517,10 @@ flowchart LR
 | **OMS** | ES `orders`, `fulfiller_orders`, `customers` | `onStart` + every transition (`indexOrder`, `indexFulfillerOrder`, `indexCustomer`) |
 | **Fulfillment** | ES `fulfillments`, `shipments` | `onTransition`/finalize — `indexFulfillment`, `indexShipment` |
 | **Inventory** | Cassandra read tables + ES `inventory` | Signal-driven targeted projections in `inventoryServiceWorkflow` (CQRS) |
+| **Communications** | Cassandra `customer_communications` + ES `communications` | Every `sendEmail()` call — best-effort write-through from the send choke point |
 
 ### State-Transition Audit (ADR-0010)
 
-Independently of the domain projections above, the framework records **every state-machine transition** to the Cassandra `workflow_state_transitions` table — from/to state, trigger + payload, a full context snapshot, and the captured `prepare`/`finalize` activity calls — via an async in-workflow recorder (off the hot path, 90-day TTL). The [order-trace dev tool](http://localhost:3000/dev/order-trace) reads this to show per-transition state diffs across a whole order journey.
+Independently of the domain projections above, the framework records **every state-machine transition** to the Cassandra `workflow_state_transitions` table — from/to state, trigger + payload, a full context snapshot, and the captured `prepare`/`finalize` activity calls — via an async in-workflow recorder (off the hot path, 90-day TTL). The [order-trace dev tool](http://localhost:3000/dev/order-trace) reads this to show per-transition state diffs across a whole order journey. Alongside it, projections are **lifecycle-stamped**: workflow-owned ES docs gain `workflowStatus`/`workflowOutcome`/`workflowClosedAt` when their workflow closes, and `fulfiller_orders` docs are stamped at terminal fulfiller-order status — powering the admin Explorer's live/completed filter.
 
 > Cassandra UUIDs must always be passed as `types.Uuid.fromString(id)` — raw strings cause silent zero-row returns.

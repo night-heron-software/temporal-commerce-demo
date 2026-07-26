@@ -2,7 +2,7 @@
 
 Step-by-step instructions for running a 4–5 minute live demonstration of the Temporal Commerce Demo. Covers local setup, screen layout, and a streamlined walkthrough.
 
-> *This document was drafted with AI assistance.*
+> _This document was drafted with AI assistance._
 
 ---
 
@@ -28,12 +28,12 @@ This starts the Next.js dev server and Temporal workers concurrently. Wait for `
 
 ### 3. Verify
 
-| URL | What to Check |
-| --- | --- |
-| `http://localhost:3000/shop` | Product grid with images and prices |
-| `http://localhost:3000/admin` | Admin dashboard loads with Orders, Inventory, Carts, Search cards |
-| `http://localhost:3000/admin/search` | Elasticsearch Explorer shows doc counts across all 11 indices |
-| `http://localhost:8233` | Temporal UI — Workflows page, no errors |
+| URL                                  | What to Check                                                                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `http://localhost:3000/shop`         | Product grid with images and prices                                                                                                                    |
+| `http://localhost:3000/admin`        | Admin dashboard loads with its 10 cards (Orders, Inventory, Carts, Search, dev tools, docs, …)                                                         |
+| `http://localhost:3000/admin/search` | Elasticsearch Explorer shows doc counts across the 12 searchable indices, with the live/completed lifecycle filter (chip badges show the mode's count) |
+| `http://localhost:8233`              | Temporal UI — Workflows page, no errors                                                                                                                |
 
 ### 4. Set Fulfillment Mode
 
@@ -45,10 +45,10 @@ Go to `http://localhost:3000/admin/orders` and confirm the **Fulfillment Mode** 
 
 Arrange two browser windows side by side:
 
-| Window | Position | URL |
-| --- | --- | --- |
-| **Storefront** | Left half | `http://localhost:3000/shop` |
-| **Temporal UI** | Right half | `http://localhost:8233` |
+| Window          | Position   | URL                          |
+| --------------- | ---------- | ---------------------------- |
+| **Storefront**  | Left half  | `http://localhost:3000/shop` |
+| **Temporal UI** | Right half | `http://localhost:8233`      |
 
 Pre-filter the Temporal UI to show all workflow types so new workflows appear immediately.
 
@@ -97,9 +97,14 @@ Pre-filter the Temporal UI to show all workflow types so new workflows appear im
 3. Show the order in the list with its current status
 4. Open the **Elasticsearch Explorer** at `http://localhost:3000/admin/search`
 5. Search for the order ID — show results across orders, fulfiller_orders, fulfillments, and inventory indices
-6. Point out the Temporal UI link in the admin panel
+6. Optional extra search beats, time permitting:
+   - Paste a **variant ID** — the product surfaces via the nested-variant search
+   - Paste the journey's **correlationId** (from the order trace header) — every projection for the journey comes back, including the order's emails in `communications`
+   - Flip the **lifecycle filter** to `completed` after the order finishes — the closed workflows' docs move over
+7. Open the order's detail page (`/admin/orders/{orderId}`) — show the **Communications** card listing the emails sent, and mention shoppers see the same under "Emails about this order" on `/shop/orders`
+8. Point out the Temporal UI link in the admin panel
 
-> "The fulfillment workflow is simulating fulfiller processing with `wf.sleep()` timers. Status updates signal the OMS, which projects to Elasticsearch. The admin panel reads from ES — it's a CQRS projection kept in sync by the workflow. The search page lets us query across all 11 domain indices to verify every entity is being tracked."
+> "The fulfillment workflow is simulating fulfiller processing with `wf.sleep()` timers. Status updates signal the OMS, which projects to Elasticsearch. The admin panel reads from ES — it's a CQRS projection kept in sync by the workflow. The search page lets us query across all 12 searchable domain indices to verify every entity is being tracked."
 
 ### 4:00 — Wrap-Up (~30 seconds)
 
@@ -126,15 +131,15 @@ Takes about 2 minutes for a complete reset.
 
 ## Troubleshooting During Demo
 
-| Problem | Quick Fix |
-| --- | --- |
-| Storefront shows no products | Run `npm run dev:seed` again |
-| "Workflow not found" errors | Cart cookie expired; clear cookies and add new items |
-| Checkout stuck | Clear cookies, start a new cart |
-| Temporal UI not loading | Check Docker: `npm run infra:ps` |
-| Worker crash on start | Check Temporal is running: `docker ps \| grep temporal` |
-| Admin shows no orders | Place an order first; check `npm run dev:seed` output |
-| Fulfillment not advancing | Check worker logs; verify fulfillment mode is set to Automatic |
+| Problem                      | Quick Fix                                                      |
+| ---------------------------- | -------------------------------------------------------------- |
+| Storefront shows no products | Run `npm run dev:seed` again                                   |
+| "Workflow not found" errors  | Cart cookie expired; clear cookies and add new items           |
+| Checkout stuck               | Clear cookies, start a new cart                                |
+| Temporal UI not loading      | Check Docker: `npm run infra:ps`                               |
+| Worker crash on start        | Check Temporal is running: `docker ps \| grep temporal`        |
+| Admin shows no orders        | Place an order first; check `npm run dev:seed` output          |
+| Fulfillment not advancing    | Check worker logs; verify fulfillment mode is set to Automatic |
 
 ---
 

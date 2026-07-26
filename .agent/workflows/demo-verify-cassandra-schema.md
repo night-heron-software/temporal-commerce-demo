@@ -10,9 +10,14 @@ Verifies that `cassandra/schema.cql` creates all tables and columns used by the 
 
 The demo uses a single consolidated schema file:
 
-| File | Contents |
-| --- | --- |
-| `cassandra/schema.cql` | All tables: catalog, orders, inventory, fulfillers, carts |
+| File                   | Contents                                                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cassandra/schema.cql` | All tables: catalog, orders, inventory, fulfillers, carts, plus the audit/domain tables `workflow_state_transitions`, `inventory_history`, and `customer_communications` |
+
+Key expected primary keys worth spot-checking:
+
+- `inventory_history` — `PRIMARY KEY ((correlation_id), at, seq)` (journey-partitioned journal)
+- `customer_communications` — `PRIMARY KEY ((order_id), sent_at, seq)` (per-order email history)
 
 ## Prerequisites
 

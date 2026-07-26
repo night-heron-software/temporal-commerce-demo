@@ -82,14 +82,14 @@ The cart is a long-running Temporal workflow that acts as a live, queryable enti
 
 Checkout is a state machine managed by the `runStateMachine` driver with two working states — `validating → collecting` — plus a terminal `complete`. The UI's shipping → payment → review steps are _derived_ from which prerequisites are satisfied in `collecting`, not modeled as machine states, and order processing runs inline within the `collecting` state's `submitOrder` handler.
 
-| Pattern                      | Implementation                                                                                                                                                    |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **State configuration**      | Transitions and guards are defined declaratively in states config; `collecting` declares every command it accepts (`setShipping`, `setPayment`, `submitOrder`, …) |
-| **Update event mapping**     | Custom update handlers map incoming signals/payloads (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events                                      |
-| **Reservation management**   | Inventory reservations are renewed at checkout start, released on timeout/cancellation, confirmed on success                                                      |
-| **Timeout**                  | `condition(() => complete, '1 hour')` auto-cancels stale checkouts and releases inventory                                                                         |
-| **Cross-workflow signaling** | Checkout signals the parent cart workflow with the result via `getExternalWorkflowHandle`                                                                         |
-| **Activity-driven spawning** | On order submission, an activity starts the OMS workflow — fully decoupling checkout from order management                                                        |
+| Pattern                      | Implementation                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **State configuration**      | Transitions and guards are defined declaratively in states config; `collecting` declares every command it accepts (`setShipping`, `setPayment`, `submitOrder`, …)                                                                                                                                                                                                                      |
+| **Update event mapping**     | Custom update handlers map incoming signals/payloads (e.g. `setShippingUpdate`, `submitOrderUpdate`) to state machine events                                                                                                                                                                                                                                                           |
+| **Reservation management**   | Inventory reservations are renewed in place at checkout start, released on timeout/cancellation, and confirmed on success via a two-phase resurrect-then-confirm — a hold that expired while the shopper sat at payment is re-acquired (availability-checked) before anything is confirmed; if stock is gone, the payment is refunded and the submit fails before any order is created |
+| **Timeout**                  | `condition(() => complete, '1 hour')` auto-cancels stale checkouts and releases inventory                                                                                                                                                                                                                                                                                              |
+| **Cross-workflow signaling** | Checkout signals the parent cart workflow with the result via `getExternalWorkflowHandle`                                                                                                                                                                                                                                                                                              |
+| **Activity-driven spawning** | On order submission, an activity starts the OMS workflow — fully decoupling checkout from order management                                                                                                                                                                                                                                                                             |
 
 ### Order Management (OMS) — Lifecycle Orchestration
 
@@ -302,7 +302,7 @@ temporal-commerce-demo/
 │   │   │   ├── orders/         # Order management
 │   │   │   ├── inventory/      # Inventory monitoring
 │   │   │   ├── carts/          # Active cart monitoring
-│   │   │   └── search/         # Elasticsearch explorer (all 11 indices)
+│   │   │   └── search/         # Elasticsearch explorer (12 searchable indices)
 │   │   └── shop/               # Storefront (catalog, product, checkout)
 │   ├── components/             # Shared UI (NavBar, CartDrawer, AccountDropdown)
 │   ├── context/                # React context (CartProvider, ShopperProvider)

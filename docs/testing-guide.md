@@ -1,25 +1,25 @@
 # Testing Without Containers
 
-This project's test suite runs **230 tests across 29 files in about seven seconds, with zero
+This project's test suite runs **514 tests across 63 files in about six seconds, with zero
 containers** — it passes with the Docker daemon not running at all. That is the claim worth making,
 and it is the one that changes how the project is developed: every contributor and every CI run
 exercises the whole system on every change, rather than the subset someone bothered to start
 infrastructure for.
 
-**What about mocks?** The suite is not mock-free, and it would be dishonest to say so. Twelve of the
-twenty-nine test files use no test doubles of any kind — including every decider test, which is
-where the business logic lives. The other seventeen stub at the **activity boundary**: activities
-are where this architecture puts its I/O, so replacing them in a workflow test supplies the
-boundary rather than faking the thing under test. The trade being made is purity at the core, not
-the absence of test doubles everywhere.
+**What about mocks?** The suite is not mock-free, and it would be dishonest to say so. Twenty-six
+of the sixty-three test files use no test doubles of any kind — including every decider test, which
+is where the business logic lives. The other thirty-seven stub at the **I/O boundary**: activities
+and the infrastructure clients behind them are where this architecture puts its I/O, so replacing
+them in a workflow or route test supplies the boundary rather than faking the thing under test. The
+trade being made is purity at the core, not the absence of test doubles everywhere.
 
 ## The three-level pyramid
 
-| Level | What runs | What's doubled | Speed |
-|---|---|---|---|
-| 1. Decider tests | `decide` / `evolve` as plain functions | Nothing | µs per case |
-| 2. Workflow tests | Real driver + states on the time-skipping test server | I/O activities | ~100s of ms |
-| 3. Cross-domain journey | Four domains orchestrating each other, same test server | I/O activities (with one live bridge) | seconds |
+| Level                   | What runs                                               | What's doubled                        | Speed       |
+| ----------------------- | ------------------------------------------------------- | ------------------------------------- | ----------- |
+| 1. Decider tests        | `decide` / `evolve` as plain functions                  | Nothing                               | µs per case |
+| 2. Workflow tests       | Real driver + states on the time-skipping test server   | I/O activities                        | ~100s of ms |
+| 3. Cross-domain journey | Four domains orchestrating each other, same test server | I/O activities (with one live bridge) | seconds     |
 
 Plus a structural level that isn't on the pyramid: generated-artifact tests over the state graph.
 
@@ -75,7 +75,7 @@ await withWorkflowEnv([cartWorker], async (env) => {
 
 **Activities are stubbed here, deliberately.** The activity map passed to the worker replaces I/O
 (`validateInventory: async () => true`, `indexCart: async () => undefined`, …) so these tests
-assert *orchestration* — update handlers, queries, state transitions, terminal behavior, activity
+assert _orchestration_ — update handlers, queries, state transitions, terminal behavior, activity
 wiring — not persistence. The decider level already proved the decisions; this level proves the
 machine around them.
 
@@ -92,7 +92,7 @@ running stack via the scripts in [`.agent/workflows/`](../.agent/workflows/)).
 `startChild`/signal orchestration, one test.
 
 Its most instructive detail is the `queryCart` activity, which is barely a stub — it queries the
-*live* cart workflow through the test environment's client, exactly as the production activity
+_live_ cart workflow through the test environment's client, exactly as the production activity
 does through its own Temporal client:
 
 ```ts
@@ -124,7 +124,7 @@ The layering falls out of the architecture rather than testing discipline:
 - **Decider** — no seam needed; it's pure by construction (lint-enforced).
 - **Workflow ↔ activity** — the one true seam. Activities are the I/O membrane, so a stubbed
   activity map is the honest double.
-- **Workflow ↔ workflow** — *not* stubbed. Child workflows and signals run for real on the test
+- **Workflow ↔ workflow** — _not_ stubbed. Child workflows and signals run for real on the test
   server at levels 2–3.
 - **Route handlers** (`src/app/api/**/*.test.ts`) — standard vitest with `vi.mock` for the ES/
   Cassandra clients; conventional Next.js testing, not part of the Temporal pyramid.

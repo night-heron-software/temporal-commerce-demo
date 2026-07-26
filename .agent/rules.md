@@ -8,7 +8,7 @@
 
 ## Development Preferences
 
-1. Do not recommend adding unit tests unless explicitly requested — **except** in `src/temporal/`, where Temporal Patterns rule 7 below *requires* co-located tests for decider/states changes.
+1. Do not recommend adding unit tests unless explicitly requested — **except** in `src/temporal/`, where Temporal Patterns rule 7 below _requires_ co-located tests for decider/states changes.
 2. Do not add confirmation dialogs to any actions unless explicitly requested.
 3. Make sure that input fields are cleared before filling in new values.
 4. Do not recommend or implement caching unless explicitly requested.
@@ -27,9 +27,9 @@ These rules are mandatory for all workflow and activity code in `src/temporal/`:
 3. **CQRS**: Sync projections with non-blocking updates/signals. Perform dirty-loop projections for high-latency Update handlers. Use Queries for reads, Updates for exact confirmations, and Signals for fire-and-forget APIs.
 4. **Code Organization**: Use the Two-File Activity pattern (contract vs. impl), Definitions File pattern for queries/signals, and strict module isolation to prevent Temporal runtime imports within Next.js.
 5. **Client Operations**: Use unified domain-specific wrappers (e.g., `executeCartUpdate`) inside Next.js Server Actions to safely handle terminal errors and perform redemptive client-state clearing.
-6. **Workflow IDs & Correlation (ported from nightheron-mono ADR-0011)**: Build workflow IDs with `buildWorkflowId(DEMO_STORE_ID, domain, entityId)` from `src/temporal/contracts/constants.ts` — never inline `{storeId}.{domain}.{entityId}` strings (lint-enforced). At workflow **starts**, spread `buildWorkflowStartOptions()` so the correlation Search Attributes (`CorrelationId`, `StoreId`, `Domain`, `OrderId`, `CartId`) and memo are set.
+6. **Workflow IDs & Correlation (ported from nightheron-mono ADR-0011)**: Build workflow IDs with `buildWorkflowId(DEMO_STORE_ID, domain, entityId)` from `src/temporal/contracts/constants.ts` — never inline `{storeId}.{domain}.{entityId}` strings (lint-enforced). At workflow **starts**, spread `buildWorkflowStartOptions()` so the correlation Search Attributes (`CorrelationId`, `StoreId`, `Domain`, `OrderId`, `CartId`) and memo are set. `correlationId` is a **dedicated journey UUID minted at cart creation** (not the cartId) and is REQUIRED — singletons opt out with explicit `undefined`. Inside activities, read the ambient value with `currentCorrelationId()` (`src/lib/correlation-context.ts`) — the worker interceptors thread it; never hand-pass it through activity arguments.
 7. **Prepare → Decide → Finalize (ADR-0003/0009/0010)**: Domain state machines are authored with `defineDomain()/transitions()` from `src/temporal/framework`; each domain has a pure `*-decider.ts` (decide → facts, evolve as the sole state writer). `decide` is pure and synchronous — no activities, no clock (`meta.timestamp` / the `at` hook argument carry deterministic time; lint-enforced), no id generation (inject via the command from `prepare`). I/O belongs in `prepare`/`finalize`/hooks. Changes to decider/states files **require** co-located `*.test.ts` unit tests.
-8. **Transition recording (ADR-0010)**: the framework records every transition to Cassandra `workflow_state_transitions` via the `persistWorkflowTransitions` activity — spread `transitionRecorderActivities` into any new domain worker. The order-trace dev tool (`/dev/order-trace`) reads these.
+8. **Transition recording (ADR-0010)**: the framework records every transition to Cassandra `workflow_state_transitions` via the `persistWorkflowTransitions` activity — spread `transitionRecorderActivities` into any new domain worker. Recorded trigger kinds are `start` / `update` / `signal` / `timeout` / `automatic` — transitional states the framework advances on its own record `'automatic'`, not `'timeout'`. The order-trace dev tool (`/dev/order-trace`) reads these.
 9. **State diagrams are generated, never hand-edited**: after changing any `states.ts` / `*-decider.ts` / `fulfiller-states.ts`, run `npm run docs:diagrams` and commit the regenerated `docs/reference/state-machine-diagrams.md` + `state-graph.json`. CI fails stale diagrams via `npm run docs:diagrams:check`; `src/temporal/state-graph.test.ts` asserts structural properties (reachability, no dead-end states) against the JSON.
 10. **Standalone activities for thin wrappers (ADR-0006)**: a single-activity operation with no signals/state/sequencing is executed directly from the client via `executeStandaloneActivity` (`src/lib/temporal-client.ts`) with typed correlation attributes — never wrapped in a one-line workflow, and never written to the database directly from a route. Multi-step or stateful operations stay workflows. Server gate: `activity.enableStandalone` (see `infra/temporal/dynamicconfig/`); `npm run smoke:standalone` verifies it live.
 
@@ -53,6 +53,12 @@ disallows queries that won't scale. Preserve that property:
    transaction, and never introduce a new LWT without noting the contention it accepts.
 3. **Workflows write, the app reads.** All Cassandra writes go through workflow activities; Next.js
    code may read (order history, trace tooling) but never write.
+4. **Correlation-keyed audit tables.** The `inventory_history` journal is partitioned by
+   `correlation_id` (the journey UUID; `__platform__` for correlation-less ops), and
+   `customer_communications` — the persisted-email domain table, `((order_id), sent_at, seq)` —
+   carries `correlation_id` as the journey join. **System actors** (expiry sweep, inline sweep on
+   a contended reserve) journal under the reservation row's **stored** key (`rowJournalKey`:
+   `correlation_id`, falling back to `cart_id` for legacy rows) — never an ambient correlationId.
 
 ---
 
@@ -122,17 +128,17 @@ npm run infra:ps       # List running infrastructure containers
 
 ## Infrastructure Services
 
-| Service | Port | Container Name |
-| --- | --- | --- |
-| Cassandra | 9042 | `demo-cassandra` |
-| Elasticsearch | 9200 | `demo-elasticsearch` |
-| Temporal Server | 7233 | `demo-temporal` |
-| Temporal UI | 8233 | `demo-temporal-ui` |
-| Jaeger UI | 16686 | `demo-jaeger` |
-| Prometheus | 9090 | `demo-prometheus` |
-| Grafana | 3200 | `demo-grafana` |
-| Next.js Storefront | 3000 | (host process) |
-| Temporal Workers | — | (host process) |
+| Service            | Port  | Container Name       |
+| ------------------ | ----- | -------------------- |
+| Cassandra          | 9042  | `demo-cassandra`     |
+| Elasticsearch      | 9200  | `demo-elasticsearch` |
+| Temporal Server    | 7233  | `demo-temporal`      |
+| Temporal UI        | 8233  | `demo-temporal-ui`   |
+| Jaeger UI          | 16686 | `demo-jaeger`        |
+| Prometheus         | 9090  | `demo-prometheus`    |
+| Grafana            | 3200  | `demo-grafana`       |
+| Next.js Storefront | 3000  | (host process)       |
+| Temporal Workers   | —     | (host process)       |
 
 ---
 
@@ -140,14 +146,14 @@ npm run infra:ps       # List running infrastructure containers
 
 All 6 domains run in a single unified worker process (`src/temporal/worker.ts`):
 
-| Domain | Task Queue | Key Patterns |
-| --- | --- | --- |
-| Cart | `cart-queue` | Entity workflow, Updates, Continue-as-New |
-| Checkout | `checkout-queue` | State machine, child workflows |
-| Fulfillment | `fulfillment-queue` | Timer-based simulation, signals |
-| Identity | `identity-queue` | User creation (simplified) |
-| Inventory | `inventory-queue` | CQRS singleton service |
-| OMS | `oms-queue` | Order lifecycle, Updates, status history |
+| Domain      | Task Queue          | Key Patterns                              |
+| ----------- | ------------------- | ----------------------------------------- |
+| Cart        | `cart-queue`        | Entity workflow, Updates, Continue-as-New |
+| Checkout    | `checkout-queue`    | State machine, child workflows            |
+| Fulfillment | `fulfillment-queue` | Timer-based simulation, signals           |
+| Identity    | `identity-queue`    | User creation (simplified)                |
+| Inventory   | `inventory-queue`   | CQRS singleton service                    |
+| OMS         | `oms-queue`         | Order lifecycle, Updates, status history  |
 
 ---
 
@@ -155,17 +161,17 @@ All 6 domains run in a single unified worker process (`src/temporal/worker.ts`):
 
 See `.env.example` for all variables. The demo uses hardcoded defaults for local development:
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal server address |
-| `TEMPORAL_NAMESPACE` | `default` | Temporal namespace |
-| `TEMPORAL_TLS_CERT` | — | Base64 mTLS cert (Temporal Cloud only) |
-| `TEMPORAL_TLS_KEY` | — | Base64 mTLS key (Temporal Cloud only) |
-| `CASSANDRA_CONTACT_POINTS` | `localhost:9042` | Cassandra contact points |
-| `CASSANDRA_KEYSPACE` | `catalog` | Cassandra keyspace |
-| `ELASTICSEARCH_URL` | `http://localhost:9200` | Elasticsearch URL |
-| `OTEL_ENABLED` | `false` | Enable distributed tracing via OTel (opt-in) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint (Jaeger) |
+| Variable                      | Default                 | Description                                  |
+| ----------------------------- | ----------------------- | -------------------------------------------- |
+| `TEMPORAL_ADDRESS`            | `localhost:7233`        | Temporal server address                      |
+| `TEMPORAL_NAMESPACE`          | `default`               | Temporal namespace                           |
+| `TEMPORAL_TLS_CERT`           | —                       | Base64 mTLS cert (Temporal Cloud only)       |
+| `TEMPORAL_TLS_KEY`            | —                       | Base64 mTLS key (Temporal Cloud only)        |
+| `CASSANDRA_CONTACT_POINTS`    | `localhost:9042`        | Cassandra contact points                     |
+| `CASSANDRA_KEYSPACE`          | `catalog`               | Cassandra keyspace                           |
+| `ELASTICSEARCH_URL`           | `http://localhost:9200` | Elasticsearch URL                            |
+| `OTEL_ENABLED`                | `false`                 | Enable distributed tracing via OTel (opt-in) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP HTTP endpoint (Jaeger)                  |
 
 ---
 
