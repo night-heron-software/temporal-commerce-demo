@@ -15,7 +15,7 @@ Open standard application and infrastructure URLs for the `temporal-commerce-dem
 | Temporal UI | `http://localhost:8233` | Temporal workflow & execution web UI |
 | Jaeger UI | `http://localhost:16686` | OpenTelemetry distributed tracing (if OTEL enabled) |
 | Prometheus | `http://localhost:9090` | Metrics & monitoring (if OTEL enabled) |
-| Grafana | `http://localhost:3200` | Dashboards (admin/admin, if OTEL enabled) |
+| Grafana | `http://localhost:3200/d/temporal-server/temporal-server` | Temporal Server dashboard (admin/admin, if OTEL enabled) |
 
 ## Steps
 
@@ -43,7 +43,7 @@ Target set:
 If OTEL is enabled (`otel=true`), also check:
 4. `http://localhost:16686` — Jaeger UI
 5. `http://localhost:9090` — Prometheus
-6. `http://localhost:3200` — Grafana (admin/admin)
+6. `http://localhost:3200/d/temporal-server/temporal-server` — Grafana Temporal Server dashboard (admin/admin)
 
 Skip any tab that is already open. For each missing URL, open a new tab, navigate to the URL, and confirm the page renders. Return a summary showing which tabs were already open and which new tabs were opened.
 
