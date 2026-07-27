@@ -1,213 +1,592 @@
 {
-  "title": "Temporal Server",
   "uid": "temporal-server",
-  "tags": [
-    "temporal",
-    "demo"
-  ],
+  "title": "Temporal Server",
+  "description": "Temporal server health: frontend service traffic and errors, worker/task-queue backlog and schedule-to-start latency, SDK worker liveness, and persistence health. Metric names verified against temporalio/server 1.31.1. Ported from nightheron-mono (c4d00de) with the demo's SDK worker panels merged in.",
+  "tags": ["temporal", "demo"],
   "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 3,
+  "editable": true,
   "refresh": "10s",
-  "time": {
-    "from": "now-30m",
-    "to": "now"
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(service_requests, namespace)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(service_requests, namespace)",
+          "refId": "namespace"
+        },
+        "current": { "text": "default", "value": "default" },
+        "includeAll": false,
+        "multi": false,
+        "refresh": 1,
+        "sort": 1
+      },
+      {
+        "name": "taskqueue",
+        "label": "Task queue",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(approximate_backlog_count{namespace=~\"$namespace\"}, taskqueue)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(approximate_backlog_count{namespace=~\"$namespace\"}, taskqueue)",
+          "refId": "taskqueue"
+        },
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
   },
   "panels": [
     {
-      "id": 1,
-      "type": "timeseries",
-      "title": "gRPC request rate by operation (top 10)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "targets": [
-        {
-          "expr": "topk(10, sum by (operation) (rate(service_requests[1m])))",
-          "legendFormat": "{{operation}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps"
-        },
-        "overrides": []
-      }
+      "type": "row",
+      "title": "At a glance",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
     },
     {
-      "id": 2,
-      "type": "timeseries",
-      "title": "Service errors by operation",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
+      "type": "stat",
+      "title": "Server scrape",
+      "description": "Prometheus scrape health for the Temporal server target. If this is down, every other panel is stale.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
       "targets": [
         {
-          "expr": "sum by (operation) (rate(service_errors[1m]))",
-          "legendFormat": "{{operation}}"
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "up{job=\"temporal-server\"}",
+          "instant": true,
+          "legendFormat": "up"
         }
       ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "color": {
-            "mode": "palette-classic"
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red", "index": 0 },
+                "1": { "text": "UP", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
           }
         },
         "overrides": []
       }
     },
     {
-      "id": 3,
-      "type": "timeseries",
-      "title": "Service latency p95 by service",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
+      "type": "stat",
+      "title": "Frontend request rate",
+      "description": "Total frontend RPS across all operations in the selected namespace.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (service_name, le) (rate(service_latency_bucket[5m])))",
-          "legendFormat": "{{service_name}}"
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(service_requests{service_name=\"frontend\", namespace=~\"$namespace\"}[5m]))",
+          "instant": true,
+          "legendFormat": "rps"
         }
       ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "reqps",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
         },
         "overrides": []
       }
     },
     {
-      "id": 4,
-      "type": "timeseries",
-      "title": "Task schedule\u2192start latency p95 by task queue",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
+      "type": "stat",
+      "title": "Frontend error rate",
+      "description": "Frontend errors per second. Non-zero is not automatically bad — NamespaceNotFound and WorkflowExecutionAlreadyStarted are routine. Check the error-type breakdown below.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (taskqueue, le) (rate(task_schedule_to_start_latency_bucket[5m])))",
-          "legendFormat": "{{taskqueue}}"
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(service_error_with_type{service_name=\"frontend\", namespace=~\"$namespace\"}[5m])) or on() vector(0)",
+          "instant": true,
+          "legendFormat": "errors/s"
         }
       ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "reqps",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          }
         },
         "overrides": []
       }
     },
     {
-      "id": 5,
-      "type": "timeseries",
-      "title": "Persistence latency p95 by operation (top 10)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 16
-      },
+      "type": "stat",
+      "title": "Total task backlog",
+      "description": "Sum of approximate backlog across the selected task queues. Sustained growth means workers are not keeping up with task production.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
       "targets": [
         {
-          "expr": "topk(10, histogram_quantile(0.95, sum by (operation, le) (rate(persistence_latency_bucket[5m]))))",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(approximate_backlog_count{namespace=~\"$namespace\", taskqueue=~\"$taskqueue\"})",
+          "instant": true,
+          "legendFormat": "tasks"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Frontend service",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate by operation",
+      "description": "Frontend RPS broken out by gRPC operation. StartWorkflowExecution / SignalWorkflowExecution spikes here are usually the first sign of a client-side change in behavior.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (operation) (rate(service_requests{service_name=\"frontend\", namespace=~\"$namespace\"}[5m]))",
           "legendFormat": "{{operation}}"
         }
       ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "reqps",
+          "custom": { "fillOpacity": 8, "showPoints": "never", "lineWidth": 1 }
         },
         "overrides": []
       }
     },
     {
-      "id": 6,
       "type": "timeseries",
-      "title": "Poll success (sync vs async) \u2014 worker liveness",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 16
-      },
+      "title": "Errors by type",
+      "description": "Frontend errors per second grouped by Temporal error type. Watch for ResourceExhausted (rate limiting), DeadlineExceeded, and Internal — those are the ones that indicate a real problem rather than normal control flow.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "targets": [
         {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (error_type) (rate(service_error_with_type{service_name=\"frontend\", namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{error_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "fillOpacity": 8, "showPoints": "never", "lineWidth": 1 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Frontend latency percentiles",
+      "description": "p50 / p95 / p99 of frontend service latency across all operations. Long-poll operations (PollWorkflowTaskQueue, PollActivityTaskQueue) legitimately sit at the long-poll timeout, so a high tail here is expected unless it moves.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(service_latency_bucket{service_name=\"frontend\", namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(service_latency_bucket{service_name=\"frontend\", namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(service_latency_bucket{service_name=\"frontend\", namespace=~\"$namespace\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 0, "showPoints": "never", "lineWidth": 2 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Workers & task queues",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Backlog by task queue",
+      "description": "Approximate number of tasks waiting per task queue and task type. A queue that climbs and never drains is the classic 'no workers polling' or 'workers too slow' signature.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (taskqueue, task_type) (approximate_backlog_count{namespace=~\"$namespace\", taskqueue=~\"$taskqueue\"})",
+          "legendFormat": "{{taskqueue}} · {{task_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": { "fillOpacity": 8, "showPoints": "never", "lineWidth": 1 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Backlog age by task queue",
+      "description": "Age of the oldest task waiting in each queue. More actionable than raw depth: a small backlog that is minutes old is worse than a large one that drains continuously.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max by (taskqueue, task_type) (approximate_backlog_age_seconds{namespace=~\"$namespace\", taskqueue=~\"$taskqueue\"})",
+          "legendFormat": "{{taskqueue}} · {{task_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 8, "showPoints": "never", "lineWidth": 1 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Schedule-to-start latency p95 by task queue",
+      "description": "How long tasks wait between being scheduled and a worker picking them up. This is the single best indicator of worker capacity: if it rises, add workers or raise poller counts. Workflow and activity task types are shown separately.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 31 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, taskqueue, task_type) (rate(task_schedule_to_start_latency_bucket{namespace=~\"$namespace\", taskqueue=~\"$taskqueue\"}[5m])))",
+          "legendFormat": "{{taskqueue}} · {{task_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 0, "showPoints": "never", "lineWidth": 1 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Poll success (sync vs async) — worker liveness",
+      "description": "Demo-side panel (no mono equivalent): server-observed poll successes. A healthy worker fleet polls continuously; a flatline here with backlog growth above means no workers are connected.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 39 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(poll_success[1m]))",
           "legendFormat": "poll_success"
         },
         {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum(rate(poll_success_sync[1m]))",
           "legendFormat": "poll_success_sync"
         }
       ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps"
+          "unit": "reqps",
+          "custom": { "fillOpacity": 8, "showPoints": "never", "lineWidth": 1 }
         },
         "overrides": []
       }
     },
     {
-      "id": 7,
       "type": "timeseries",
       "title": "Worker task slots used by task queue (SDK)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 24
-      },
+      "description": "Demo-side panel (no mono equivalent): SDK-exported concurrency slot usage per queue and worker type, scraped from the worker process on :9466.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 39 },
       "targets": [
         {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum by (task_queue, worker_type) (temporal_worker_task_slots_used)",
           "legendFormat": "{{task_queue}} {{worker_type}}"
         }
       ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "custom": { "fillOpacity": 8, "showPoints": "never", "lineWidth": 1 }
         },
         "overrides": []
       }
     },
     {
-      "id": 8,
       "type": "timeseries",
-      "title": "Workflow task schedule\u2192start p95 (SDK, per queue)",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 24
-      },
+      "title": "Workflow task schedule→start p95 + activity failures (SDK, per queue)",
+      "description": "Demo-side panel (no mono equivalent): the SDK's own view of schedule-to-start latency, plus activity execution failures per queue — the worker-side complement of the server panel above.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 47 },
       "targets": [
         {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "histogram_quantile(0.95, sum by (task_queue, le) (rate(temporal_workflow_task_schedule_to_start_latency_bucket[5m])))",
           "legendFormat": "{{task_queue}}"
         },
         {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "sum by (task_queue) (rate(temporal_activity_execution_failed[5m]))",
           "legendFormat": "activity failures {{task_queue}}"
         }
       ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "s"
+          "unit": "s",
+          "custom": { "fillOpacity": 0, "showPoints": "never", "lineWidth": 1 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "title": "Persistence",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 55 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Persistence latency p95 by operation",
+      "description": "p95 latency of persistence-layer calls. When frontend latency degrades, this panel answers whether the cause is below the service layer.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, operation) (rate(persistence_latency_bucket{namespace=~\"$namespace\"}[5m]))))",
+          "legendFormat": "{{operation}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 0, "showPoints": "never", "lineWidth": 1 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Persistence errors by type",
+      "description": "Persistence errors per second by type. ConditionFailed is normal optimistic-concurrency retry traffic; ResourceExhausted or Timeout here points at the datastore.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (error_type) (rate(persistence_error_with_type{namespace=~\"$namespace\"}[5m]))",
+          "legendFormat": "{{error_type}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "calcs": ["mean", "max"]
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "fillOpacity": 8, "showPoints": "never", "lineWidth": 1 }
         },
         "overrides": []
       }
     }
-  ],
-  "schemaVersion": 39,
-  "version": 2
+  ]
 }

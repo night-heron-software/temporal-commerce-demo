@@ -685,15 +685,54 @@ describe('fulfill() RELEASED backstop', () => {
   });
 });
 
-describe('transferToFulfiller() terminal early-return', () => {
-  it('skips terminal reservations before any row mutation or journal write', async () => {
-    for (const status of ['RELEASED', 'CANCELLED', 'FULFILLED']) {
+describe('transferToFulfiller() live-status whitelist', () => {
+  it('skips every non-live reservation — including statuses added later — before any row mutation or journal write', async () => {
+    // Whitelist semantics (ported from mono): anything that is not TEMPORARY/CONFIRMED
+    // fails safe, so a future terminal status cannot slip through a stale blacklist.
+    for (const status of ['RELEASED', 'CANCELLED', 'FULFILLED', 'SOME_FUTURE_STATUS']) {
       primeReads({ reservation: reservationRow({ status, expires_at: null }) });
       await InventoryCommandRepository.transferToFulfiller('cart-1-v1', 'f2', 2);
     }
     expect(db.executeBatch).not.toHaveBeenCalled();
     expect(db.clientExecute).not.toHaveBeenCalled();
     expect(db.signalInventoryChanged).not.toHaveBeenCalled();
+  });
+
+  it('transfers a live hold: rows + journal first, then the counter move (retry-safe ordering)', async () => {
+    primeReads({
+      reservation: reservationRow({ status: 'TEMPORARY' }),
+      stock: { total_stock: 10, reserved_stock: 5 },
+    });
+
+    await InventoryCommandRepository.transferToFulfiller('cart-1-v1', 'f2', 2);
+
+    // One batch: main row, by_status registry row, and a TRANSFER journal entry.
+    const statements = batchStatements();
+    expect(statements.some((s) => s.query.includes('UPDATE inventory_reservations_w'))).toBe(true);
+    expect(
+      statements.some((s) => s.query.includes('UPDATE inventory_reservations_by_status_w')),
+    ).toBe(true);
+    const history = statements.find((s) => s.query.includes('INSERT INTO inventory_history'))!;
+    expect(history.params[H.operation]).toBe('TRANSFER');
+    expect(JSON.parse(history.params[H.details] as string)).toEqual({
+      fromFulfillerId: 'f1',
+      toFulfillerId: 'f2',
+      fromQuantity: 2,
+      toQuantity: 2,
+    });
+
+    // Counter CAS moves the hold (total_stock carried unchanged): f1 reserved 5→3,
+    // f2 reserved 5→7, each conditioned on the read value 5.
+    expect(db.clientExecute).toHaveBeenCalledTimes(2);
+    expect(db.clientExecute.mock.calls[0][1]).toEqual([3, 10, 'TEE', 'f1', 5]);
+    expect(db.clientExecute.mock.calls[1][1]).toEqual([7, 10, 'TEE', 'f2', 5]);
+
+    // Rows land BEFORE counters: a retry after the batch sees the new attribution and
+    // no-ops instead of double-adjusting; the reconciler settles from rows on failure.
+    expect(db.executeBatch.mock.invocationCallOrder[0]).toBeLessThan(
+      db.clientExecute.mock.invocationCallOrder[0],
+    );
+    expect(db.signalInventoryChanged).toHaveBeenCalledWith(['TEE']);
   });
 });
 

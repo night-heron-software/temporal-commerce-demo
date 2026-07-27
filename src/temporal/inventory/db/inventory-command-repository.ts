@@ -1665,16 +1665,14 @@ export const InventoryCommandRepository = {
     }
     const current = transferRows[0];
 
-    // Terminal rows hold no stock: transferring one would mutate a dead row and journal
-    // a misleading TRANSFER over the RELEASE/CANCEL/FULFILL that ended it (issue #34).
-    if (
-      current.status === 'RELEASED' ||
-      current.status === 'CANCELLED' ||
-      current.status === 'FULFILLED'
-    ) {
+    // Only live rows hold stock to move: transferring anything else would mutate a dead
+    // row and journal a misleading TRANSFER over the RELEASE/CANCEL/FULFILL that ended it
+    // (issue #34). Whitelist the live statuses rather than blacklisting the terminal ones
+    // so a status added later fails safe (ported from nightheron-mono).
+    if (current.status !== 'TEMPORARY' && current.status !== 'CONFIRMED') {
       logger.warn(
         { reservationId, status: current.status },
-        'Skipping transfer of terminal reservation',
+        'Skipping transfer of non-live reservation',
       );
       return;
     }
@@ -1690,14 +1688,14 @@ export const InventoryCommandRepository = {
         params: [fulfillerId, quantity, reservationId] as unknown[],
       },
     ];
-    if (current.status === 'TEMPORARY' || current.status === 'CONFIRMED') {
-      statements.push({
-        query: `UPDATE inventory_reservations_by_status_w
-                SET fulfiller_id = ?, quantity = ?, updated_at = toTimestamp(now())
-                WHERE status = ? AND reservation_id = ?`,
-        params: [fulfillerId, quantity, current.status, reservationId],
-      });
-    }
+    // The status guard above narrows `current.status` to the two live partitions, so the
+    // registry row is always present to update.
+    statements.push({
+      query: `UPDATE inventory_reservations_by_status_w
+              SET fulfiller_id = ?, quantity = ?, updated_at = toTimestamp(now())
+              WHERE status = ? AND reservation_id = ?`,
+      params: [fulfillerId, quantity, current.status, reservationId],
+    });
     statements.push(
       historyInsert({
         correlationId: journalCorrelation(rowJournalKey(current)),
@@ -1720,23 +1718,24 @@ export const InventoryCommandRepository = {
     );
     await executeBatch(statements);
 
-    // Move the reserved counter to match the new attribution (active holds only —
-    // terminal reservations no longer occupy a counter).
-    if (current.status === 'TEMPORARY' || current.status === 'CONFIRMED') {
-      if (priorFulfillerId && priorFulfillerId !== fulfillerId) {
-        await casAdjustStock(current.blank_sku, priorFulfillerId, -priorQuantity);
-        await casAdjustStock(current.blank_sku, fulfillerId, quantity);
-      } else if (priorFulfillerId && quantity !== priorQuantity) {
-        await casAdjustStock(current.blank_sku, priorFulfillerId, quantity - priorQuantity);
-      } else if (!priorFulfillerId) {
-        // Legacy pre-attribution row: the counter lives on an unknown row; the reconciler
-        // will settle it against the new attribution at the next sweep.
-        logger.warn(
-          { reservationId, fulfillerId },
-          'Transfer of unattributed reservation — reconciler will settle counters',
-        );
-        await casAdjustStock(current.blank_sku, fulfillerId, quantity);
-      }
+    // Move the reserved counter to match the new attribution. Deliberately AFTER the row
+    // batch (mono orders counters first): a retry that re-runs this function after the
+    // batch landed sees the new attribution and no-ops the counter move instead of
+    // double-adjusting, and if the counter move itself fails the reconciler settles
+    // counters from the (already-correct) rows at the next sweep.
+    if (priorFulfillerId && priorFulfillerId !== fulfillerId) {
+      await casAdjustStock(current.blank_sku, priorFulfillerId, -priorQuantity);
+      await casAdjustStock(current.blank_sku, fulfillerId, quantity);
+    } else if (priorFulfillerId && quantity !== priorQuantity) {
+      await casAdjustStock(current.blank_sku, priorFulfillerId, quantity - priorQuantity);
+    } else if (!priorFulfillerId) {
+      // Legacy pre-attribution row: the counter lives on an unknown row; the reconciler
+      // will settle it against the new attribution at the next sweep.
+      logger.warn(
+        { reservationId, fulfillerId },
+        'Transfer of unattributed reservation — reconciler will settle counters',
+      );
+      await casAdjustStock(current.blank_sku, fulfillerId, quantity);
     }
 
     logger.info({ reservationId, fulfillerId, quantity }, 'Transferred reservation to fulfiller');
