@@ -10,6 +10,12 @@ A full-stack e-commerce application demonstrating [Temporal](https://temporal.io
 
 Built with **Next.js**, **Temporal TypeScript SDK**, **Cassandra**, and **Elasticsearch**.
 
+**Evaluating Temporal, or evaluating this project?** Start with
+[Temporal Lessons Learned](docs/temporal-lessons-learned.md) — 26 practical lessons from building
+this system on the TypeScript SDK — then the
+[State Machine Reference](docs/reference/state-machine-diagrams.md), auto-generated from source and
+kept fresh by CI.
+
 ![Order Trace tool showing one order's journey across five parallel workflows](docs/images/order-trace.png)
 
 _The built-in Order Trace tool: one order's full cross-domain lifecycle — cart → checkout → OMS → fulfillment → fulfiller order — reconstructed from workflow state transitions recorded to Cassandra._
