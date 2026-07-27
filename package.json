@@ -58,7 +58,7 @@
     "infra:up": "bash scripts/infra-start.sh",
     "infra:up:obs": "docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d",
     "infra:down": "bash scripts/local-shutdown.sh",
-    "infra:clean": "npm run infra:down && docker-compose down -v && echo '✓ All data wiped'",
+    "infra:clean": "npm run infra:down && docker compose -f docker-compose.yml -f docker-compose.observability.yml down -v && echo '✓ All data wiped'",
     "infra:ps": "docker-compose ps",
     "infra:ready": "bash scripts/docker-ready.sh",
     "dev:logs": "tail -F logs/demo-*-$(date +%F).log"
