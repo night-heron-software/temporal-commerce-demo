@@ -16,9 +16,9 @@ this system on the TypeScript SDK — then the
 [State Machine Reference](docs/reference/state-machine-diagrams.md), auto-generated from source and
 kept fresh by CI.
 
-![Order Trace tool showing one order's journey across five parallel workflows](docs/images/order-trace.png)
+![Order Trace tool showing one order's journey across five parallel workflows, plus its inventory journal and customer emails](docs/images/order-trace.png)
 
-_The built-in Order Trace tool: one order's full cross-domain lifecycle — cart → checkout → OMS → fulfillment → fulfiller order — reconstructed from workflow state transitions recorded to Cassandra._
+_The built-in Order Trace tool: one order's full cross-domain lifecycle — cart → checkout → OMS → fulfillment → fulfiller order — reconstructed from workflow state transitions recorded to Cassandra, alongside the correlation-keyed inventory journal and every email sent to the customer._
 
 > **Note:** This demo is derived from a much more comprehensive e-commerce platform currently under active development. It is a standalone extraction designed to showcase Temporal patterns without the full platform's multi-tenant, multi-supplier, and plugin architecture.
 
