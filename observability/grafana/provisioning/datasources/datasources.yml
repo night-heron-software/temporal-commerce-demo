@@ -3,6 +3,9 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
+    # Stable uid so provisioned dashboards can reference the datasource by name
+    # instead of a Grafana-generated one.
+    uid: prometheus
     access: proxy
     url: http://demo-prometheus:9090
     isDefault: true

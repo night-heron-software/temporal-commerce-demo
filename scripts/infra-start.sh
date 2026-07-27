@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+INFRA_START=$(date +%s)
+elapsed() { local now=$(date +%s); printf "%dm %02ds" $(( (now - INFRA_START) / 60 )) $(( (now - INFRA_START) % 60 )); }
+
 # Ensure Docker is running
 npm run infra:ready
 
@@ -30,21 +33,24 @@ $COMPOSE_CMD up -d
 
 echo "⏳ Waiting for Cassandra..."
 until docker inspect --format='{{.State.Health.Status}}' demo-cassandra 2>/dev/null | grep -q healthy; do
-  sleep 5; echo "  Cassandra starting..."
+  sleep 5; echo "  Cassandra starting... ($(elapsed))"
 done
-echo "✓ Cassandra ready"
+echo "✓ Cassandra ready ($(elapsed))"
 
 echo "⏳ Waiting for Elasticsearch..."
 until curl -sf http://localhost:9200/_cluster/health > /dev/null 2>&1; do
-  sleep 5; echo "  ES starting..."
+  sleep 5; echo "  ES starting... ($(elapsed))"
 done
-echo "✓ Elasticsearch ready"
+echo "✓ Elasticsearch ready ($(elapsed))"
+
+# Trigger dependent containers (e.g. temporal-schema-setup, temporal) now that Cassandra & ES are ready
+$COMPOSE_CMD up -d
 
 echo "⏳ Waiting for Temporal..."
 until docker inspect --format='{{.State.Health.Status}}' demo-temporal 2>/dev/null | grep -q healthy; do
-  sleep 5; echo "  Temporal starting..."
+  sleep 5; echo "  Temporal starting... ($(elapsed))"
 done
-echo "✓ Temporal ready"
+echo "✓ Temporal ready ($(elapsed))"
 
 echo "⏳ Registering correlation Search Attributes (ADR-0011)..."
 bash "$(dirname "$0")/register-search-attributes.sh"
@@ -52,25 +58,25 @@ bash "$(dirname "$0")/register-search-attributes.sh"
 if [ "$OTEL_ENABLED" = "true" ]; then
   echo "⏳ Waiting for Jaeger..."
   until docker inspect --format='{{.State.Health.Status}}' demo-jaeger 2>/dev/null | grep -q healthy; do
-    sleep 3; echo "  Jaeger starting..."
+    sleep 3; echo "  Jaeger starting... ($(elapsed))"
   done
-  echo "✓ Jaeger ready"
+  echo "✓ Jaeger ready ($(elapsed))"
 
   echo "⏳ Waiting for Prometheus..."
   until docker inspect --format='{{.State.Health.Status}}' demo-prometheus 2>/dev/null | grep -q healthy; do
-    sleep 3; echo "  Prometheus starting..."
+    sleep 3; echo "  Prometheus starting... ($(elapsed))"
   done
-  echo "✓ Prometheus ready"
+  echo "✓ Prometheus ready ($(elapsed))"
 
   echo "⏳ Waiting for Grafana..."
   until curl -sf http://localhost:3200/api/health > /dev/null 2>&1; do
-    sleep 3; echo "  Grafana starting..."
+    sleep 3; echo "  Grafana starting... ($(elapsed))"
   done
-  echo "✓ Grafana ready"
+  echo "✓ Grafana ready ($(elapsed))"
 fi
 
 echo ""
-echo "✨ Infrastructure ready!"
+echo "✨ Infrastructure ready! ($(elapsed))"
 echo "   Temporal UI  → http://localhost:8233"
 if [ "$OTEL_ENABLED" = "true" ]; then
   echo "   Jaeger UI    → http://localhost:16686"

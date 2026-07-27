@@ -48,13 +48,13 @@ function ShopPageContent() {
   const initialPriceMin = searchParams.get('priceMin');
   const initialPriceMax = searchParams.get('priceMax');
 
-  // Search state
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
   const [products, setProducts] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [page, setPage] = useState(initialPage);
   const pageSize = 24;
 
@@ -158,16 +158,29 @@ function ShopPageContent() {
 
       try {
         const res = await fetch(buildSearchUrl(), { signal: controller.signal });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(
+            `Search request failed (${res.status}): ${errorData.error || res.statusText}`,
+          );
+        }
         const data: SearchResponse = await res.json();
+        if (typeof data?.total !== 'number' || !Array.isArray(data?.hits)) {
+          throw new Error(
+            `Invalid search response format: expected hits array and numeric total`,
+          );
+        }
         if (isCurrent) {
           setProducts(data.hits);
           setTotal(data.total);
           setFacets(data.facets);
+          setSearchError(null);
           setIsLoading(false);
         }
       } catch (err) {
         if (isCurrent && (err as Error).name !== 'AbortError') {
           console.error(err);
+          setSearchError((err as Error).message);
           setIsLoading(false);
         }
       }
@@ -420,7 +433,12 @@ function ShopPageContent() {
               </p>
             </div>
 
-            {isLoading ? (
+            {searchError ? (
+              <div className="p-6 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-300">
+                <h3 className="font-semibold text-lg mb-1">Search Error</h3>
+                <p className="text-sm">{searchError}</p>
+              </div>
+            ) : isLoading ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {[...Array(8)].map((_, i) => (
                   <div key={i} className="animate-pulse">

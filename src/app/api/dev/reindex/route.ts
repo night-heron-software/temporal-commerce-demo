@@ -43,15 +43,31 @@ export async function POST(request: NextRequest) {
 
       // Delete and recreate index
       try {
-        await esClient.indices.delete({ index: idx });
-      } catch {
-        // Index may not exist
+        const exists = await esClient.indices.exists({ index: idx });
+        if (exists) {
+          await esClient.indices.delete({ index: idx });
+        }
+      } catch (err) {
+        console.warn(`[dev/reindex] Delete index '${idx}' failed, attempting putMapping fallback:`, err);
       }
 
-      await esClient.indices.create({
-        index: idx,
-        mappings: INDEX_MAPPINGS[idx],
-      });
+      try {
+        await esClient.indices.create({
+          index: idx,
+          mappings: INDEX_MAPPINGS[idx],
+        });
+      } catch (createErr) {
+        const errStr = String(createErr);
+        if (errStr.includes('resource_already_exists_exception') || errStr.includes('already exists')) {
+          console.log(`[dev/reindex] Index '${idx}' already exists, refreshing mapping`);
+          await esClient.indices.putMapping({
+            index: idx,
+            ...INDEX_MAPPINGS[idx],
+          });
+        } else {
+          throw createErr;
+        }
+      }
 
       try {
         switch (idx) {
