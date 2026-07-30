@@ -60,6 +60,11 @@ export interface ReservationRow {
   reservationId: string;
   blankSku: string;
   cartId: string;
+  /**
+   * Journey correlationId (ADR-0011). Null for rows read from the by_status active
+   * registry, which doesn't mirror the column — only the main table stores it.
+   */
+  correlationId: string | null;
   variantId: string;
   fulfillerId: string | null;
   quantity: number;
@@ -84,6 +89,7 @@ export async function getInventoryReservations(scope: 'active' | 'all' = 'active
         reservationId: r.reservationId,
         blankSku: r.blankSku,
         cartId: r.cartId,
+        correlationId: r.correlationId,
         variantId: r.variantId,
         fulfillerId: r.fulfillerId,
         quantity: r.quantity,
@@ -98,6 +104,7 @@ export async function getInventoryReservations(scope: 'active' | 'all' = 'active
         reservation_id: string;
         blank_sku: string;
         cart_id: string;
+        correlation_id: string | null;
         variant_id: string;
         fulfiller_id: string | null;
         quantity: number;
@@ -107,7 +114,7 @@ export async function getInventoryReservations(scope: 'active' | 'all' = 'active
       }
 
       const rows = await executeCql<DbRow>(
-        `SELECT reservation_id, blank_sku, cart_id, variant_id, fulfiller_id,
+        `SELECT reservation_id, blank_sku, cart_id, correlation_id, variant_id, fulfiller_id,
                 quantity, status, expires_at, created_at
          FROM inventory_reservations_w`,
       );
@@ -116,6 +123,7 @@ export async function getInventoryReservations(scope: 'active' | 'all' = 'active
         reservationId: r.reservation_id,
         blankSku: r.blank_sku,
         cartId: r.cart_id,
+        correlationId: r.correlation_id ?? null,
         variantId: r.variant_id,
         fulfillerId: r.fulfiller_id,
         quantity: r.quantity,

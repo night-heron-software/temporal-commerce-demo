@@ -297,6 +297,11 @@ export interface ReservationRecord {
   reservationId: string;
   blankSku: string;
   cartId: string;
+  /**
+   * Journey correlationId captured at reserve time (#36). Null for legacy rows and for
+   * rows read from the by_status active registry, which doesn't mirror the column.
+   */
+  correlationId: string | null;
   variantId: string;
   fulfillerId: string | null;
   quantity: number;
@@ -616,6 +621,7 @@ function rowToReservation(row: ReservationRow): ReservationRecord {
     reservationId: row.reservation_id,
     blankSku: row.blank_sku,
     cartId: row.cart_id,
+    correlationId: row.correlation_id ?? null,
     variantId: row.variant_id,
     fulfillerId: row.fulfiller_id,
     quantity: row.quantity,
