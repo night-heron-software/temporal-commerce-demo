@@ -380,10 +380,13 @@ export default function AdminSearchPage() {
                       </span>
                     </button>
 
-                    {(hit.source?.cartId || hit.source?.orderId) != null && (
+                    {(hit.source?.correlationId || hit.source?.cartId || hit.source?.orderId) !=
+                      null && (
                       <div className="px-4 pb-2 -mt-1 pl-11">
                         <EntityIds
-                          correlationId={(hit.source.cartId as string) ?? null}
+                          correlationId={
+                            ((hit.source.correlationId ?? hit.source.cartId) as string) ?? null
+                          }
                           orderId={(hit.source.orderId as string) ?? null}
                         />
                       </div>

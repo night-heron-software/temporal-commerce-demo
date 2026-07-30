@@ -374,9 +374,14 @@ export default function AdminInventoryPage() {
                     >
                       {row.cartId.substring(0, 8)}…
                     </a>
-                    <div className="mt-0.5">
-                      <EntityIds correlationId={row.cartId} />
-                    </div>
+                    {/* Only the real journey key gets the corr: chip — the by_status
+                        registry rows don't carry it, and labelling the cartId as a
+                        correlation id sends operators to an empty visibility query. */}
+                    {row.correlationId && (
+                      <div className="mt-0.5">
+                        <EntityIds correlationId={row.correlationId} />
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right font-medium text-zinc-900 dark:text-zinc-100 tabular-nums">
                     {row.quantity}
