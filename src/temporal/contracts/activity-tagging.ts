@@ -25,15 +25,15 @@ export interface BuildActivitySearchAttributesInput {
  *
  * Standalone activities only accept the typed form (`SearchAttributePair[]`), not the
  * legacy `{ Key: [value] }` map that `buildWorkflowStartOptions` emits — hence this
- * sibling builder. Same keys, same Keyword registration, same defaulting rule
- * (`correlationId` falls back to `cartId`). Tagged activities are queryable in the
- * Temporal UI's **Activities** list (not merged into workflow lists).
+ * sibling builder. Same keys, same Keyword registration, same no-fallback rule:
+ * post-#33 the CorrelationId attribute carries only a real journey UUID — never a
+ * cartId stand-in that would pollute correlation queries. Tagged activities are
+ * queryable in the Temporal UI's **Activities** list (not merged into workflow lists).
  */
 export function buildActivityTypedSearchAttributes(
   input: BuildActivitySearchAttributesInput,
 ): SearchAttributePair[] {
-  const { storeId, domain, orderId, cartId } = input;
-  const correlationId = input.correlationId ?? cartId;
+  const { storeId, domain, correlationId, orderId, cartId } = input;
 
   const kw = (name: string) => defineSearchAttributeKey(name, SearchAttributeType.KEYWORD);
   const pairs: SearchAttributePair[] = [];

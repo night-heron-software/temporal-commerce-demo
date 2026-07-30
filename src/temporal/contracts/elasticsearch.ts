@@ -394,6 +394,8 @@ export interface CartDocument extends WorkflowLifecycleFields {
 export interface ReservationDocument extends WorkflowLifecycleFields {
   reservationId: string;
   cartId: string;
+  /** Journey correlationId (ADR-0011) — the mapping, live writer, and reindex all populate it. */
+  correlationId?: string;
   variantId: string;
   quantity: number;
   status: string;
