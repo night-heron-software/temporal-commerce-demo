@@ -48,5 +48,6 @@ next-env.d.ts
 
 # private planning / session docs (local-only)
 /docs/private/
+/docs/private copy/
 .claude/settings.json
 .claude/worktrees/*
