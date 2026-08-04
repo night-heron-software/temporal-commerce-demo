@@ -166,9 +166,7 @@ function ShopPageContent() {
         }
         const data: SearchResponse = await res.json();
         if (typeof data?.total !== 'number' || !Array.isArray(data?.hits)) {
-          throw new Error(
-            `Invalid search response format: expected hits array and numeric total`,
-          );
+          throw new Error(`Invalid search response format: expected hits array and numeric total`);
         }
         if (isCurrent) {
           setProducts(data.hits);

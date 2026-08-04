@@ -5,19 +5,37 @@
  * with no Cassandra source to rebuild from — ES holds the only copy — so reindexing it destroys
  * the error log. These tests pin that it is excluded from both `all` and targeted requests.
  */
+import { readFileSync } from 'node:fs';
+
 import { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Must cover EVERY esClient.indices.* method the route calls. A missing one is not a
+// missing assertion — it is `undefined`, so the call throws, and the route's own
+// try/catch swallows it as a warning. That is how `exists` (added to the route on
+// 2026-07-27) silently disabled the delete path these tests exist to guard: the
+// suite went red claiming "expected 0 to be greater than 0" rather than naming the
+// real cause. Route calls: create, delete, exists, putMapping, refresh.
 const es = vi.hoisted(() => ({
   delete: vi.fn().mockResolvedValue({}),
   create: vi.fn().mockResolvedValue({}),
   refresh: vi.fn().mockResolvedValue({}),
+  // The route deletes only `if (exists)`, so a falsy default would skip the delete
+  // and quietly neuter the regression guard.
+  exists: vi.fn().mockResolvedValue(true),
+  putMapping: vi.fn().mockResolvedValue({}),
   index: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('@/lib/es-client', () => ({
   getElasticsearchClient: () => ({
-    indices: { delete: es.delete, create: es.create, refresh: es.refresh },
+    indices: {
+      delete: es.delete,
+      create: es.create,
+      refresh: es.refresh,
+      exists: es.exists,
+      putMapping: es.putMapping,
+    },
     index: es.index,
   }),
 }));
@@ -41,6 +59,32 @@ function request(body: unknown): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe('the mock keeps up with the route', () => {
+  // The failure mode this prevents is nastier than a stale assertion. The route wraps its
+  // index calls in try/catch, so an unmocked method is `undefined`, throws, and gets
+  // swallowed as a warning — the guarded behaviour silently stops happening while the
+  // error message points somewhere else entirely. Assert against the source so adding a
+  // client call to the route fails HERE, naming the method, instead of over there.
+  it('stubs every esClient.indices.* method the route calls', () => {
+    const routeSrc = readFileSync(new URL('./route.ts', import.meta.url), 'utf8');
+    const used = [...routeSrc.matchAll(/indices\.([a-zA-Z]+)\(/g)].map((m) => m[1]);
+
+    expect(used.length).toBeGreaterThan(0); // guard against a regex that matches nothing
+    expect([...new Set(used)].sort()).toEqual(
+      expect.arrayContaining(
+        Object.keys(es)
+          .filter((k) => k !== 'index')
+          .sort(),
+      ),
+    );
+    for (const method of new Set(used)) {
+      expect(es, `route calls indices.${method}() but the mock does not stub it`).toHaveProperty(
+        method,
+      );
+    }
+  });
 });
 
 describe('system_errors is never reindexed', () => {
