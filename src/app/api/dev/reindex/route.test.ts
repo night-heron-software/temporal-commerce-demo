@@ -73,7 +73,11 @@ describe('the mock keeps up with the route', () => {
 
     expect(used.length).toBeGreaterThan(0); // guard against a regex that matches nothing
     expect([...new Set(used)].sort()).toEqual(
-      expect.arrayContaining(Object.keys(es).filter((k) => k !== 'index').sort()),
+      expect.arrayContaining(
+        Object.keys(es)
+          .filter((k) => k !== 'index')
+          .sort(),
+      ),
     );
     for (const method of new Set(used)) {
       expect(es, `route calls indices.${method}() but the mock does not stub it`).toHaveProperty(

@@ -48,7 +48,10 @@ export async function POST(request: NextRequest) {
           await esClient.indices.delete({ index: idx });
         }
       } catch (err) {
-        console.warn(`[dev/reindex] Delete index '${idx}' failed, attempting putMapping fallback:`, err);
+        console.warn(
+          `[dev/reindex] Delete index '${idx}' failed, attempting putMapping fallback:`,
+          err,
+        );
       }
 
       try {
@@ -58,7 +61,10 @@ export async function POST(request: NextRequest) {
         });
       } catch (createErr) {
         const errStr = String(createErr);
-        if (errStr.includes('resource_already_exists_exception') || errStr.includes('already exists')) {
+        if (
+          errStr.includes('resource_already_exists_exception') ||
+          errStr.includes('already exists')
+        ) {
           console.log(`[dev/reindex] Index '${idx}' already exists, refreshing mapping`);
           await esClient.indices.putMapping({
             index: idx,

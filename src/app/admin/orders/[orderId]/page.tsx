@@ -141,7 +141,10 @@ export default function AdminOrderDetailPage() {
           </h1>
           <p className="text-zinc-500 text-sm mt-1 font-mono">{order.orderId}</p>
           <div className="mt-1.5">
-            <EntityIds correlationId={order.correlationId ?? order.cartId} orderId={order.orderId} />
+            <EntityIds
+              correlationId={order.correlationId ?? order.cartId}
+              orderId={order.orderId}
+            />
           </div>
         </div>
         <div className="flex items-center gap-3">
