@@ -1,24 +1,35 @@
 /**
- * OMS Decider — the pure Functional Core (aligned with nightheron-mono, ADR-0009).
+ * OMS Decider — pure Functional Core, on the ADR-0024 decider-native surface
+ * (aligned with nightheron-mono): the framework owns the fold, this module supplies only
  *
- *   decide: (command, state) => Event[]     // what happened, as past-tense facts
- *   evolve: (state, event)   => State        // fold one fact into state (the ONLY writer)
+ *   decide: (command, state) => Event[]     // what happened, as past-tense events
+ *   evolve: (state, event)   => State       // fold one event into state (the ONLY writer)
  *
- * Both functions are pure — no I/O, no clock, no `uuid4`, no Temporal. The deterministic
- * timestamp a decision needs is injected into the *command* by the shell (`states.ts`).
- * `evolve` is the sole writer of order status / feedback / refunds / return request /
- * fulfiller-order state.
+ * Pure — no I/O, no clock, no `uuid4`, no Temporal. The deterministic timestamp and any
+ * prepared data (resolved fulfiller assignments, minted fulfiller-order ids) arrive ON the
+ * enriched command; ids are minted in the states' `prepare` phases.
  *
- * Scope (mirrors the mono rollout decision): this covers the post-intake *lifecycle* —
- * cancel, status updates, feedback, refunds, returns, and fulfilment-status aggregation.
- * The I/O saga *intake* states (pending_assignment → assigning_fulfillers →
- * requesting_fulfillment) and the `finalize` effect union stay imperative in the shell.
+ * Scope: the FULL order lifecycle, intake included. The old split — "the I/O saga intake
+ * states stay imperative in the shell" — is gone: fulfiller assignment and fulfiller-order
+ * construction are decided here as events (`FulfillersAssigned`, `FulfillmentRequested`),
+ * and the shell's reactions (emails, the fulfillment child start) are event-keyed effects
+ * in `states.ts`. (Demo divergence: `capturePayment` decides a bare `PaymentCaptured` —
+ * the mono computes the ORDER_CAPTURE ledger numbers here; the demo has no accounting.)
+ *
+ * Status routing: an admin `updateStatus` decides a per-target event (`OrderShipped`,
+ * `OrderRefunded`, …) rather than a payload-routed `StatusChanged` — route tables key on
+ * event TYPE, so every admin jump is a visible edge in the state diagram. Fulfilment
+ * aggregation likewise decides its OUTCOME (`FulfillmentShipped` / `FulfillmentDelivered`
+ * / `FulfillmentPartiallyShipped`) instead of the shell re-inspecting the folded status.
  */
 
-import type { Decider } from '../framework';
+import type { MachineDecider } from '../framework';
+import type { Cart, Fulfillment } from '../contracts';
 import type {
   OrderState,
   OrderStatus,
+  OrderCommand,
+  OrderAssignment,
   FulfillmentStatusUpdate,
   FulfillerOrder,
   RefundLineInput,
@@ -26,33 +37,79 @@ import type {
   ReturnRequestRecord,
 } from './types';
 
-/** The Chassaing "command": a lifecycle intent, enriched with the deterministic timestamp. */
-export type OrderCommand =
-  | { type: 'cancelOrder' }
-  | { type: 'updateStatus'; status: OrderStatus }
-  | { type: 'submitFeedback'; rating: 1 | 2 | 3 | 4 | 5; comment?: string; at: string }
-  | { type: 'refundOrder'; lines?: RefundLineInput[]; reason?: string; at: string }
+// ==================
+// Commands (enriched) and events
+// ==================
+
+/** Order line item shape with the optional display fields the intake logic reads. */
+export interface OrderCartItem extends Cart.CartItem {
+  productId?: string;
+  title?: string;
+  variantTitle?: string;
+}
+
+/** A fulfiller resolution for one order line (positional), with its prepared assignment id. */
+export type ResolvedAssignment = {
+  assignmentId: string;
+  fulfillerId: string;
+  fulfillerName?: string;
+  fulfillerType?: string;
+  sku?: string;
+} | null;
+
+/**
+ * The command as the decider sees it: the wire/timer command + the framework-injected
+ * timestamp, plus the prepared data two intake commands need (id minting and fulfiller
+ * resolution are impure — they run in `prepare` and ride in on the enriched command).
+ */
+export type EnrichedOrderCommand = (
+  | Exclude<OrderCommand, { type: 'assignFulfillers' } | { type: 'requestFulfillment' }>
+  | (Extract<OrderCommand, { type: 'assignFulfillers' }> & { resolved: ResolvedAssignment[] })
+  | (Extract<OrderCommand, { type: 'requestFulfillment' }> & {
+      fulfillerOrderIds: Record<string, string>;
+    })
+) & { at: string };
+
+/** Past-tense domain events. */
+export type OrderEvent =
+  // ── intake ──
+  // Demo divergence: no capture payload — the mono decides the ORDER_CAPTURE ledger
+  // numbers here; the demo took mock payment at checkout and has no accounting domain.
+  | { type: 'PaymentCaptured'; at: string }
+  | { type: 'FulfillersAssigned'; assignments: OrderAssignment[]; at: string }
+  | { type: 'NoFulfillersResolved'; at: string }
   | {
-      type: 'requestReturn';
-      lines?: RefundLineInput[];
-      reason?: string;
-      updatedBy?: 'system' | 'admin' | 'customer';
+      type: 'FulfillmentRequested';
+      fulfillerOrders: FulfillerOrder[];
+      fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[];
       at: string;
     }
-  | { type: 'confirmReturn'; reason?: string; at: string }
-  | { type: 'denyReturn' }
-  | { type: 'fulfillmentStatus'; update: FulfillmentStatusUpdate; at: string };
-
-/** Past-tense domain facts. */
-export type OrderFact =
-  | { type: 'OrderCancelled' }
-  | { type: 'StatusChanged'; status: OrderStatus }
+  // ── lifecycle ──
+  | { type: 'OrderCancelled'; at: string }
   | { type: 'FeedbackSubmitted'; rating: 1 | 2 | 3 | 4 | 5; comment?: string; at: string }
-  | { type: 'Refunded'; record: RefundRecord; fullyRefunded: boolean }
-  | { type: 'ReturnRequested'; record: ReturnRequestRecord }
-  | { type: 'ReturnConfirmed'; record: RefundRecord }
-  | { type: 'ReturnDenied' }
-  | { type: 'FulfillmentApplied'; update: FulfillmentStatusUpdate; at: string };
+  | { type: 'Refunded'; record: RefundRecord; fullyRefunded: boolean; at: string }
+  | { type: 'ReturnRequested'; record: ReturnRequestRecord; at: string }
+  | { type: 'ReturnConfirmed'; record: RefundRecord; at: string }
+  | { type: 'ReturnDenied'; at: string }
+  | { type: 'FulfillmentApplied'; update: FulfillmentStatusUpdate; at: string }
+  // ── fulfilment-aggregate outcomes (decided, so routing never re-reads folded status) ──
+  | { type: 'FulfillmentPartiallyShipped'; at: string }
+  | { type: 'FulfillmentShipped'; at: string }
+  | { type: 'FulfillmentDelivered'; at: string }
+  // ── forced status moves (admin `updateStatus`) — one event per target, so every
+  //    admin jump is a route-table edge ──
+  | { type: 'OrderProcessing'; at: string }
+  | { type: 'OrderPartiallyShipped'; at: string }
+  | { type: 'OrderShipped'; at: string }
+  | { type: 'OrderDelivered'; at: string }
+  | { type: 'OrderReturnRequested'; at: string }
+  | { type: 'OrderRefunded'; at: string }
+  | { type: 'OrderReturned'; at: string }
+  | { type: 'OrderCompleted'; at: string };
+
+// ==================
+// State copy
+// ==================
 
 /** Deep-copy order state for immutable folds (history entries copied too, so evolve is pure). */
 export function copyOrderState(ctx: Readonly<OrderState>): OrderState {
@@ -69,17 +126,62 @@ export function copyOrderState(ctx: Readonly<OrderState>): OrderState {
   };
 }
 
+// ==================
+// Refund math (pure)
+// ==================
+
 /** Round to cents-precision to keep pro-rated tax stable across folds. */
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Per-line quantities already refunded on this order. */
+function refundedQuantities(state: Readonly<OrderState>): Record<string, number> {
+  const alreadyRefunded: Record<string, number> = {};
+  for (const r of state.refunds ?? []) {
+    for (const l of r.lines) {
+      alreadyRefunded[l.lineItemId] = (alreadyRefunded[l.lineItemId] ?? 0) + l.quantity;
+    }
+  }
+  return alreadyRefunded;
+}
+
+/**
+ * Pure refund-selection validation, for `guard`s: the reason a selection is invalid
+ * (unknown line / non-positive qty / exceeds remaining / nothing left), or undefined when
+ * acceptable. With this in the guard, `decide`'s refund math never throws for a caller
+ * mistake.
+ */
+export function refundSelectionProblem(
+  state: Readonly<OrderState>,
+  lines: RefundLineInput[] | undefined,
+): string | undefined {
+  const alreadyRefunded = refundedQuantities(state);
+  if (!lines || lines.length === 0) {
+    // Full refund of the remainder — invalid only when nothing remains.
+    const anyRemaining = state.order.items.some(
+      (item) => item.quantity - (alreadyRefunded[item.lineItemId] ?? 0) > 0,
+    );
+    return anyRemaining ? undefined : 'Nothing left to refund';
+  }
+  for (const l of lines) {
+    const item = state.order.items.find((i) => i.lineItemId === l.lineItemId);
+    if (!item) return `Unknown line item in refund selection: ${l.lineItemId}`;
+    if (l.quantity <= 0) return `Non-positive refund quantity for ${l.lineItemId}`;
+    const remaining = item.quantity - (alreadyRefunded[l.lineItemId] ?? 0);
+    if (l.quantity > remaining) {
+      return `Refund quantity ${l.quantity} exceeds remaining ${remaining} for ${l.lineItemId}`;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Pure refund computation (simplified from the mono's accounting-package breakdown):
- * validates the selection, pro-rates order tax by the refunded retail share, guards
- * against over-refunding, and reports whether every unit is now refunded. Throws on an
- * invalid selection (unknown line / non-positive qty / exceeds remaining) — the framework
- * converts the throw into an update rejection.
+ * pro-rates order tax by the refunded retail share, guards against over-refunding, and
+ * reports whether every unit is now refunded. Caller mistakes are rejected by
+ * {@link refundSelectionProblem} in the states' guards before this runs; a throw here is
+ * a backstop, not control flow.
  */
 function computeRefundRecord(
   ctx: Readonly<OrderState>,
@@ -87,12 +189,7 @@ function computeRefundRecord(
   reason: string | undefined,
   at: string,
 ): { record: RefundRecord; fullyRefunded: boolean } {
-  const alreadyRefunded: Record<string, number> = {};
-  for (const r of ctx.refunds ?? []) {
-    for (const l of r.lines) {
-      alreadyRefunded[l.lineItemId] = (alreadyRefunded[l.lineItemId] ?? 0) + l.quantity;
-    }
-  }
+  const alreadyRefunded = refundedQuantities(ctx);
 
   const remainingFor = (lineItemId: string): number => {
     const item = ctx.order.items.find((i) => i.lineItemId === lineItemId);
@@ -146,9 +243,86 @@ function computeRefundRecord(
   return { record, fullyRefunded };
 }
 
+// ==================
+// Intake math (pure)
+// ==================
+
+/**
+ * Pure fulfiller-order construction: group assignments by fulfiller, build the
+ * `FulfillerOrder` records and the `FulfillmentFulfillerOrderInput[]` payload. Reads
+ * state only — the assignment updates (fulfillerOrderId + status) are folded by `evolve`
+ * from the emitted event, and the child start + indexing are the `FulfillmentRequested`
+ * effect. Ids are prepared (minted) per fulfiller.
+ */
+export function buildFulfillment(
+  state: Readonly<OrderState>,
+  at: string,
+  fulfillerOrderIds: Record<string, string>,
+): {
+  fulfillerOrders: FulfillerOrder[];
+  fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[];
+} {
+  const byFulfiller: Record<string, OrderAssignment[]> = {};
+  for (const a of state.assignments) {
+    (byFulfiller[a.fulfillerId] ??= []).push(a);
+  }
+
+  const fulfillerOrders: FulfillerOrder[] = [];
+  const fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[] = [];
+
+  for (const [fulfillerId, assignments] of Object.entries(byFulfiller)) {
+    const fulfillerOrderId = fulfillerOrderIds[fulfillerId];
+
+    fulfillerOrders.push({
+      fulfillerOrderId,
+      orderId: state.order.orderId,
+      fulfillerId,
+      fulfillerName: assignments[0].fulfillerName || fulfillerId,
+      status: 'pending',
+      items: assignments.map((a) => ({
+        assignmentId: a.assignmentId,
+        variantId: a.variantId,
+        quantity: a.quantity,
+      })),
+      createdAt: at,
+      updatedAt: at,
+      statusHistory: [{ status: 'pending', timestamp: at, note: 'Fulfiller order created' }],
+    });
+
+    const items: Fulfillment.FulfillmentItem[] = assignments.map((a) => {
+      // Match by the assignment's own line item — assignments are line-scoped, and
+      // matching on variantId would price duplicate-variant lines from the first line.
+      const orderItem = (state.order.items as OrderCartItem[]).find(
+        (i) => i.lineItemId === a.lineItemId,
+      );
+      return {
+        sku: a.sku || a.variantId,
+        productId: a.variantId,
+        variantId: a.variantId,
+        quantity: a.quantity,
+        unitPrice: orderItem?.price ?? 0,
+        title: orderItem?.title || orderItem?.variantTitle || `Item ${a.variantId.slice(0, 8)}`,
+      };
+    });
+
+    fulfillmentInputs.push({
+      fulfillerOrderId,
+      fulfillerId,
+      fulfillerType: 'simulated',
+      items,
+    });
+  }
+
+  return { fulfillerOrders, fulfillmentInputs };
+}
+
+// ==================
+// Status aggregation + forced-status mapping (pure)
+// ==================
+
 /** The machine state implied by the aggregate status of all fulfiller orders (forward-only). */
 export function aggregateShippingState(
-  fulfillerOrders: ReadonlyArray<FulfillerOrder>,
+  fulfillerOrders: ReadonlyArray<Pick<FulfillerOrder, 'status'>>,
 ): 'processing' | 'partially_shipped' | 'shipped' | 'delivered' {
   const isDelivered = (s: FulfillerOrder['status']) => s === 'delivered' || s === 'rejected';
   const isShipped = (s: FulfillerOrder['status']) =>
@@ -161,36 +335,125 @@ export function aggregateShippingState(
 }
 
 /**
- * decide(command, state) → facts. Pure: emits the facts implied by the command. Refund and
- * return-confirm compute the (pure) refund breakdown here; a fulfilment update for an unknown
- * fulfiller order emits nothing (the shell logs + stays put).
+ * The statuses an admin `updateStatus` may force. Anything else (intake statuses,
+ * typos) is rejected by the states' guard — never a throw from `decide`. (Demo
+ * divergence: no `closed` — the demo has no return-window auto-close.)
  */
-export function decide(command: OrderCommand, state: OrderState): OrderFact[] {
-  switch (command.type) {
-    case 'cancelOrder':
-      return [{ type: 'OrderCancelled' }];
+export const FORCEABLE_STATUSES: readonly OrderStatus[] = [
+  'processing',
+  'partially_shipped',
+  'shipped',
+  'delivered',
+  'return_requested',
+  'cancelled',
+  'refunded',
+  'returned',
+  'complete',
+];
 
-    case 'updateStatus':
-      return [{ type: 'StatusChanged', status: command.status }];
+/** The event a forced status move decides — null for a status the guard should have rejected. */
+function forcedStatusEvent(status: OrderStatus, at: string): OrderEvent | null {
+  switch (status) {
+    case 'processing':
+      return { type: 'OrderProcessing', at };
+    case 'partially_shipped':
+      return { type: 'OrderPartiallyShipped', at };
+    case 'shipped':
+      return { type: 'OrderShipped', at };
+    case 'delivered':
+      return { type: 'OrderDelivered', at };
+    case 'return_requested':
+      return { type: 'OrderReturnRequested', at };
+    case 'cancelled':
+      return { type: 'OrderCancelled', at };
+    case 'refunded':
+      return { type: 'OrderRefunded', at };
+    case 'returned':
+      return { type: 'OrderReturned', at };
+    case 'complete':
+      return { type: 'OrderCompleted', at };
+    default:
+      return null;
+  }
+}
+
+// ==================
+// decide
+// ==================
+
+/** Normalize an empty selection list to "the full remainder". */
+function normalizeLines(lines: RefundLineInput[] | undefined): RefundLineInput[] | undefined {
+  return lines && lines.length > 0 ? lines : undefined;
+}
+
+/**
+ * decide(command, state) → events. Pure: emits the events implied by the command. Refund and
+ * return-confirm compute the (pure) refund breakdown here; a fulfilment update for an unknown
+ * fulfiller order emits nothing (stay put).
+ */
+export function decide(command: EnrichedOrderCommand, state: OrderState): OrderEvent[] {
+  const at = command.at;
+  switch (command.type) {
+    // ── intake ──
+    case 'capturePayment':
+      // Demo: a bare hop event — payment was mock-captured at checkout; no ledger here.
+      return [{ type: 'PaymentCaptured', at }];
+
+    case 'assignFulfillers': {
+      const assignments: OrderAssignment[] = [];
+      for (let i = 0; i < state.order.items.length; i++) {
+        const item = state.order.items[i];
+        const assignment = command.resolved[i];
+        if (!assignment) continue; // unresolved line — falls back to the manual path
+        assignments.push({
+          assignmentId: assignment.assignmentId,
+          lineItemId: item.lineItemId,
+          variantId: item.variantId,
+          fulfillerId: assignment.fulfillerId,
+          fulfillerName: assignment.fulfillerName,
+          fulfillerType: assignment.fulfillerType,
+          quantity: item.quantity,
+          status: 'assigned',
+          sku: assignment.sku,
+        });
+      }
+      return assignments.length > 0
+        ? [{ type: 'FulfillersAssigned', assignments, at }]
+        : [{ type: 'NoFulfillersResolved', at }];
+    }
+
+    case 'requestFulfillment': {
+      const { fulfillerOrders, fulfillmentInputs } = buildFulfillment(
+        state,
+        at,
+        command.fulfillerOrderIds,
+      );
+      return [{ type: 'FulfillmentRequested', fulfillerOrders, fulfillmentInputs, at }];
+    }
+
+    // ── lifecycle ──
+    case 'cancelOrder':
+      return [{ type: 'OrderCancelled', at }];
+
+    case 'updateStatus': {
+      const event = forcedStatusEvent(command.status, at);
+      return event ? [event] : [];
+    }
 
     case 'submitFeedback':
-      return [
-        {
-          type: 'FeedbackSubmitted',
-          rating: command.rating,
-          comment: command.comment,
-          at: command.at,
-        },
-      ];
+      return [{ type: 'FeedbackSubmitted', rating: command.rating, comment: command.comment, at }];
 
     case 'refundOrder': {
       const { record, fullyRefunded } = computeRefundRecord(
         state,
-        command.lines,
+        normalizeLines(command.lines),
         command.reason,
-        command.at,
+        at,
       );
-      return [{ type: 'Refunded', record, fullyRefunded }];
+      const events: OrderEvent[] = [{ type: 'Refunded', record, fullyRefunded, at }];
+      // A full refund also decides the terminal move — routing keys on the event.
+      if (fullyRefunded) events.push({ type: 'OrderRefunded', at });
+      return events;
     }
 
     case 'requestReturn':
@@ -198,41 +461,54 @@ export function decide(command: OrderCommand, state: OrderState): OrderFact[] {
         {
           type: 'ReturnRequested',
           record: {
-            lines: command.lines,
+            lines: normalizeLines(command.lines),
             reason: command.reason,
-            requestedAt: command.at,
+            requestedAt: at,
             requestedBy: command.updatedBy,
           },
+          at,
         },
       ];
 
     case 'confirmReturn': {
       const req = state.returnRequest;
-      const { record } = computeRefundRecord(
-        state,
-        req?.lines,
-        command.reason ?? req?.reason,
-        command.at,
-      );
-      return [{ type: 'ReturnConfirmed', record }];
+      const { record } = computeRefundRecord(state, req?.lines, command.reason ?? req?.reason, at);
+      return [{ type: 'ReturnConfirmed', record, at }];
     }
 
     case 'denyReturn':
-      return [{ type: 'ReturnDenied' }];
+      return [{ type: 'ReturnDenied', at }];
 
-    case 'fulfillmentStatus':
-      return state.fulfillerOrders.some(
-        (so) => so.fulfillerOrderId === command.update.fulfillerOrderId,
-      )
-        ? [{ type: 'FulfillmentApplied', update: command.update, at: command.at }]
-        : [];
+    case 'fulfillmentStatus': {
+      const update = command.update;
+      const known = state.fulfillerOrders.some(
+        (so) => so.fulfillerOrderId === update.fulfillerOrderId,
+      );
+      if (!known) return []; // stay put; nothing happened to THIS order
+      const events: OrderEvent[] = [{ type: 'FulfillmentApplied', update, at }];
+      // Decide the aggregate OUTCOME by projecting the update onto the current set —
+      // routing keys on these events instead of re-reading the folded status.
+      const projected = state.fulfillerOrders.map((so) =>
+        so.fulfillerOrderId === update.fulfillerOrderId ? { status: update.status } : so,
+      );
+      const aggregate = aggregateShippingState(projected);
+      if (aggregate === 'delivered') events.push({ type: 'FulfillmentDelivered', at });
+      else if (aggregate === 'shipped') events.push({ type: 'FulfillmentShipped', at });
+      else if (aggregate === 'partially_shipped')
+        events.push({ type: 'FulfillmentPartiallyShipped', at });
+      return events;
+    }
 
     default:
       return [];
   }
 }
 
-/** Fold a single fulfilment-status fact: apply to the fulfiller order, then aggregate. */
+// ==================
+// evolve
+// ==================
+
+/** Fold a single fulfilment-status event: apply to the fulfiller order, then aggregate. */
 function applyFulfillment(
   draft: OrderState,
   update: FulfillmentStatusUpdate,
@@ -282,40 +558,72 @@ function applyFulfillment(
 }
 
 /**
- * evolve(state, fact) → state. Pure fold; the ONLY writer of order status / feedback / refunds /
- * return request / fulfiller-order state.
+ * evolve(state, event) → state. Pure fold; the ONLY writer of order status / feedback / refunds /
+ * return request / assignment / fulfiller-order state.
  */
-export function evolve(state: OrderState, fact: OrderFact): OrderState {
+export function evolve(state: OrderState, event: OrderEvent): OrderState {
   const draft = copyOrderState(state);
-  switch (fact.type) {
+  switch (event.type) {
+    // ── intake ──
+    case 'PaymentCaptured':
+      // Nothing folds — the demo has no ledger; this is the intake hop marker.
+      return draft;
+
+    case 'FulfillersAssigned':
+      draft.assignments.push(...event.assignments.map((a) => ({ ...a })));
+      return draft;
+
+    case 'NoFulfillersResolved':
+      return draft;
+
+    case 'FulfillmentRequested': {
+      draft.fulfillerOrders = event.fulfillerOrders.map((so) => ({
+        ...so,
+        items: so.items.map((i) => ({ ...i })),
+        statusHistory: so.statusHistory.map((h) => ({ ...h })),
+      }));
+      for (const so of event.fulfillerOrders) {
+        for (const item of so.items) {
+          const assignment = draft.assignments.find((a) => a.assignmentId === item.assignmentId);
+          if (assignment) {
+            assignment.fulfillerOrderId = so.fulfillerOrderId;
+            assignment.status = 'fulfilled';
+          }
+        }
+      }
+      draft.status = 'processing';
+      return draft;
+    }
+
+    // ── lifecycle ──
     case 'OrderCancelled':
       draft.status = 'cancelled';
       return draft;
 
-    case 'StatusChanged':
-      draft.status = fact.status;
-      return draft;
-
     case 'FeedbackSubmitted':
       draft.status = 'complete';
-      draft.customerFeedback = { rating: fact.rating, comment: fact.comment, submittedAt: fact.at };
+      draft.customerFeedback = {
+        rating: event.rating,
+        comment: event.comment,
+        submittedAt: event.at,
+      };
       return draft;
 
     case 'Refunded':
-      draft.refunds = [...(draft.refunds ?? []), fact.record];
-      if (fact.fullyRefunded) draft.status = 'refunded';
-      draft.updatedAt = fact.record.timestamp;
+      draft.refunds = [...(draft.refunds ?? []), event.record];
+      if (event.fullyRefunded) draft.status = 'refunded';
+      draft.updatedAt = event.record.timestamp;
       return draft;
 
     case 'ReturnRequested':
-      draft.returnRequest = fact.record;
+      draft.returnRequest = event.record;
       return draft;
 
     case 'ReturnConfirmed':
-      draft.refunds = [...(draft.refunds ?? []), fact.record];
+      draft.refunds = [...(draft.refunds ?? []), event.record];
       draft.status = 'returned';
       draft.returnRequest = undefined;
-      draft.updatedAt = fact.record.timestamp;
+      draft.updatedAt = event.record.timestamp;
       return draft;
 
     case 'ReturnDenied':
@@ -323,32 +631,59 @@ export function evolve(state: OrderState, fact: OrderFact): OrderState {
       return draft;
 
     case 'FulfillmentApplied':
-      return applyFulfillment(draft, fact.update, fact.at);
+      return applyFulfillment(draft, event.update, event.at);
+
+    // ── aggregate outcomes (FulfillmentApplied already folded the status; idempotent) ──
+    case 'FulfillmentPartiallyShipped':
+      draft.status = 'partially_shipped';
+      return draft;
+    case 'FulfillmentShipped':
+      draft.status = 'shipped';
+      return draft;
+    case 'FulfillmentDelivered':
+      draft.status = 'delivered';
+      return draft;
+
+    // ── forced status moves ──
+    case 'OrderProcessing':
+      draft.status = 'processing';
+      return draft;
+    case 'OrderPartiallyShipped':
+      draft.status = 'partially_shipped';
+      return draft;
+    case 'OrderShipped':
+      draft.status = 'shipped';
+      return draft;
+    case 'OrderDelivered':
+      // Deliberately does NOT set `deliveredAt` — only a real fulfilment aggregate does.
+      draft.status = 'delivered';
+      return draft;
+    case 'OrderReturnRequested':
+      draft.status = 'return_requested';
+      return draft;
+    case 'OrderRefunded':
+      draft.status = 'refunded';
+      return draft;
+    case 'OrderReturned':
+      draft.status = 'returned';
+      return draft;
+    case 'OrderCompleted':
+      draft.status = 'complete';
+      return draft;
 
     default:
       return draft;
   }
 }
 
-/** Terminal statuses — the order lifecycle's defined ends. */
-function isTerminalStatus(state: OrderState): boolean {
-  return (
-    state.status === 'cancelled' ||
-    state.status === 'refunded' ||
-    state.status === 'returned' ||
-    state.status === 'complete'
-  );
-}
-
 /**
- * The assembled Decider, conforming to the shared `Decider<Command, Event, State>` shape.
- * `initialState` documents the birth shape for the Decider; at runtime the real initial context
- * is built from workflow input (`orderWorkflow`).
+ * The assembled decider, conforming to the framework's `MachineDecider` shape (ADR-0024:
+ * `isTerminal` is gone — terminality is the route tables' job; `initialState` remains as
+ * the canonical empty shape for decider unit tests, never consulted at runtime).
  */
-export const omsDecider: Decider<OrderCommand, OrderFact, OrderState> = {
+export const omsDecider: MachineDecider<EnrichedOrderCommand, OrderEvent, OrderState> = {
   decide,
   evolve,
-  isTerminal: isTerminalStatus,
   initialState: {
     order: undefined as unknown as OrderState['order'],
     status: 'pending_assignment',

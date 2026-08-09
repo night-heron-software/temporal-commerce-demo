@@ -1,11 +1,12 @@
 /**
  * Correlation header codec — shared by the workflow-outbound injector
- * (`activity-capture.ts`) and the worker's activity-inbound interceptor
- * (`src/lib/worker-otel.ts`).
+ * (`activity-capture.ts`) and the host worker's activity-inbound interceptor.
  *
- * Workflow-safe: imports only `@temporalio/common`. Pure encode/decode over the default
- * payload converter so both sides agree on the wire shape and the round-trip is unit
- * testable without a worker.
+ * Workflow-safe: imports only `@temporalio/common`, so the same module is reachable from
+ * inside the workflow sandbox and from plain Node worker code (see the `./correlation`
+ * export subpath, which hosts import to avoid pulling `@temporalio/workflow`). Pure
+ * encode/decode over the default payload converter so both sides agree on the wire shape
+ * and the round-trip is unit testable without a worker.
  */
 import { defaultPayloadConverter, type Payload } from '@temporalio/common';
 

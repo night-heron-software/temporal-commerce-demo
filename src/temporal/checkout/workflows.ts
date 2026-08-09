@@ -5,7 +5,7 @@ import type {
   CheckoutWorkflowInput,
   CheckoutWorkflowResult,
   CheckoutContext,
-  CheckoutInput,
+  CheckoutCommand,
   CheckoutStateName,
   CheckoutStep,
   RecomputeSignal,
@@ -29,6 +29,7 @@ import {
   runStateMachine,
   StateMachineConfig,
   MappedUpdateRegistration,
+  SignalRegistration,
   deriveDisplayStatus,
   isTerminal,
 } from '../framework';
@@ -101,10 +102,10 @@ export async function checkoutWorkflow(
   // ── State machine run ──
   const config: StateMachineConfig<
     CheckoutStateName,
-    CheckoutInput,
+    CheckoutCommand,
     CheckoutContext,
     CheckoutState | void,
-    RecomputeSignal
+    CheckoutCommand
   > = {
     states: CHECKOUT_STATES,
     initialState: 'validating',
@@ -128,6 +129,8 @@ export async function checkoutWorkflow(
       }
     },
     onTerminal: async (finalCtx: CheckoutContext, terminalState: string) => {
+      // A machine-decided cancel/timeout already released via the Cancelled effect (and
+      // evolve cleared the list); this covers the remaining non-complete closes.
       if (!isTerminal(terminalState, 'complete') && finalCtx.reservations.length > 0) {
         await releaseReservations(finalCtx.reservations);
       }
@@ -147,13 +150,13 @@ export async function checkoutWorkflow(
   };
 
   const updateHandlers: MappedUpdateRegistration<
-    CheckoutInput,
+    CheckoutCommand,
     CheckoutContext,
     CheckoutState | void
   >[] = [
     {
       definition: setShippingUpdate,
-      toEvent: (s: SetShippingSignal) => ({
+      toEvent: (s: SetShippingSignal): CheckoutCommand => ({
         type: 'setShipping',
         shippingAddress: s.shippingAddress,
       }),
@@ -161,12 +164,15 @@ export async function checkoutWorkflow(
     },
     {
       definition: setPaymentUpdate,
-      toEvent: (s: SetPaymentSignal) => ({ type: 'setPayment', paymentMethod: s.paymentMethod }),
+      toEvent: (s: SetPaymentSignal): CheckoutCommand => ({
+        type: 'setPayment',
+        paymentMethod: s.paymentMethod,
+      }),
       ...stateFormatters,
     },
     {
       definition: submitOrderUpdate,
-      toEvent: (s: SubmitOrderSignal) => ({
+      toEvent: (s: SubmitOrderSignal): CheckoutCommand => ({
         type: 'submitOrder',
         reviewedCartVersion: s?.reviewedCartVersion,
       }),
@@ -174,12 +180,12 @@ export async function checkoutWorkflow(
     },
     {
       definition: cancelCheckoutUpdate,
-      toEvent: () => ({ type: 'cancelCheckout' }),
+      toEvent: (): CheckoutCommand => ({ type: 'cancelCheckout' }),
       ...stateFormatters,
     },
     {
       definition: acknowledgeCartChangeUpdate,
-      toEvent: (s: { cartVersion: number }) => ({
+      toEvent: (s: { cartVersion: number }): CheckoutCommand => ({
         type: 'acknowledgeCartChange',
         cartVersion: s.cartVersion,
       }),
@@ -187,20 +193,32 @@ export async function checkoutWorkflow(
     },
     {
       definition: retargetParentUpdate,
-      toEvent: (s: RetargetParentSignal) => ({
+      toEvent: (s: RetargetParentSignal): CheckoutCommand => ({
         type: 'retargetParent',
         newParentCartWorkflowId: s.newParentCartWorkflowId,
       }),
     },
   ];
 
+  // ADR-0024: the cart's nudge signal is transport — mapped to the `recompute` command,
+  // the machine's single input vocabulary.
+  const signals: SignalRegistration<CheckoutCommand>[] = [
+    {
+      definition: recomputeSignal,
+      toSignal: (payload: RecomputeSignal): CheckoutCommand => ({
+        type: 'recompute',
+        cartVersion: payload?.cartVersion,
+      }),
+    },
+  ];
+
   ctx = await runStateMachine<
     CheckoutStateName,
-    CheckoutInput,
+    CheckoutCommand,
     CheckoutContext,
     CheckoutState | void,
-    RecomputeSignal
-  >(config, ctx, updateHandlers, recomputeSignal);
+    CheckoutCommand
+  >(config, ctx, updateHandlers, signals);
 
   // ── Unified exit path ──
   const result: CheckoutWorkflowResult = {

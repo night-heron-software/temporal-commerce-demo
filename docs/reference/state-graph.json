@@ -1,8 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generator": "scripts/generate-state-diagrams.mjs",
   "machines": [
     {
+      "id": "CART_STATES",
       "domain": "cart",
       "registry": "CART_STATES",
       "source": "src/temporal/cart/states.ts",
@@ -15,118 +16,65 @@
         {
           "name": "active",
           "timeout": "30 days",
+          "commands": [
+            {
+              "name": "addItem"
+            },
+            {
+              "name": "updateQuantity"
+            },
+            {
+              "name": "removeItem"
+            },
+            {
+              "name": "applyCoupon"
+            },
+            {
+              "name": "linkUser"
+            },
+            {
+              "name": "expireCart"
+            },
+            {
+              "name": "beginCheckout",
+              "guarded": true,
+              "prepareActivities": [
+                "startChild"
+              ]
+            }
+          ],
           "transitional": false,
-          "hasPrepare": true,
+          "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "addItem",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CheckoutEntered",
+              "kind": "event",
+              "to": "checkout"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CartAbandoned",
+              "kind": "event",
+              "to": "__terminal:abandoned"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
-            },
-            {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
-            },
-            {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
-            },
-            {
-              "on": "applyCoupon",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting"
-              ]
-            },
-            {
-              "on": "linkUser",
-              "kind": "update",
+              "on": "*",
+              "kind": "event",
               "to": "active"
             },
             {
-              "on": "beginCheckout",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "prepared.empty"
-              ],
-              "prepareActivities": [
-                "startChild"
-              ]
+              "on": "expireCart",
+              "kind": "timeout",
+              "to": "checkout"
             },
             {
-              "on": "beginCheckout",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "prepared.empty"
-              ],
-              "prepareActivities": [
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
+              "on": "expireCart",
               "kind": "timeout",
               "to": "__terminal:abandoned"
             },
             {
-              "on": "signal",
-              "kind": "signal",
+              "on": "expireCart",
+              "kind": "timeout",
               "to": "active"
             }
           ]
@@ -134,148 +82,93 @@
         {
           "name": "checkout",
           "timeout": "1 hour",
+          "commands": [
+            {
+              "name": "addItem"
+            },
+            {
+              "name": "updateQuantity"
+            },
+            {
+              "name": "removeItem"
+            },
+            {
+              "name": "applyCoupon"
+            },
+            {
+              "name": "linkUser"
+            },
+            {
+              "name": "beginCheckout"
+            },
+            {
+              "name": "submitStarted"
+            },
+            {
+              "name": "submitAborted"
+            },
+            {
+              "name": "checkoutCompleted"
+            },
+            {
+              "name": "checkoutTimedOut"
+            }
+          ],
           "transitional": false,
-          "hasPrepare": true,
+          "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "addItem",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CheckoutDisowned",
+              "kind": "event",
+              "to": "active"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CheckoutFailed",
+              "kind": "event",
+              "to": "active"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CartCompleted",
+              "kind": "event",
+              "to": "__terminal:completed"
             },
             {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
+              "on": "CartAbandoned",
+              "kind": "event",
+              "to": "__terminal:abandoned"
             },
             {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
-            },
-            {
-              "on": "applyCoupon",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting"
-              ]
-            },
-            {
-              "on": "linkUser",
-              "kind": "update",
+              "on": "*",
+              "kind": "event",
               "to": "checkout"
             },
             {
-              "on": "beginCheckout",
-              "kind": "update",
-              "to": "checkout"
-            },
-            {
-              "on": "timeout",
+              "on": "checkoutTimedOut",
               "kind": "timeout",
               "to": "active"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "checkout",
-              "conditions": [
-                "signal.kind === 'submitStarted'",
-                "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
-                "context.cart.status === 'completed'"
-              ],
-              "signalKinds": [
-                "submitStarted",
-                "submitAborted"
-              ]
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "__terminal:completed"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:completed",
-              "conditions": [
-                "signal.kind === 'submitStarted'",
-                "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
-                "context.cart.status === 'completed'"
-              ],
-              "signalKinds": [
-                "submitStarted",
-                "submitAborted"
-              ]
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "__terminal:abandoned"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "active",
-              "conditions": [
-                "signal.kind === 'submitStarted'",
-                "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
-                "context.cart.status === 'completed'"
-              ],
-              "signalKinds": [
-                "submitStarted",
-                "submitAborted"
-              ]
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "checkout"
             }
           ]
         }
       ]
     },
     {
+      "id": "CHECKOUT_STATES",
       "domain": "checkout",
       "registry": "CHECKOUT_STATES",
       "source": "src/temporal/checkout/states.ts",
@@ -391,6 +284,7 @@
       ]
     },
     {
+      "id": "FULFILLER_ORDER_STATES",
       "domain": "fulfillment",
       "registry": "FULFILLER_ORDER_STATES",
       "source": "src/temporal/fulfillment/fulfiller-states.ts",
@@ -607,6 +501,7 @@
       ]
     },
     {
+      "id": "FULFILLMENT_STATES",
       "domain": "fulfillment",
       "registry": "FULFILLMENT_STATES",
       "source": "src/temporal/fulfillment/states.ts",
@@ -694,6 +589,7 @@
       ]
     },
     {
+      "id": "OMS_STATES",
       "domain": "oms",
       "registry": "OMS_STATES",
       "source": "src/temporal/oms/states.ts",

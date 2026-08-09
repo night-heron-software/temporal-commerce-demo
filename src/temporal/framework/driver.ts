@@ -215,7 +215,10 @@ export async function runStateMachine<
         input = { kind: 'timeout', timestamp: new Date().toISOString() };
         inputEventDesc = 'automatic';
       } else {
-        const timeout = stateConfig.timeout ?? '1 millisecond';
+        const timeout =
+          (typeof stateConfig.timeout === 'function'
+            ? stateConfig.timeout(ctx)
+            : stateConfig.timeout) ?? '1 millisecond';
         const woke = await condition(
           () => updateQueue.length > 0 || signalQueue.length > 0,
           timeout,
@@ -262,15 +265,20 @@ export async function runStateMachine<
         throw err;
       }
 
-      // 6. Apply context
+      // 6. Apply context — unless the input was REJECTED (ADR-0024). A rejection
+      // changes nothing: the caller gets the error (step 7b/8), but context hooks,
+      // onTransition, and recording (7c) all skip — a rejection is not a transition
+      // and must not project.
       const previousStateName = currentStateName;
-      ctx = output.context;
-      if (config.onContextUpdate) {
-        config.onContextUpdate(ctx, output.next);
+      if (!output.rejected) {
+        ctx = output.context;
+        if (config.onContextUpdate) {
+          config.onContextUpdate(ctx, output.next);
+        }
       }
 
       // 7. Trigger onTransition Hook
-      if (config.onTransition) {
+      if (config.onTransition && !output.rejected) {
         try {
           await config.onTransition(
             previousStateName,
@@ -306,7 +314,11 @@ export async function runStateMachine<
       // 7c. Record the transition (ADR-0010) — on a real state change, or any command
       // (update/signal) so context mutations within a state are captured too. Idle timeout
       // ticks that change nothing are skipped.
-      if (recorder && (output.next !== previousStateName || input.kind !== 'timeout')) {
+      if (
+        recorder &&
+        !output.rejected &&
+        (output.next !== previousStateName || input.kind !== 'timeout')
+      ) {
         recorder.record({
           from: previousStateName,
           to: output.next,

@@ -7,7 +7,7 @@
 
 Reference for every domain state machine in `temporal-commerce-demo`. Regenerated from source by `npm run docs:diagrams`.
 
-> **Trigger kinds** — `update:` (Temporal Update, synchronous), `signal` (fire-and-forget Signal), `timeout` (wall-clock deadline), *(auto)* (transitional state, no input). The auto-vs-timeout distinction is recorded, not just displayed: transitional advancement is persisted to `workflow_state_transitions` as trigger kind `automatic` (PR #45). Self-loops (event processed but state stays the same) are shown as looping arcs on the state. Notes show `prepare:` activities (I/O), `if:` conditions tested in `decide`, and `finalize:` activities (side-effects).
+> **Trigger kinds** — `update:` (Temporal Update, synchronous), `signal` (fire-and-forget Signal), `timeout` (wall-clock deadline), *(auto)* (transitional state, no input). Self-loops (event processed but state stays the same) are shown as looping arcs on the state. The auto-vs-timeout distinction is recorded, not just displayed: transitional advancement is persisted to `workflow_state_transitions` as trigger kind `automatic` (PR #45). Notes show `prepare:` activities (I/O), `if:` conditions tested in `decide`, and `finalize:` activities (side-effects).
 
 ## Cross-Domain Orchestration
 
@@ -39,54 +39,47 @@ stateDiagram-v2
   active
   checkout
   [*] --> active
-  active --> active: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / signal
-  active --> [*]: updateQuantity / removeItem / timeout → abandoned
-  active --> checkout: beginCheckout
-  checkout --> checkout: addItem / updateQuantity / removeItem / applyCoupon / linkUser / beginCheckout / submitStarted / submitAborted
-  checkout --> [*]: updateQuantity / removeItem → abandoned
-  checkout --> active: timeout / submitStarted / submitAborted
-  checkout --> [*]: submitStarted / submitAborted → completed
+  active --> checkout: CheckoutEntered / timeout
+  active --> [*]: CartAbandoned / timeout → abandoned
+  active --> active: * / timeout
+  checkout --> active: CheckoutDisowned / CheckoutFailed / timeout
+  checkout --> [*]: CartCompleted / timeout → completed
+  checkout --> [*]: CartAbandoned / timeout → abandoned
+  checkout --> checkout: * / timeout
   note right of active: timeout 30 days
   note right of checkout: timeout 1 hour
 ```
 
 ### State: `active`
 
+**Accepts:** `addItem` · `updateQuantity` · `removeItem` · `applyCoupon` · `linkUser` · `expireCart` · `beginCheckout` *(guarded; prepare: startChild)* — any other command is rejected.
+
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: addItem` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError` |
-| `update: updateQuantity` | `active` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: removeItem` | `active` | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
-| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
-| `update: applyCoupon` | `active` | if: `ctx.submitting` |
-| `update: linkUser` | `active` |  |
-| `update: beginCheckout` | `active` | prepare: `startChild` · if: `prepared.empty` |
-| `update: beginCheckout` | `checkout` | prepare: `startChild` · if: `prepared.empty` |
-| `timeout` | ⇒ abandoned |  |
-| `signal` | `active` |  |
+| `event: CheckoutEntered` | `checkout` |  |
+| `event: CartAbandoned` | ⇒ abandoned |  |
+| `event: *` | `active` |  |
+| `timeout → expireCart` | `checkout` |  |
+| `timeout → expireCart` | ⇒ abandoned |  |
+| `timeout → expireCart` | `active` |  |
 
 **Timeout:** 30 days
 
 ### State: `checkout`
 
+**Accepts:** `addItem` · `updateQuantity` · `removeItem` · `applyCoupon` · `linkUser` · `beginCheckout` · `submitStarted` · `submitAborted` · `checkoutCompleted` · `checkoutTimedOut` — any other command is rejected.
+
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `update: addItem` | `checkout` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError` |
-| `update: updateQuantity` | `checkout` | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: updateQuantity` | ⇒ abandoned | prepare: `releaseCartItem`, `reserveCartItem` · if: `ctx.submitting`; `prepared.reserveError`; `context.cart.items.length === 0` |
-| `update: removeItem` | `checkout` | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
-| `update: removeItem` | ⇒ abandoned | prepare: `releaseCartItem` · if: `ctx.submitting`; `context.cart.items.length === 0` |
-| `update: applyCoupon` | `checkout` | if: `ctx.submitting` |
-| `update: linkUser` | `checkout` |  |
-| `update: beginCheckout` | `checkout` |  |
-| `timeout` | `active` |  |
-| `signal` | `checkout` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined &&
-          result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
-| `signal` | ⇒ completed | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined &&
-          result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
-| `signal` | `active` | if: `signal.kind === 'submitStarted'`; `signal.kind === 'submitAborted'`; `result.checkoutVersion !== undefined &&
-          result.checkoutVersion !== ctx.checkoutVersion`; `context.cart.status === 'completed'` · signal kinds: `submitStarted`, `submitAborted` |
+| `event: CheckoutDisowned` | `active` |  |
+| `event: CheckoutFailed` | `active` |  |
+| `event: CartCompleted` | ⇒ completed |  |
+| `event: CartAbandoned` | ⇒ abandoned |  |
+| `event: *` | `checkout` |  |
+| `timeout → checkoutTimedOut` | `active` |  |
+| `timeout → checkoutTimedOut` | ⇒ completed |  |
+| `timeout → checkoutTimedOut` | ⇒ abandoned |  |
+| `timeout → checkoutTimedOut` | `checkout` |  |
 
 **Timeout:** 1 hour
 

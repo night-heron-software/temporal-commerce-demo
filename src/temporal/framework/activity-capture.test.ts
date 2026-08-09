@@ -38,8 +38,13 @@ describe('transition activity-capture interceptor', () => {
     await schedule('indexCart', ['cart-1'], undefined);
     endActivityCapture();
     expect(bucket).toEqual([
-      { name: 'reserveCartItem', args: [{ sku: 'A' }], result: { reserved: true } },
-      { name: 'indexCart', args: ['cart-1'], result: undefined },
+      {
+        name: 'reserveCartItem',
+        args: [{ sku: 'A' }],
+        result: { reserved: true },
+        durationMs: expect.any(Number),
+      },
+      { name: 'indexCart', args: ['cart-1'], result: undefined, durationMs: expect.any(Number) },
     ]);
   });
 
@@ -52,6 +57,33 @@ describe('transition activity-capture interceptor', () => {
     ).rejects.toThrow('declined');
     endActivityCapture();
     expect(bucket[0]).toMatchObject({ name: 'processPayment', args: [1], error: 'declined' });
+  });
+
+  // Durations use WORKFLOW time (Date.now() is SDK-patched in the sandbox and replayed from
+  // history), so they measure what the workflow waited: dispatch + queue + execution.
+  it('records how long the workflow waited on each activity', async () => {
+    const clock = vi.spyOn(Date, 'now');
+    clock.mockReturnValueOnce(1_000).mockReturnValueOnce(1_063); // schedule → completion
+    const bucket = beginActivityCapture();
+    await schedule('reserveCartItem', [], { ok: true });
+    endActivityCapture();
+    // 3ms of activity work behind 60ms of dispatch still reads as the 63ms the workflow waited.
+    expect(bucket[0].durationMs).toBe(63);
+    clock.mockRestore();
+  });
+
+  it('records the duration for a FAILED activity too — a slow failure is still a slow hop', async () => {
+    const clock = vi.spyOn(Date, 'now');
+    clock.mockReturnValueOnce(5_000).mockReturnValueOnce(5_250);
+    const bucket = beginActivityCapture();
+    await expect(
+      outbound.scheduleActivity({ activityType: 'processPayment', args: [] }, () =>
+        Promise.reject(new Error('declined')),
+      ),
+    ).rejects.toThrow('declined');
+    endActivityCapture();
+    expect(bucket[0]).toMatchObject({ error: 'declined', durationMs: 250 });
+    clock.mockRestore();
   });
 
   it('excludes the recorder’s own persist activity', async () => {
@@ -143,7 +175,12 @@ describe('correlation-header injection', () => {
     await schedule('reserveCartItem', [{ sku: 'A' }], { reserved: true });
     endActivityCapture();
     expect(bucket).toEqual([
-      { name: 'reserveCartItem', args: [{ sku: 'A' }], result: { reserved: true } },
+      {
+        name: 'reserveCartItem',
+        args: [{ sku: 'A' }],
+        result: { reserved: true },
+        durationMs: expect.any(Number),
+      },
     ]);
   });
 });

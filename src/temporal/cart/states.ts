@@ -1,222 +1,188 @@
-/**
- * Cart states — the shell around the pure cart Decider (aligned with nightheron-mono).
- *
- * The cart stays editable in BOTH `active` and `checkout`: the item-edit handlers are
- * genuinely shared (each edit keeps the cart in whatever state it is already in,
- * expressed as `next: SELF`). While the checkout child is placing the order
- * (`ctx.submitting`, set by the submit-freeze signals) edits are rejected. A cart edit
- * during checkout triggers a `recompute` nudge to the checkout child — sent from the
- * workflow's onTransition hook, not from here.
- *
- * `decide` (cart-decider.ts) emits facts; `evolve` folds them — the ONLY writer of cart
- * contents / status / checkout link / submit flag. Every side effect (inventory
- * reservations, the checkout child, id generation) stays in the shell `prepare` handlers.
- */
-import { log, startChild, ParentClosePolicy, uuid4 } from '@temporalio/workflow';
+import {
+  log,
+  startChild,
+  getExternalWorkflowHandle,
+  defineSignal,
+  ParentClosePolicy,
+  uuid4,
+  ApplicationFailure,
+} from '@temporalio/workflow';
 import { reserveCartItem, releaseCartItem } from './activities';
 import { buildCheckoutInput } from './cart-logic';
-import { decide as cartDecide, evolve } from './cart-decider';
-import type { CartCommand } from './cart-decider';
+import { cartDecider } from './cart-decider';
+import type { CartEvent } from './cart-decider';
 import type {
-  CartEvent,
+  CartCommand,
   CartUpdateResponse,
-  CartInboundSignal,
   CheckoutWorkflowResult,
   CheckoutWorkflowInput,
   CartStateName,
   CartWorkflowContext,
 } from './types';
-import { defineDomain, terminal, SELF, workflowCorrelationId } from '../framework';
-import type { StateRegistry, TransitionMap } from '../framework';
+import { defineMachine, reject, terminal, SELF, workflowCorrelationId } from '../framework';
+import type { CommandHandler, EffectsMap, Rejection, StateRegistry } from '../framework';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 
 // ==================
-// Domain factory — binds the shared type params once
+// The machine (ADR-0024 decider-native surface, aligned with nightheron-mono).
+//
+// The framework owns the fold: each accepted command runs guard → prepare → decide →
+// evolve, and routing keys on the EMITTED EVENTS — the shell never re-derives what the
+// decider said (emptying the cart routes on `CartAbandoned`, not on a re-checked
+// `items.length === 0`). `evolve` stamps `updatedAt`/`cartVersion` on every fold, so the
+// old onTransition bump-and-flush is gone. A command a state does not list is
+// REJECTED: typed error to the caller, no transition, no recording, no projection.
 // ==================
 
-const cart = defineDomain<
+const m = defineMachine<
   CartStateName,
+  CartCommand,
   CartEvent,
   CartWorkflowContext,
-  CartUpdateResponse,
-  CartInboundSignal
->();
-
-type CartTransitions = TransitionMap<
-  CartStateName,
-  CartWorkflowContext,
-  CartUpdateResponse,
-  CartEvent
->;
-
-// ==================
-// Shell adapter — runs the pure Decider behind the driver.
-// ==================
-
-function apply(ctx: Readonly<CartWorkflowContext>, command: CartCommand): CartWorkflowContext {
-  const state = ctx as CartWorkflowContext;
-  return cartDecide(command, state).reduce(evolve, state);
-}
+  CartUpdateResponse
+>({
+  decider: cartDecider,
+  respond: (ctx) => ctx.cart,
+});
 
 /**
  * Reject a cart edit while the checkout child is placing the order. Shared by both
- * `active` and `checkout`, so it stays in the CURRENT state (`SELF`) — in `active` the
- * `ctx.submitting` guard is inert, so this path is unreachable there.
+ * states: in `active` a submit is never in progress, so the guard is inert there; in
+ * `checkout` it holds the cart still for the saga. Guards run BEFORE `prepare`, so no
+ * reservation write can happen on a rejected edit — the old mirrored prepare/decide checks
+ * are unnecessary by construction.
  */
-function rejectWhileSubmitting(ctx: Readonly<CartWorkflowContext>) {
-  return {
-    context: ctx as CartWorkflowContext,
-    next: SELF,
-    error: 'Order is being placed — please wait',
-  };
+function notWhileSubmitting(ctx: Readonly<CartWorkflowContext>): Rejection | undefined {
+  return ctx.submitting ? reject('Order is being placed — please wait') : undefined;
 }
 
+type Handler<K extends CartCommand['type']> = CommandHandler<
+  CartWorkflowContext,
+  Extract<CartCommand, { type: K }>,
+  CartEvent,
+  CartUpdateResponse
+>;
+
 // ==================
-// Shared transition entries
-//
-// The cart owns reservation writes (in `prepare`). A failed reservation is reported as a
-// prepared error (never thrown) so decide can reject the edit and keep the cart
-// unchanged. Emptying the cart routes to `terminal('abandoned')` (the decider emits
-// `CartAbandoned`); the cart's onTerminal then cancels any checkout child.
+// Shared command handlers — the cart stays editable in BOTH `active` and `checkout`;
+// the handlers are genuinely identical, and each state's route table decides where the
+// resulting events lead. The cart owns reservation writes (in `prepare`); a prepare
+// throw is a rejection. Demo divergence from mono: reservations are per-variant
+// release-then-re-reserve (no sku resolution, no ADR-0022 absolute holds), so a failed
+// re-reserve compensates by restoring the old quantity before throwing.
 // ==================
 
-function itemEditEntries(): Pick<
-  CartTransitions,
-  'addItem' | 'updateQuantity' | 'removeItem' | 'applyCoupon'
-> {
-  return {
-    addItem: {
-      async prepare(ctx, event) {
-        const lineItemId = uuid4();
-        if (ctx.submitting) return { lineItemId, reserveError: undefined };
-        const existing = ctx.cart.items.find((i) => i.variantId === event.variantId);
-        const oldQty = existing ? existing.quantity : 0;
-        const newQty = oldQty + event.quantity;
+const addItem: Handler<'addItem'> = {
+  guard: notWhileSubmitting,
+  async prepare(ctx, command) {
+    const lineItemId = uuid4();
+    const existing = ctx.cart.items.find((i) => i.variantId === command.variantId);
+    const oldQty = existing ? existing.quantity : 0;
+    const newQty = oldQty + command.quantity;
 
-        // Release existing reservation before re-reserving at the new quantity
-        if (oldQty > 0) await releaseCartItem(ctx.cart.cartId, event.variantId);
-        const reservationId = await reserveCartItem(ctx.cart.cartId, event.variantId, newQty);
+    // Release existing reservation before re-reserving at the new quantity
+    if (oldQty > 0) await releaseCartItem(ctx.cart.cartId, command.variantId);
+    const reservationId = await reserveCartItem(ctx.cart.cartId, command.variantId, newQty);
 
-        if (!reservationId) {
-          // Reservation failed — re-reserve at the old quantity if we released
-          if (oldQty > 0) await reserveCartItem(ctx.cart.cartId, event.variantId, oldQty);
-          return {
-            lineItemId,
-            reserveError: `Insufficient inventory for variant ${event.variantId}`,
-          };
-        }
-        return { lineItemId, reserveError: undefined };
-      },
-      decide(ctx, event, _meta, prepared) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        if (prepared.reserveError) {
-          return { context: ctx as CartWorkflowContext, next: SELF, error: prepared.reserveError };
-        }
-        const context = apply(ctx, {
-          type: 'addItem',
-          variantId: event.variantId,
-          quantity: event.quantity,
-          price: event.price,
-          properties: event.properties,
-          lineItemId: prepared.lineItemId,
-        });
-        return { context, next: SELF, response: context.cart };
-      },
-    },
-
-    updateQuantity: {
-      async prepare(ctx, event) {
-        if (ctx.submitting) return { reserveError: undefined };
-        const item = ctx.cart.items.find((i) => i.lineItemId === event.lineItemId);
-        if (!item) return { reserveError: undefined };
-        const variantId = item.variantId;
-        if (event.quantity <= 0) {
-          await releaseCartItem(ctx.cart.cartId, variantId);
-          return { reserveError: undefined };
-        }
-        await releaseCartItem(ctx.cart.cartId, variantId);
-        const reservationId = await reserveCartItem(ctx.cart.cartId, variantId, event.quantity);
-        if (!reservationId) {
-          // Re-reserve at the old quantity
-          await reserveCartItem(ctx.cart.cartId, variantId, item.quantity);
-          return {
-            reserveError: `Insufficient inventory to update quantity for variant ${variantId}`,
-          };
-        }
-        return { reserveError: undefined };
-      },
-      decide(ctx, event, _meta, prepared) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        if (prepared.reserveError) {
-          return { context: ctx as CartWorkflowContext, next: SELF, error: prepared.reserveError };
-        }
-        const context = apply(ctx, {
-          type: 'updateQuantity',
-          lineItemId: event.lineItemId,
-          quantity: event.quantity,
-        });
-        if (context.cart.items.length === 0) {
-          return { context, next: terminal('abandoned'), response: context.cart };
-        }
-        return { context, next: SELF, response: context.cart };
-      },
-    },
-
-    removeItem: {
-      async prepare(ctx, event) {
-        if (ctx.submitting) return;
-        const removed = ctx.cart.items.find((i) => i.lineItemId === event.lineItemId);
-        if (removed) await releaseCartItem(ctx.cart.cartId, removed.variantId);
-      },
-      decide(ctx, event) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        const context = apply(ctx, { type: 'removeItem', lineItemId: event.lineItemId });
-        if (context.cart.items.length === 0) {
-          return { context, next: terminal('abandoned'), response: context.cart };
-        }
-        return { context, next: SELF, response: context.cart };
-      },
-    },
-
-    applyCoupon: {
-      decide(ctx, event) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        const context = apply(ctx, { type: 'applyCoupon', code: event.code });
-        return { context, next: SELF, response: context.cart };
-      },
-    },
-  };
-}
-
-/** linkUser — identical in both states; stays put (`SELF`). */
-const linkUserHandler: CartTransitions['linkUser'] = {
-  decide(ctx, event) {
-    const context = apply(ctx, { type: 'linkUser', email: event.email, userId: event.userId });
-    return { context, next: SELF, response: context.cart };
+    if (!reservationId) {
+      // Reservation failed — re-reserve at the old quantity if we released
+      if (oldQty > 0) await reserveCartItem(ctx.cart.cartId, command.variantId, oldQty);
+      throw ApplicationFailure.nonRetryable(
+        `Insufficient inventory for variant ${command.variantId}`,
+        'OutOfStockError',
+      );
+    }
+    return { lineItemId };
   },
+};
+
+const updateQuantity: Handler<'updateQuantity'> = {
+  guard: notWhileSubmitting,
+  async prepare(ctx, command) {
+    const item = ctx.cart.items.find((i) => i.lineItemId === command.lineItemId);
+    if (!item) return;
+    const variantId = item.variantId;
+    if (command.quantity <= 0) {
+      await releaseCartItem(ctx.cart.cartId, variantId);
+      return;
+    }
+    await releaseCartItem(ctx.cart.cartId, variantId);
+    const reservationId = await reserveCartItem(ctx.cart.cartId, variantId, command.quantity);
+    if (!reservationId) {
+      // Re-reserve at the old quantity
+      await reserveCartItem(ctx.cart.cartId, variantId, item.quantity);
+      throw ApplicationFailure.nonRetryable(
+        `Insufficient inventory to update quantity for variant ${variantId}`,
+        'OutOfStockError',
+      );
+    }
+  },
+};
+
+const removeItem: Handler<'removeItem'> = {
+  guard: notWhileSubmitting,
+  async prepare(ctx, command) {
+    const removed = ctx.cart.items.find((i) => i.lineItemId === command.lineItemId);
+    if (removed) await releaseCartItem(ctx.cart.cartId, removed.variantId);
+  },
+};
+
+const applyCoupon: Handler<'applyCoupon'> = { guard: notWhileSubmitting };
+
+const linkUser: Handler<'linkUser'> = {};
+
+// ==================
+// Outbound nudge to the checkout child when the cart changes mid-checkout —
+// an EFFECT keyed by the item-edit events, replacing the old hand-maintained
+// ITEM_EDIT_EVENTS list in workflows.ts. The nudge carries the post-fold cartVersion
+// (evolve already bumped it); checkout re-pulls the cart live via queryCart.
+// ==================
+
+const recomputeSignal = defineSignal<[{ cartVersion: number }]>('recompute');
+
+async function nudgeCheckout(_event: CartEvent, ctx: Readonly<CartWorkflowContext>): Promise<void> {
+  if (!ctx.checkoutWorkflowId) return;
+  try {
+    const handle = getExternalWorkflowHandle(ctx.checkoutWorkflowId);
+    await handle.signal(recomputeSignal, { cartVersion: ctx.cart.cartVersion });
+  } catch (e) {
+    log.warn('Failed to send recompute nudge to checkout child', { error: String(e) });
+  }
+}
+
+const itemEditNudges: EffectsMap<CartEvent, CartWorkflowContext> = {
+  ItemAdded: nudgeCheckout,
+  ItemQuantityChanged: nudgeCheckout,
+  ItemRemoved: nudgeCheckout,
+  CouponApplied: nudgeCheckout,
 };
 
 // ==================
 // State: active
 // ==================
 
-const active = cart.transitions(
-  'active',
-  {
-    ...itemEditEntries(),
-    linkUser: linkUserHandler,
+const active = m.state('active', {
+  commands: {
+    addItem,
+    updateQuantity,
+    removeItem,
+    applyCoupon,
+    linkUser,
+    expireCart: {},
 
     beginCheckout: {
+      // Purely (ctx, command)-derivable, so it lives in guard — and because guards run
+      // before prepare, the checkout child is never started for an empty cart.
+      guard: (ctx) =>
+        ctx.cart.items.length === 0 ? reject('Cannot checkout with empty cart') : undefined,
       async prepare(ctx) {
-        if (ctx.cart.items.length === 0) {
-          return { empty: true as const };
-        }
-
         const parentCartWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', ctx.cart.cartId);
-        // A fresh checkout id per attempt, tagged with the journey's correlationId so the
-        // whole journey is queryable (ADR-0011). The value is read from this cart
-        // workflow's own CorrelationId Search Attribute (minted at cart creation);
-        // legacy carts started before tagging fall back to the cartId.
+        const newCheckoutVersion = ctx.checkoutVersion + 1;
+
+        // A fresh checkout id per attempt, tagged with the cart's correlation id so the
+        // whole journey is queryable (ADR-0011). Read back from this workflow's own
+        // CorrelationId Search Attribute (minted at cart creation); legacy carts started
+        // before tagging fall back to the cartId.
         const checkoutStart = buildWorkflowStartOptions({
           storeId: DEMO_STORE_ID,
           domain: 'checkout',
@@ -224,15 +190,14 @@ const active = cart.transitions(
           correlationId: workflowCorrelationId() ?? ctx.cart.cartId,
           cartId: ctx.cart.cartId,
         });
-        const newCheckoutWorkflowId = checkoutStart.workflowId;
-        const newCheckoutVersion = ctx.checkoutVersion + 1;
+        const checkoutWorkflowId = checkoutStart.workflowId;
 
         await startChild<(input: CheckoutWorkflowInput) => Promise<CheckoutWorkflowResult>>(
           'checkoutWorkflow',
           {
             ...checkoutStart,
             taskQueue: 'checkout-queue',
-            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
+            parentClosePolicy: ParentClosePolicy.REQUEST_CANCEL,
             args: [
               {
                 ...buildCheckoutInput(ctx.cart, parentCartWorkflowId),
@@ -245,131 +210,66 @@ const active = cart.transitions(
 
         log.info('Started checkout child workflow', {
           cartId: ctx.cart.cartId,
-          checkoutWorkflowId: newCheckoutWorkflowId,
+          checkoutWorkflowId,
         });
 
-        return { empty: false as const, newCheckoutWorkflowId };
-      },
-      decide(ctx, _event, _meta, prepared) {
-        if (prepared.empty) {
-          return {
-            context: ctx as CartWorkflowContext,
-            next: 'active' as const,
-            error: 'Cannot checkout with empty cart',
-          };
-        }
-        const context = apply(ctx, {
-          type: 'beginCheckout',
-          checkoutWorkflowId: prepared.newCheckoutWorkflowId,
-        });
-        return { context, next: 'checkout' as const, response: context.cart };
+        return { checkoutWorkflowId };
       },
     },
   },
-  {
-    onTimeout: {
-      decide(ctx) {
-        // Idle timeout: abandon cart
-        const context = evolve(ctx as CartWorkflowContext, { type: 'CartAbandoned' });
-        return { context, next: terminal('abandoned') };
-      },
-    },
-    onSignal: {
-      decide(ctx) {
-        // Ignore signals (stale checkout completions / freeze phases) in active state
-        return { context: ctx as CartWorkflowContext, next: 'active' as const };
-      },
-    },
+  route: {
+    CheckoutEntered: 'checkout',
+    CartAbandoned: terminal('abandoned'),
+    '*': SELF,
   },
-);
+  timeout: '30 days',
+  onTimeout: () => ({ type: 'expireCart' }),
+});
 
 // ==================
-// State: checkout
-//
-// Shares the editable item handlers with `active` but keeps state in `checkout`; a cart
-// edit here triggers a `recompute` nudge to the checkout child (sent from the workflow's
-// onTransition hook). The combined inbound signal drives the submit freeze + completion.
+// State: checkout — the cart stays editable (same handlers); edits nudge the checkout
+// child via the item-edit effects. The submit freeze and the completion result arrive
+// as signal-mapped commands.
 // ==================
 
-const checkout = cart.transitions(
-  'checkout',
-  {
-    ...itemEditEntries(),
-    linkUser: linkUserHandler,
-
-    beginCheckout: {
-      decide(ctx) {
-        return {
-          context: ctx as CartWorkflowContext,
-          next: 'checkout' as const,
-          response: ctx.cart,
-        };
-      },
-    },
+const checkout = m.state('checkout', {
+  commands: {
+    addItem,
+    updateQuantity,
+    removeItem,
+    applyCoupon,
+    linkUser,
+    // Idempotent no-op mid-checkout: no prepare → no child id → the decider emits
+    // nothing; the caller still gets the current cart back.
+    beginCheckout: {},
+    submitStarted: {},
+    submitAborted: {},
+    checkoutCompleted: {},
+    checkoutTimedOut: {},
   },
-  {
-    onTimeout: {
-      decide(ctx) {
-        // Checkout timed out — return to active state (preserve the cart, not abandon).
-        log.warn('Checkout completion signal timed out, protecting cart', {
-          cartId: ctx.cart.cartId,
-        });
-        const context = evolve(ctx as CartWorkflowContext, { type: 'CheckoutDisowned' });
-        return { context, next: 'active' as const };
-      },
-    },
-    onSignal: {
-      decide(ctx, signal) {
-        // Combined inbound signal: submit-freeze phases keep us in `checkout`;
-        // `completed` drives the completion logic.
-        if (signal.kind === 'submitStarted') {
-          const context = apply(ctx, { type: 'submitStarted' });
-          return { context, next: 'checkout' as const };
-        }
-        if (signal.kind === 'submitAborted') {
-          const context = apply(ctx, { type: 'submitAborted' });
-          return { context, next: 'checkout' as const };
-        }
-
-        // Ignore stale signals from a previous checkout attempt.
-        const result = signal.result;
-        if (
-          result.checkoutVersion !== undefined &&
-          result.checkoutVersion !== ctx.checkoutVersion
-        ) {
-          log.warn('Ignoring stale checkout signal', {
-            cartId: ctx.cart.cartId,
-            expected: ctx.checkoutVersion,
-            received: result.checkoutVersion,
-          });
-          return { context: ctx as CartWorkflowContext, next: 'checkout' as const };
-        }
-
-        const context = apply(ctx, { type: 'checkoutCompleted', result });
-        if (context.cart.status === 'completed') {
-          return { context, next: terminal('completed') };
-        }
-        log.info('Checkout cancelled/failed, returning to active with error', {
-          cartId: ctx.cart.cartId,
-          error: result.error,
-        });
-        return { context, next: 'active' as const };
-      },
-    },
+  route: {
+    CheckoutDisowned: 'active',
+    CheckoutFailed: 'active',
+    CartCompleted: terminal('completed'),
+    CartAbandoned: terminal('abandoned'),
+    '*': SELF,
   },
-);
+  effects: itemEditNudges,
+  timeout: '1 hour',
+  onTimeout: () => ({ type: 'checkoutTimedOut' }),
+});
 
 // ==================
-// Registry
+// Registry — table of contents. timeout/transitional ride the state defs above.
 // ==================
 
 export const CART_STATES: StateRegistry<
   CartStateName,
-  CartEvent,
+  CartCommand,
   CartWorkflowContext,
   CartUpdateResponse,
-  CartInboundSignal
+  CartCommand
 > = {
-  active: { ...active, timeout: '30 days' },
-  checkout: { ...checkout, timeout: '1 hour' },
+  active,
+  checkout,
 };

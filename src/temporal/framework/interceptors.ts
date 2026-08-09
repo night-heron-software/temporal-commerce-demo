@@ -12,7 +12,7 @@
  *     },
  *   })
  *
- * It shares the `activity-capture` module instance with `definePureState` (same workflow bundle),
- * so prepare/finalize activity capture works.
+ * It shares the `activity-capture` module instance with the machine compiler (same workflow
+ * bundle), so prepare/effects activity capture works.
  */
 export { transitionActivityInterceptors as interceptors } from './activity-capture';

@@ -1,21 +1,24 @@
 /**
- * Checkout Decider — the pure Functional Core (ported pattern from nightheron-mono, ADR-0009).
+ * Checkout Decider — the pure Functional Core, on the ADR-0024 decider-native surface
+ * (aligned with nightheron-mono).
  *
- *   decide: (command, state) => Event[]      // what happened, as past-tense facts
- *   evolve: (state, event)   => State        // fold one fact into state (the ONLY writer)
+ *   decide: (command, state) => Event[]     // what happened, as past-tense events
+ *   evolve: (state, event)   => State       // fold one event into state (the ONLY writer)
  *
- * Both are pure and infrastructure-free. Everything a decision needs from the outside world
- * (reservation results, computed shipping/tax, the processed order) is gathered by the shell
- * (`states.ts` prepare) and injected into the command as a `prepared` payload.
+ * All I/O (cart query, shipping/tax, the PaymentIntent, the submit saga) runs in the
+ * states' `prepare` phases (`states.ts`); their results arrive enriched on the commands.
+ * `evolve` owns every `CheckoutContext`/`CheckoutState` mutation, including the pricing
+ * math `totalPrice = subtotal − discounts + shipping + tax`. Routing keys on the emitted
+ * events (per-state: `ValidationFailed` is terminal in `validating`; rejections in
+ * `collecting` fold their error into `state.error` and stay put).
  *
- * `State` is the whole `CheckoutContext` (checkout state + pricing + reservations + parent link).
- *
- * The fold owns the pricing math `totalPrice = subtotal − discounts + shipping + tax` and never
- * writes the UI-facing `step` — the workflow derives it from prerequisites (see `deriveStep` in
- * `workflows.ts`), matching the mono's single-`collecting`-state design.
+ * The fold never writes the UI-facing `step` — the workflow derives it from prerequisites
+ * (see `deriveStep` in `workflows.ts`), matching the mono's single-`collecting` design.
  */
 
+import type { MachineDecider } from '../framework';
 import type {
+  CheckoutCommand,
   CheckoutContext,
   CheckoutState,
   Order,
@@ -25,7 +28,7 @@ import type {
 } from './types';
 import type { ReservationInfo } from './activities';
 
-// ── Prepared payloads (shell → core) ────────────────────────────────────────
+// ── `prepare` result shapes (shared with the shell) ─────────────────────────
 
 /** Result of pulling the live cart + renewing reservations on checkout entry. */
 export interface ValidatingPrepared {
@@ -59,21 +62,22 @@ export type SubmitOrderPrepared =
   | { success: true; order: Order; newState: CheckoutState }
   | { success: false; error: string };
 
-// ── Commands & facts ────────────────────────────────────────────────────────
+/**
+ * The command as the decider sees it: the base `CheckoutCommand` union with the fields
+ * the states' `prepare` phases inject, plus the framework's deterministic timestamp
+ * (the collapse ADR-0024 prescribes — one union, with enrichment expressed as
+ * intersections on it rather than a hand-maintained parallel union).
+ */
+export type EnrichedCheckoutCommand = (
+  | (Extract<CheckoutCommand, { type: 'validate' }> & { prepared: ValidatingPrepared })
+  | (Extract<CheckoutCommand, { type: 'setShipping' }> & { prepared: ShippingPrepared })
+  | (Extract<CheckoutCommand, { type: 'submitOrder' }> & { prepared: SubmitOrderPrepared })
+  | (Extract<CheckoutCommand, { type: 'recompute' }> & { prepared: RecomputePrepared })
+  | Exclude<CheckoutCommand, { type: 'validate' | 'setShipping' | 'submitOrder' | 'recompute' }>
+) & { at: string };
 
-/** The Chassaing "command": the intent enriched with its `prepare` result / payload by the shell. */
-export type CheckoutCommand =
-  | { type: 'validated'; prepared: ValidatingPrepared }
-  | { type: 'setShipping'; shippingAddress: ShippingAddress; prepared: ShippingPrepared }
-  | { type: 'setPayment'; paymentMethod: PaymentMethod }
-  | { type: 'acknowledgeCartChange'; cartVersion: number }
-  | { type: 'retargetParent'; newParentCartWorkflowId: string }
-  | { type: 'cancelCheckout' }
-  | { type: 'submitOrder'; prepared: SubmitOrderPrepared }
-  | { type: 'recompute'; prepared: RecomputePrepared };
-
-/** Past-tense domain facts. */
-export type CheckoutFact =
+/** Past-tense domain events. */
+export type CheckoutEvent =
   | { type: 'CartLoaded'; cart: QueriedCart; reservations: ReservationInfo[] }
   | { type: 'ValidationFailed'; error: string }
   | {
@@ -93,17 +97,26 @@ export type CheckoutFact =
   | { type: 'PaymentSet'; paymentMethod: PaymentMethod }
   | { type: 'CartChangeAcknowledged'; cartVersion: number }
   | { type: 'ParentRetargeted'; parentCartWorkflowId: string }
-  | { type: 'Cancelled' }
+  /**
+   * Carries the pre-fold reservations so the release effect can act on them: `evolve`
+   * clears `ctx.reservations` on this event (so `onTerminal` cannot double-release),
+   * which means the post-fold context no longer knows what to release — the event does.
+   */
+  | {
+      type: 'Cancelled';
+      reason: 'checkout-cancelled' | 'checkout-timeout';
+      reservations: ReservationInfo[];
+    }
   | { type: 'OrderSubmitted'; newState: CheckoutState }
   | { type: 'SubmitRejected'; error: string }
   | { type: 'Recomputed'; cart: QueriedCart; shipping: number; tax: number };
 
 // ── decide ──────────────────────────────────────────────────────────────────
 
-/** decide(command, state) → facts. Pure. */
-export function decide(command: CheckoutCommand, state: CheckoutContext): CheckoutFact[] {
+/** decide(command, state) → events. Pure. */
+export function decide(command: EnrichedCheckoutCommand, state: CheckoutContext): CheckoutEvent[] {
   switch (command.type) {
-    case 'validated': {
+    case 'validate': {
       const p = command.prepared;
       return p.success
         ? [{ type: 'CartLoaded', cart: p.cart, reservations: p.reservations }]
@@ -144,7 +157,12 @@ export function decide(command: CheckoutCommand, state: CheckoutContext): Checko
       return [{ type: 'ParentRetargeted', parentCartWorkflowId: command.newParentCartWorkflowId }];
 
     case 'cancelCheckout':
-      return [{ type: 'Cancelled' }];
+      return [
+        { type: 'Cancelled', reason: 'checkout-cancelled', reservations: state.reservations },
+      ];
+
+    case 'checkoutTimedOut':
+      return [{ type: 'Cancelled', reason: 'checkout-timeout', reservations: state.reservations }];
 
     case 'submitOrder':
       return command.prepared.success
@@ -170,11 +188,11 @@ export function decide(command: CheckoutCommand, state: CheckoutContext): Checko
 
 // ── evolve ──────────────────────────────────────────────────────────────────
 
-/** evolve(state, fact) → state. Pure fold; the ONLY writer of context / CheckoutState. */
-export function evolve(ctx: CheckoutContext, fact: CheckoutFact): CheckoutContext {
-  switch (fact.type) {
+/** evolve(state, event) → state. Pure fold; the ONLY writer of context / CheckoutState. */
+export function evolve(ctx: CheckoutContext, event: CheckoutEvent): CheckoutContext {
+  switch (event.type) {
     case 'CartLoaded': {
-      const { cart } = fact;
+      const { cart } = event;
       return {
         ...ctx,
         items: cart.items,
@@ -183,77 +201,77 @@ export function evolve(ctx: CheckoutContext, fact: CheckoutFact): CheckoutContex
         appliedCoupons: cart.appliedCoupons,
         cartVersion: cart.cartVersion,
         totalPrice: cart.subtotalPrice - cart.totalDiscounts,
-        reservations: fact.reservations,
+        reservations: event.reservations,
       };
     }
 
     case 'ValidationFailed':
-      return { ...ctx, state: { ...ctx.state, error: fact.error } };
+      return { ...ctx, state: { ...ctx.state, error: event.error } };
 
     case 'ShippingSet': {
       const state: CheckoutState = {
         ...ctx.state,
-        shippingAddress: fact.shippingAddress,
-        shippingCost: fact.shipping,
-        tax: fact.tax,
-        clientSecret: fact.clientSecret,
+        shippingAddress: event.shippingAddress,
+        shippingCost: event.shipping,
+        tax: event.tax,
+        clientSecret: event.clientSecret,
         error: undefined,
       };
       return {
         ...ctx,
         state,
-        shippingCost: fact.shipping,
-        totalTax: fact.tax,
-        totalPrice: ctx.subtotalPrice - ctx.totalDiscounts + fact.shipping + fact.tax,
+        shippingCost: event.shipping,
+        totalTax: event.tax,
+        totalPrice: ctx.subtotalPrice - ctx.totalDiscounts + event.shipping + event.tax,
       };
     }
 
     case 'ShippingFailed': {
       const state: CheckoutState = {
         ...ctx.state,
-        shippingAddress: fact.shippingAddress,
-        shippingCost: fact.shipping,
-        tax: fact.tax,
-        error: fact.error,
+        shippingAddress: event.shippingAddress,
+        shippingCost: event.shipping,
+        tax: event.tax,
+        error: event.error,
       };
       return {
         ...ctx,
         state,
-        shippingCost: fact.shipping,
-        totalTax: fact.tax,
-        totalPrice: ctx.subtotalPrice - ctx.totalDiscounts + fact.shipping + fact.tax,
+        shippingCost: event.shipping,
+        totalTax: event.tax,
+        totalPrice: ctx.subtotalPrice - ctx.totalDiscounts + event.shipping + event.tax,
       };
     }
 
     case 'PaymentSet':
       return {
         ...ctx,
-        state: { ...ctx.state, paymentMethod: fact.paymentMethod, error: undefined },
+        state: { ...ctx.state, paymentMethod: event.paymentMethod, error: undefined },
       };
 
     case 'CartChangeAcknowledged':
-      return { ...ctx, state: { ...ctx.state, cartVersionAcknowledged: fact.cartVersion } };
+      return { ...ctx, state: { ...ctx.state, cartVersionAcknowledged: event.cartVersion } };
 
     case 'ParentRetargeted':
-      return { ...ctx, parentCartWorkflowId: fact.parentCartWorkflowId };
+      return { ...ctx, parentCartWorkflowId: event.parentCartWorkflowId };
 
     case 'Cancelled':
       return { ...ctx, state: { ...ctx.state, error: undefined }, reservations: [] };
 
     case 'OrderSubmitted':
-      return { ...ctx, state: fact.newState };
+      return { ...ctx, state: event.newState };
 
     case 'SubmitRejected':
-      return { ...ctx, state: { ...ctx.state, error: fact.error } };
+      return { ...ctx, state: { ...ctx.state, error: event.error } };
 
     case 'Recomputed': {
-      const { cart } = fact;
+      const { cart } = event;
       // Un-check payment on the amount-affecting cart change so the shopper re-confirms.
       const state: CheckoutState = {
         ...ctx.state,
         paymentMethod: undefined,
-        shippingCost: fact.shipping,
-        tax: fact.tax,
+        shippingCost: event.shipping,
+        tax: event.tax,
         error: undefined,
       };
       return {
@@ -263,9 +281,9 @@ export function evolve(ctx: CheckoutContext, fact: CheckoutFact): CheckoutContex
         totalDiscounts: cart.totalDiscounts,
         appliedCoupons: cart.appliedCoupons,
         cartVersion: cart.cartVersion,
-        shippingCost: fact.shipping,
-        totalTax: fact.tax,
-        totalPrice: cart.subtotalPrice - cart.totalDiscounts + fact.shipping + fact.tax,
+        shippingCost: event.shipping,
+        totalTax: event.tax,
+        totalPrice: cart.subtotalPrice - cart.totalDiscounts + event.shipping + event.tax,
         state,
       };
     }
@@ -274,3 +292,34 @@ export function evolve(ctx: CheckoutContext, fact: CheckoutFact): CheckoutContex
       return ctx;
   }
 }
+
+/**
+ * The assembled decider, conforming to the framework's `MachineDecider` shape (ADR-0024:
+ * `isTerminal` is gone — terminality is the route tables' job; `initialState` remains as
+ * the canonical empty shape for decider unit tests, never consulted at runtime).
+ */
+export const checkoutDecider: MachineDecider<
+  EnrichedCheckoutCommand,
+  CheckoutEvent,
+  CheckoutContext
+> = {
+  decide,
+  evolve,
+  initialState: {
+    cartId: '',
+    parentCartWorkflowId: '',
+    items: [],
+    subtotalPrice: 0,
+    totalDiscounts: 0,
+    currency: 'USD',
+    appliedCoupons: [],
+    isGuest: true,
+    cartVersion: 0,
+    checkoutVersion: 0,
+    state: { step: 'validating', isGuest: true, shippingCost: 0, tax: 0 },
+    reservations: [],
+    shippingCost: 0,
+    totalTax: 0,
+    totalPrice: 0,
+  },
+};

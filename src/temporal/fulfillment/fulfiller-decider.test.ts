@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { decide, evolve } from './fulfiller-decider';
-import type { FulfillerOrderCommand } from './fulfiller-decider';
-import type { FulfillerOrderWorkflowContext } from './fulfiller-workflows';
-import type { FulfillmentFulfillerOrderState } from './types';
+
+// Pure Functional Core: no Temporal sandbox, no activity mocks.
+import { decide, evolve, fulfillerDecider } from './fulfiller-decider';
+import type { EnrichedFulfillerCommand, FulfillerOrderWorkflowContext } from './fulfiller-decider';
+import type { FulfillmentFulfillerOrderState, FulfillerStatusUpdate } from './types';
+
+const AT = '2026-02-01T00:00:00.000Z';
 
 function makeCtx(
   soOverrides: Partial<FulfillmentFulfillerOrderState> = {},
@@ -28,28 +31,85 @@ function makeCtx(
       fulfillerId: 'simulated',
       fulfillerType: 'simulated',
       status: 'received',
-      items: [
-        {
-          sku: 'SKU-1',
-          productId: 'p1',
-          variantId: 'v1',
-          quantity: 1,
-          unitPrice: 10,
-          title: 'T',
-          status: 'pending',
-        },
-      ],
-      statusHistory: [],
+      items: [{ sku: 'SKU-1', productId: 'p1', variantId: 'v1', quantity: 1, status: 'pending' }],
       ...soOverrides,
-    } as FulfillmentFulfillerOrderState,
+    },
     manualMode: false,
   };
 }
 
-const apply = (ctx: FulfillerOrderWorkflowContext, cmd: FulfillerOrderCommand) =>
+const apply = (ctx: FulfillerOrderWorkflowContext, cmd: EnrichedFulfillerCommand) =>
   decide(cmd, ctx).reduce(evolve, ctx);
 
-describe('fulfiller-order decide/evolve', () => {
+const shippedUpdate: FulfillerStatusUpdate = {
+  fulfillerOrderId: 'so-1',
+  status: 'shipped',
+  timestamp: 't4',
+  shipmentInfo: {
+    carrier: 'UPS',
+    trackingNumber: '1Z999',
+    items: [{ sku: 'SKU-1', quantity: 1 }],
+  },
+} as FulfillerStatusUpdate;
+
+describe('fulfiller decide() — events emitted', () => {
+  it('maps each command to its events — outcomes decided alongside the application', () => {
+    expect(decide({ type: 'beginSubmit', at: AT }, makeCtx())).toEqual([
+      { type: 'SubmissionStarted', at: AT },
+    ]);
+    expect(decide({ type: 'submitted', fulfillerExternalId: 'ext-1', at: AT }, makeCtx())).toEqual([
+      { type: 'OrderSubmitted', fulfillerExternalId: 'ext-1', at: AT },
+    ]);
+    expect(decide({ type: 'simulatedShip', trackingNumber: 'SIMABC', at: AT }, makeCtx())).toEqual([
+      { type: 'SimulatedShipped', trackingNumber: 'SIMABC', at: AT },
+    ]);
+    expect(decide({ type: 'simulatedDeliver', at: AT }, makeCtx())).toEqual([
+      { type: 'SimulatedDelivered', at: AT },
+    ]);
+    expect(decide({ type: 'cancel', at: AT }, makeCtx())).toEqual([{ type: 'Cancelled', at: AT }]);
+
+    // A shipped update applies AND progresses the shipment (routing reads the event).
+    expect(
+      decide({ type: 'fulfillerStatus', update: shippedUpdate, at: AT }, makeCtx()).map(
+        (e) => e.type,
+      ),
+    ).toEqual(['FulfillerStatusApplied', 'ShipmentProgressed']);
+    expect(
+      decide(
+        {
+          type: 'fulfillerStatus',
+          update: { fulfillerOrderId: 'so-1', status: 'failed', timestamp: AT },
+          at: AT,
+        },
+        makeCtx(),
+      ).map((e) => e.type),
+    ).toEqual(['FulfillerStatusApplied', 'FulfillerOrderFailed']);
+    expect(
+      decide(
+        {
+          type: 'fulfillerStatus',
+          update: { fulfillerOrderId: 'so-1', status: 'in_production', timestamp: AT },
+          at: AT,
+        },
+        makeCtx(),
+      ).map((e) => e.type),
+    ).toEqual(['FulfillerStatusApplied']);
+  });
+
+  it('decide never mutates the input state', () => {
+    const s = makeCtx();
+    const snap = structuredClone(s);
+    decide({ type: 'fulfillerStatus', update: shippedUpdate, at: AT }, s);
+    expect(s).toEqual(snap);
+  });
+});
+
+describe('fulfiller-order decide→evolve (folded)', () => {
+  it('beginSubmit marks the order submitting', () => {
+    const ctx = apply(makeCtx(), { type: 'beginSubmit', at: 't0' });
+    expect(ctx.so.status).toBe('submitting');
+  });
+
   it('submitted records the external id and moves items to in_production', () => {
     const ctx = apply(makeCtx(), { type: 'submitted', fulfillerExternalId: 'ext-1', at: 't1' });
     expect(ctx.so.fulfillerExternalId).toBe('ext-1');
@@ -66,9 +126,11 @@ describe('fulfiller-order decide/evolve', () => {
     });
     expect(ctx.so.status).toBe('shipped');
     expect(ctx.so.shippedAt).toBe('t2');
+    expect(ctx.so.carrier).toBe('Simulated Carrier');
     expect(ctx.so.trackingNumber).toBe('SIMABC123');
     expect(ctx.so.shipments).toHaveLength(1);
     expect(ctx.so.shipments![0].shippedAt).toBe('t2');
+    expect(ctx.so.shipments![0].trackingNumber).toBe('SIMABC123');
     expect(ctx.so.items[0].status).toBe('shipped');
   });
 
@@ -82,16 +144,8 @@ describe('fulfiller-order decide/evolve', () => {
   it('fulfillerStatus shipped appends a shipment from the update payload', () => {
     const ctx = apply(makeCtx({ status: 'in_production' }), {
       type: 'fulfillerStatus',
-      update: {
-        fulfillerOrderId: 'so-1',
-        status: 'shipped',
-        timestamp: 't4',
-        shipmentInfo: {
-          carrier: 'UPS',
-          trackingNumber: '1Z999',
-          items: [{ sku: 'SKU-1', quantity: 1 }],
-        },
-      } as never,
+      update: shippedUpdate,
+      at: 't4',
     });
     expect(ctx.so.status).toBe('shipped');
     expect(ctx.so.shipments).toHaveLength(1);
@@ -107,21 +161,44 @@ describe('fulfiller-order decide/evolve', () => {
     });
     const ctx = apply(shipped, {
       type: 'fulfillerStatus',
-      update: { fulfillerOrderId: 'so-1', status: 'delivered', timestamp: 't5' } as never,
+      update: { fulfillerOrderId: 'so-1', status: 'delivered', timestamp: 't5' },
+      at: 't5',
     });
     expect(ctx.so.status).toBe('delivered');
+    expect(ctx.so.completedAt).toBe('t5');
     expect(ctx.so.shipments![0].deliveredAt).toBe('t5');
   });
 
+  it('fulfillerStatus failed cascades failed to the line items', () => {
+    const ctx = apply(makeCtx({ status: 'in_production' }), {
+      type: 'fulfillerStatus',
+      update: { fulfillerOrderId: 'so-1', status: 'failed', timestamp: 't5' },
+      at: 't5',
+    });
+    expect(ctx.so.status).toBe('failed');
+    expect(ctx.so.items.every((i) => i.status === 'failed')).toBe(true);
+  });
+
   it('cancel cascades to line items', () => {
-    const ctx = apply(makeCtx({ status: 'in_production' }), { type: 'cancel' });
+    const ctx = apply(makeCtx({ status: 'in_production' }), { type: 'cancel', at: 't6' });
     expect(ctx.so.status).toBe('cancelled');
     expect(ctx.so.items[0].status).toBe('cancelled');
   });
 
   it('does not mutate the input context', () => {
     const ctx = makeCtx();
-    apply(ctx, { type: 'cancel' });
+    apply(ctx, { type: 'cancel', at: 't' });
     expect(ctx.so.status).toBe('received');
+  });
+});
+
+describe('fulfillerDecider — the assembled decider', () => {
+  it("has no isTerminal — terminality is the route tables' job (ADR-0024)", () => {
+    expect('isTerminal' in fulfillerDecider).toBe(false);
+  });
+
+  it('exposes decide and evolve', () => {
+    expect(fulfillerDecider.decide).toBe(decide);
+    expect(fulfillerDecider.evolve).toBe(evolve);
   });
 });

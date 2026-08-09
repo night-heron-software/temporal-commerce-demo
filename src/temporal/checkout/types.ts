@@ -29,6 +29,18 @@ export type CheckoutStep =
  */
 export type CheckoutState = Cart.CheckoutState;
 
+// Re-export the shared wire contract (single source of truth: contracts/checkout.ts) —
+// including the merged CheckoutCommand union (ADR-0024).
+export type {
+  CheckoutCommand,
+  RecomputeSignal,
+  SetShippingSignal,
+  SetPaymentSignal,
+  SubmitOrderSignal,
+  CancelCheckoutSignal,
+  RetargetParentSignal,
+} from '../contracts/checkout';
+
 /**
  * Checkout input carries no cart-content snapshot — contents are pulled live via the
  * queryCart activity at `validating` and re-pulled on each recompute nudge.
@@ -40,14 +52,6 @@ export interface CheckoutWorkflowInput {
   isGuest: boolean;
   cartVersion: number;
   checkoutVersion: number;
-}
-
-/**
- * Inbound nudge from the parent cart when items changed during checkout. Trigger-only:
- * carries the new cartVersion; the checkout re-pulls contents via queryCart.
- */
-export interface RecomputeSignal {
-  cartVersion: number;
 }
 
 /** Live cart contents as returned by the queryCart activity. */
@@ -69,35 +73,6 @@ export interface CheckoutWorkflowResult {
   finalStep: CheckoutStep;
   checkoutVersion: number;
 }
-
-export interface SetShippingSignal {
-  shippingAddress: ShippingAddress;
-}
-
-export interface SetPaymentSignal {
-  paymentMethod: PaymentMethod;
-}
-
-export interface SubmitOrderSignal {
-  /** The cartVersion the buyer reviewed; submit is rejected if the cart changed since. */
-  reviewedCartVersion?: number;
-}
-
-export type CancelCheckoutSignal = object;
-
-export interface RetargetParentSignal {
-  newParentCartWorkflowId: string;
-}
-
-// Discriminated on `type` (framework TransitionMap convention). Driver timeouts arrive as
-// their own input kind, not as an event member.
-export type CheckoutInput =
-  | { type: 'setShipping'; shippingAddress: ShippingAddress }
-  | { type: 'setPayment'; paymentMethod: PaymentMethod }
-  | { type: 'submitOrder'; reviewedCartVersion?: number }
-  | { type: 'cancelCheckout' }
-  | { type: 'acknowledgeCartChange'; cartVersion: number }
-  | { type: 'retargetParent'; newParentCartWorkflowId: string };
 
 export interface CheckoutContext {
   readonly cartId: string;

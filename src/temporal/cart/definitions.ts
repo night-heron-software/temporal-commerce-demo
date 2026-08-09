@@ -10,7 +10,7 @@ export {
 
 // Re-export types for convenience
 export type {
-  CartEvent,
+  CartCommand,
   CartUpdateResponse,
   CartDetails,
   CheckoutWorkflowResult,

@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { decide, evolve } from './checkout-decider';
-import type { CheckoutCommand } from './checkout-decider';
+
+// Pure Functional Core: no Temporal sandbox, no activity mocks. All I/O is in the states'
+// `prepare`; here `decide` is asserted on emitted events and `evolve` on the fold.
+import { decide, evolve, checkoutDecider } from './checkout-decider';
+import type { EnrichedCheckoutCommand } from './checkout-decider';
 import type { CheckoutContext, Order, QueriedCart } from './types';
+
+const at = '2026-08-09T00:00:00.000Z';
 
 function makeCtx(overrides: Partial<CheckoutContext> = {}): CheckoutContext {
   return {
@@ -24,7 +29,7 @@ function makeCtx(overrides: Partial<CheckoutContext> = {}): CheckoutContext {
   };
 }
 
-const apply = (ctx: CheckoutContext, cmd: CheckoutCommand): CheckoutContext =>
+const apply = (ctx: CheckoutContext, cmd: EnrichedCheckoutCommand): CheckoutContext =>
   decide(cmd, ctx).reduce(evolve, ctx);
 
 const address = {
@@ -52,9 +57,10 @@ const queriedCart = (overrides: Partial<QueriedCart> = {}): QueriedCart => ({
 // The fold never writes the UI `step` — the workflow derives it from prerequisites
 // (deriveStep), so these tests assert the prerequisites themselves.
 describe('checkout decide/evolve', () => {
-  it('validated(success) → CartLoaded: stores reservations and folds the live cart', () => {
+  it('validate(success) → CartLoaded: stores reservations and folds the live cart', () => {
     const ctx = apply(makeCtx({ items: [], subtotalPrice: 0, totalPrice: 0 }), {
-      type: 'validated',
+      type: 'validate',
+      at,
       prepared: {
         success: true,
         reservations: [{ reservationId: 'r-1' } as never],
@@ -68,9 +74,10 @@ describe('checkout decide/evolve', () => {
     expect(ctx.totalPrice).toBe(10);
   });
 
-  it('validated(failure) → ValidationFailed: records the reservation error', () => {
+  it('validate(failure) → ValidationFailed: records the reservation error', () => {
     const ctx = apply(makeCtx(), {
-      type: 'validated',
+      type: 'validate',
+      at,
       prepared: { success: false, reservations: [], error: 'out of stock', cart: queriedCart() },
     });
     expect(ctx.state.error).toBe('out of stock');
@@ -93,6 +100,7 @@ describe('checkout decide/evolve', () => {
     });
     const ctx = apply(priced, {
       type: 'recompute',
+      at,
       prepared: {
         cart: queriedCart({
           items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 10 }],
@@ -114,6 +122,7 @@ describe('checkout decide/evolve', () => {
   it('recompute without re-pricing folds contents and keeps prior shipping/tax', () => {
     const ctx = apply(makeCtx(), {
       type: 'recompute',
+      at,
       prepared: { cart: queriedCart({ subtotalPrice: 30, cartVersion: 3 }) },
     });
     expect(ctx.subtotalPrice).toBe(30);
@@ -127,6 +136,7 @@ describe('checkout decide/evolve', () => {
     const ctx = apply(makeCtx(), {
       type: 'setShipping',
       shippingAddress: address,
+      at,
       prepared: { calculatedShipping: 5, calculatedTax: 0.8, clientSecret: 'cs_1' },
     });
     expect(ctx.state.shippingAddress).toEqual(address);
@@ -141,6 +151,7 @@ describe('checkout decide/evolve', () => {
     const ctx = apply(makeCtx(), {
       type: 'setShipping',
       shippingAddress: address,
+      at,
       prepared: { calculatedShipping: 5, calculatedTax: 0.8, paymentIntentError: 'no payment' },
     });
     expect(ctx.state.error).toBe('no payment');
@@ -152,6 +163,7 @@ describe('checkout decide/evolve', () => {
     const ctx = apply(makeCtx(), {
       type: 'setPayment',
       paymentMethod: { type: 'mock', token: 'tok_1' },
+      at,
     });
     expect(ctx.state.paymentMethod?.token).toBe('tok_1');
     expect(ctx.state.error).toBeUndefined();
@@ -161,40 +173,97 @@ describe('checkout decide/evolve', () => {
     const base = makeCtx();
     const ok = apply(base, {
       type: 'submitOrder',
+      at,
       prepared: { success: true, order, newState: { ...base.state, order } },
     });
     expect(ok.state.order?.orderId).toBe('o-1');
 
     const fail = apply(makeCtx(), {
       type: 'submitOrder',
+      at,
       prepared: { success: false, error: 'Payment failed. Please try again.' },
     });
     expect(fail.state.order).toBeUndefined();
     expect(fail.state.error).toMatch(/payment failed/i);
   });
 
-  it('cancelCheckout → Cancelled: clears reservations and the error', () => {
-    const ctx = apply(makeCtx({ reservations: [{ reservationId: 'r-1' } as never] }), {
-      type: 'cancelCheckout',
-    });
+  it('cancelCheckout → Cancelled carries the pre-fold reservations; the fold clears them', () => {
+    const withHolds = makeCtx({ reservations: [{ reservationId: 'r-1' } as never] });
+    // The decided reason distinguishes an explicit cancel from a timeout, and the event
+    // carries the reservations so the release effect still knows them post-fold.
+    expect(decide({ type: 'cancelCheckout', at }, withHolds)).toEqual([
+      {
+        type: 'Cancelled',
+        reason: 'checkout-cancelled',
+        reservations: [{ reservationId: 'r-1' }],
+      },
+    ]);
+    expect(decide({ type: 'checkoutTimedOut', at }, withHolds)).toEqual([
+      { type: 'Cancelled', reason: 'checkout-timeout', reservations: [{ reservationId: 'r-1' }] },
+    ]);
+
+    const ctx = apply(withHolds, { type: 'cancelCheckout', at });
     expect(ctx.reservations).toEqual([]);
     expect(ctx.state.error).toBeUndefined();
   });
 
   it('acknowledgeCartChange and retargetParent update the coordination fields', () => {
-    const acked = apply(makeCtx(), { type: 'acknowledgeCartChange', cartVersion: 7 });
+    const acked = apply(makeCtx(), { type: 'acknowledgeCartChange', cartVersion: 7, at });
     expect(acked.state.cartVersionAcknowledged).toBe(7);
 
     const retargeted = apply(makeCtx(), {
       type: 'retargetParent',
       newParentCartWorkflowId: 'demo.cart.other',
+      at,
     });
     expect(retargeted.parentCartWorkflowId).toBe('demo.cart.other');
   });
 
   it('does not mutate the input context', () => {
     const ctx = makeCtx();
-    apply(ctx, { type: 'setPayment', paymentMethod: { type: 'mock', token: 'tok_1' } });
+    const snap = structuredClone(ctx);
+    apply(ctx, { type: 'setPayment', paymentMethod: { type: 'mock', token: 'tok_1' }, at });
+    expect(ctx).toEqual(snap);
     expect(ctx.state.paymentMethod).toBeUndefined();
+  });
+});
+
+describe('rebuilding state is a fold (decide → evolve)', () => {
+  it('validate → set shipping → set payment → submit replays to a completed order', () => {
+    let c = makeCtx({ items: [], subtotalPrice: 0, totalPrice: 0 });
+    c = apply(c, {
+      type: 'validate',
+      at,
+      prepared: {
+        success: true,
+        reservations: [{ reservationId: 'r-1' } as never],
+        cart: queriedCart(),
+      },
+    });
+    c = apply(c, {
+      type: 'setShipping',
+      shippingAddress: address,
+      at,
+      prepared: { calculatedShipping: 5, calculatedTax: 0.8, clientSecret: 'cs_1' },
+    });
+    c = apply(c, { type: 'setPayment', paymentMethod: { type: 'mock', token: 'tok_1' }, at });
+    c = apply(c, {
+      type: 'submitOrder',
+      at,
+      prepared: { success: true, order, newState: { ...c.state, order } },
+    });
+    expect(c.state.order).toBe(order);
+    expect(c.totalPrice).toBeCloseTo(15.8);
+  });
+});
+
+describe('checkoutDecider — the assembled decider', () => {
+  it("has no isTerminal — terminality is the route tables' job (ADR-0024)", () => {
+    expect('isTerminal' in checkoutDecider).toBe(false);
+  });
+
+  it('exposes decide and evolve', () => {
+    expect(checkoutDecider.decide).toBe(decide);
+    expect(checkoutDecider.evolve).toBe(evolve);
   });
 });

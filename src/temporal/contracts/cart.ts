@@ -93,10 +93,17 @@ export interface CartDetails {
 }
 
 // ==================
-// Cart Event Discriminated Union
+// Cart Command — one union for every intent the machine accepts (ADR-0024).
+//
+// The first block is the WIRE union (what `cartUpdate` callers send). The second
+// block is internal: signal-mapped commands from the checkout child (see `toSignal`
+// in cart/workflows.ts) and the commands the two states' timers synthesize. The
+// decider sees these enriched with prepared data + the deterministic timestamp
+// (see `EnrichedCartCommand` in cart/cart-decider.ts).
 // ==================
 
-export type CartEvent =
+export type CartCommand =
+  // — wire (cartUpdate) —
   | {
       type: 'addItem';
       variantId: string;
@@ -108,7 +115,14 @@ export type CartEvent =
   | { type: 'removeItem'; lineItemId: string }
   | { type: 'applyCoupon'; code: string }
   | { type: 'linkUser'; email: string; userId: string }
-  | { type: 'beginCheckout' };
+  | { type: 'beginCheckout' }
+  // — from the checkout child (signal transport, mapped to commands at registration) —
+  | { type: 'checkoutCompleted'; result: CheckoutWorkflowResult }
+  | { type: 'submitStarted' }
+  | { type: 'submitAborted' }
+  // — synthesized by state timers (onTimeout) —
+  | { type: 'expireCart' }
+  | { type: 'checkoutTimedOut' };
 
 // Update response: either the updated cart state or void for terminal operations
 export type CartUpdateResponse = CartDetails | void;
@@ -148,7 +162,7 @@ export interface CheckoutWorkflowResult {
 import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
 
 // Single consolidated cart update
-export const cartUpdate = defineUpdate<CartUpdateResponse, [CartEvent]>('cartUpdate');
+export const cartUpdate = defineUpdate<CartUpdateResponse, [CartCommand]>('cartUpdate');
 
 // Queries
 export const getCartQuery = defineQuery<CartDetails>('getCart');

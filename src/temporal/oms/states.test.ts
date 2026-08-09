@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ── Mock the workflow sandbox + activity I/O so the states layer (shell adapters,
-// finalize action mapping, intake prepare) can be exercised directly. The pure
-// decide/evolve logic is covered in oms-decider.test.ts — these tests assert the
-// wiring: next-state routing, prepare adapters, and the OmsFinalize side effects.
+// ── Mock the workflow sandbox + activity I/O so the machine states can be exercised
+// directly. The pure decide/evolve logic is covered in oms-decider.test.ts — these tests
+// assert the wiring: route tables, guards (rejections), prepare adapters, and the
+// event-keyed effects (emails, fulfillment cancel, the fulfillment child start).
 vi.mock('@temporalio/workflow', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   defineSignal: vi.fn((name: string) => ({ type: 'signal', name })),
@@ -56,10 +56,11 @@ import { terminal } from '../framework';
 import type {
   Order,
   OrderState,
-  OrderEvent,
+  OrderCommand,
   OrderAssignment,
   FulfillerOrder,
   FulfillmentStatusUpdate,
+  RefundRecord,
 } from './types';
 
 // ── Builders ────────────────────────────────────────────────────────────────
@@ -132,16 +133,17 @@ const makeSO = (
   statusHistory: [{ status: 'pending', timestamp: 't0' }],
 });
 
-const ev = (event: OrderEvent) => ({ kind: 'event' as const, event, timestamp: 't' });
-// The aggregated fulfillment callback (per-fulfiller-order status from the fulfillment domain).
-const sig = (result: FulfillmentStatusUpdate) => ({
+const ev = (event: OrderCommand) => ({ kind: 'event' as const, event, timestamp: 't' });
+// ADR-0024: signals are transport — the registration maps the raw payload to a
+// `fulfillmentStatus` COMMAND, which is what the state function receives.
+const sig = (update: FulfillmentStatusUpdate) => ({
   kind: 'signal' as const,
-  result,
+  result: { type: 'fulfillmentStatus', update } as OrderCommand,
   timestamp: 't',
 });
 const timeout = { kind: 'timeout' as const, timestamp: 't' };
 
-/** Capture the external-handle signal fn (cancelAndNotify → fulfillment cancel). */
+/** Capture the external-handle signal fn (the OrderCancelled effect → fulfillment cancel). */
 function captureExternalSignal() {
   const signal = vi.fn();
   vi.mocked(getExternalWorkflowHandle).mockReturnValue({ signal, cancel: vi.fn() } as never);
@@ -178,12 +180,13 @@ describe('assigning_fulfillers (transitional)', () => {
     // IDs come from the prepared payload (generated in prepare, not decide) — with the
     // sandbox uuid4 mocked, the assert is deterministic.
     expect(out.context.assignments[0].assignmentId).toBe('asg-uuid-fix');
-    // The prepare adapter snapshots line items with display-field fallbacks (bare CartItems).
+    // The prepare adapter snapshots line items with display-field fallbacks (bare
+    // CartItems); the snapshot marker is the order's own creation instant.
     const [lineItems] = vi.mocked(resolveFulfillerAssignments).mock.calls[0];
     expect(lineItems[0]).toMatchObject({
       productId: 'unknown',
       productTitle: 'Unknown Product',
-      snapshotTimestamp: 't',
+      snapshotTimestamp: '2026-01-01T00:00:00Z',
     });
   });
 
@@ -197,13 +200,14 @@ describe('assigning_fulfillers (transitional)', () => {
     expect(out.context.assignments).toHaveLength(0);
   });
 
-  it('a resolution activity failure stays put with the error (prepare-throw guard)', async () => {
+  it('a resolution activity failure is a rejection (prepare-throw): stay put with the error', async () => {
     vi.mocked(resolveFulfillerAssignments).mockRejectedValueOnce(new Error('resolver down'));
     const out = await OMS_STATES.assigning_fulfillers.fn(
       makeCtx({ status: 'assigning_fulfillers' }),
       timeout,
     );
     expect(out.next).toBe('assigning_fulfillers');
+    expect(out.rejected).toBe(true);
     expect(out.error).toMatch(/resolver down/);
   });
 });
@@ -243,8 +247,8 @@ describe('requesting_fulfillment (transitional)', () => {
       expect(a.fulfillerOrderId).toBe('so-uuid-fix');
       expect(a.status).toBe('fulfilled');
     }
-    // finalize: index each fulfiller order, then start the child (ABANDON so OMS closing
-    // never kills an in-flight fulfillment).
+    // FulfillmentRequested effect: index each fulfiller order, then start the child
+    // (ABANDON so OMS closing never kills an in-flight fulfillment).
     expect(indexFulfillerOrder).toHaveBeenCalledTimes(2);
     expect(startChild).toHaveBeenCalledWith(
       'fulfillmentWorkflow',
@@ -283,7 +287,7 @@ describe('requesting_fulfillment (transitional)', () => {
         items: [
           { lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10, title: 'Small Print' },
           { lineItemId: 'li-2', variantId: 'v1', quantity: 1, price: 25, title: 'Large Print' },
-          // (Cast: `title` lives on the states layer's OrderCartItem view of CartItem.)
+          // (Cast: `title` lives on the decider's OrderCartItem view of CartItem.)
         ] as unknown as Order['items'],
       }),
       assignments: [
@@ -345,7 +349,7 @@ describe('ready_to_fulfill — manual fallback', () => {
     expect(signal).toHaveBeenCalled();
   });
 
-  it('updateStatus(shipped) advances via nextForStatus and sends the status email', async () => {
+  it('updateStatus(shipped) routes on OrderShipped and sends the status email', async () => {
     const out = await OMS_STATES.ready_to_fulfill.fn(
       ctx(),
       ev({ type: 'updateStatus', status: 'shipped', updatedBy: 'admin' }),
@@ -355,10 +359,11 @@ describe('ready_to_fulfill — manual fallback', () => {
     expect(sendOrderStatusEmail).toHaveBeenCalledWith('a@b.c', 'o-1', 'shipped', {});
   });
 
-  it('an event with no transition entry is rejected in place', async () => {
+  it('a command the state does not list is REJECTED in place', async () => {
     const out = await OMS_STATES.ready_to_fulfill.fn(ctx(), ev({ type: 'confirmReturn' }));
     expect(out.next).toBe('ready_to_fulfill');
-    expect(out.error).toMatch(/No transition for 'confirmReturn'/);
+    expect(out.rejected).toBe(true);
+    expect(out.error).toMatch(/does not accept command 'confirmReturn'/);
   });
 
   it('timeout stays put (the order waits indefinitely for the admin)', async () => {
@@ -367,9 +372,9 @@ describe('ready_to_fulfill — manual fallback', () => {
   });
 });
 
-// ── processing: aggregated fulfillment-status signal ─────────────────────────
+// ── processing: aggregated fulfillment-status command ────────────────────────
 describe('processing — fulfillment-status aggregation', () => {
-  it('an update for an unknown fulfiller order is ignored (stay put + warn)', async () => {
+  it('an update for an unknown fulfiller order emits nothing (stay put)', async () => {
     const ctx = makeCtx({ fulfillerOrders: [makeSO('so-1', 'a-1')] });
     const out = await OMS_STATES.processing.fn(
       ctx,
@@ -377,10 +382,6 @@ describe('processing — fulfillment-status aggregation', () => {
     );
     expect(out.next).toBe('processing');
     expect(out.context.fulfillerOrders[0].status).toBe('pending');
-    expect(log.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/unknown fulfiller order/),
-      expect.anything(),
-    );
   });
 
   it('one of two shipped aggregates to partially_shipped and stamps the assignment', async () => {
@@ -421,7 +422,7 @@ describe('processing — fulfillment-status aggregation', () => {
     expect(out.context.deliveredAt).toBe('t');
   });
 
-  it('updateStatus(cancelled) routes through cancelAndNotify (email + fulfillment cancel)', async () => {
+  it('updateStatus(cancelled) routes through the OrderCancelled effect (email + fulfillment cancel)', async () => {
     const signal = captureExternalSignal();
     const out = await OMS_STATES.processing.fn(
       makeCtx(),
@@ -430,6 +431,17 @@ describe('processing — fulfillment-status aggregation', () => {
     expect(out.next).toBe(terminal('cancelled'));
     expect(sendOrderStatusEmail).toHaveBeenCalledWith('a@b.c', 'o-1', 'cancelled', {});
     expect(signal).toHaveBeenCalled();
+  });
+
+  it('updateStatus with an unforceable status is REJECTED — no transition', async () => {
+    const out = await OMS_STATES.processing.fn(
+      makeCtx(),
+      ev({ type: 'updateStatus', status: 'pending_assignment', updatedBy: 'admin' }),
+    );
+    expect(out.rejected).toBe(true);
+    expect(out.error).toMatch(/Unexpected status/);
+    expect(out.next).toBe('processing');
+    expect(out.context.status).toBe('processing');
   });
 
   it('timeout stays put (shipment-tracking states never expire the order)', async () => {
@@ -481,6 +493,32 @@ describe('delivered — feedback, refunds, returns', () => {
     expect(sendOrderStatusEmail).not.toHaveBeenCalled();
   });
 
+  it('refundOrder with an invalid selection is REJECTED before any refund math', async () => {
+    const out = await OMS_STATES.delivered.fn(
+      deliveredCtx(),
+      ev({ type: 'refundOrder', lines: [{ lineItemId: 'nope', quantity: 1 }] }),
+    );
+    expect(out.rejected).toBe(true);
+    expect(out.error).toMatch(/Unknown line item/);
+    expect(out.context.refunds).toBeUndefined();
+  });
+
+  it('refundOrder when everything is already refunded is REJECTED (nothing left)', async () => {
+    const priorRefund: RefundRecord = {
+      refundId: 'refund-1',
+      timestamp: 't0',
+      lines: [{ lineItemId: 'li-1', quantity: 1 }],
+      refundAmount: 10,
+      taxAmount: 0.8,
+    };
+    const out = await OMS_STATES.delivered.fn(
+      deliveredCtx({ refunds: [priorRefund] }),
+      ev({ type: 'refundOrder' }),
+    );
+    expect(out.rejected).toBe(true);
+    expect(out.error).toMatch(/Nothing left to refund/);
+  });
+
   it("updateStatus('refunded') routes through the refund command (records the refund)", async () => {
     const out = await OMS_STATES.delivered.fn(
       deliveredCtx(),
@@ -504,12 +542,14 @@ describe('delivered — feedback, refunds, returns', () => {
     });
   });
 
-  it('a stale fulfillment signal in delivered is ignored', async () => {
+  it('a stale fulfillment signal in delivered is REJECTED (state does not accept it)', async () => {
     const out = await OMS_STATES.delivered.fn(
       deliveredCtx(),
       sig({ fulfillerOrderId: 'so-1', status: 'shipped' }),
     );
     expect(out.next).toBe('delivered');
+    expect(out.rejected).toBe(true);
+    expect(out.error).toMatch(/does not accept command 'fulfillmentStatus'/);
     expect(out.context.status).toBe('delivered');
   });
 });
