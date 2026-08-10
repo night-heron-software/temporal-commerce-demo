@@ -558,7 +558,7 @@ function isMachineStateCall(call) {
  * distinct route target (like a conditional's branches). Effects attach their awaited
  * calls to the matching event's edge as finalize activities.
  */
-function machineStateFromDef(defObj, decls, src) {
+function machineStateFromDef(defObj, decls, _src) {
   const edges = [];
   const commands = [];
   let timeout = null;
