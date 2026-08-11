@@ -1,7 +1,18 @@
 import { describe, it, expect } from 'vitest';
 
-// Pure Functional Core: no Temporal sandbox, no mocks.
-import { decide, evolve, aggregateStatus, fulfillmentDecider } from './fulfillment-decider';
+// Pure Functional Core: no Temporal sandbox, no mocks. The per-command blocks are
+// exported structures, so each command's decide / evolve entries are exercised directly
+// in addition to the assembled dispatchers.
+import {
+  decide,
+  evolve,
+  aggregateStatus,
+  fulfillmentDecider,
+  beginProductionBlock,
+  cancelBlock,
+  childStatusBlock,
+} from './states';
+import type { FulfillmentEvent } from './states';
 import type {
   FulfillmentWorkflowState,
   FulfillmentFulfillerOrderState,
@@ -135,5 +146,60 @@ describe('fulfillmentDecider — the assembled decider', () => {
   it('exposes decide and evolve', () => {
     expect(fulfillmentDecider.decide).toBe(decide);
     expect(fulfillmentDecider.evolve).toBe(evolve);
+  });
+});
+
+// ── The regression net the purity refactor buys: apply EVERY FulfillmentEvent type and
+// prove the input context is untouched. The mapped-type table makes a missing event a
+// compile-time hole; the length pin keeps the net growing with the union.
+const eventSamples: { [E in FulfillmentEvent['type']]: Extract<FulfillmentEvent, { type: E }> } = {
+  ProductionStarted: { type: 'ProductionStarted', at: AT },
+  OrderCancelled: { type: 'OrderCancelled', at: AT },
+  ChildStatusApplied: { type: 'ChildStatusApplied', update: so('delivered'), at: AT },
+  FulfillmentDelivered: { type: 'FulfillmentDelivered', at: AT },
+  FulfillmentFailed: { type: 'FulfillmentFailed', at: AT },
+};
+
+describe('evolve never mutates its input — every FulfillmentEvent type', () => {
+  it('the table covers the whole event union', () => {
+    expect(Object.keys(eventSamples)).toHaveLength(5);
+  });
+
+  it.each(Object.entries(eventSamples))('%s leaves the input context untouched', (_type, event) => {
+    const s = state({ fulfillerOrders: [makeSO(), makeSO({ fulfillerOrderId: 'so-2' })] });
+    const snapshot = structuredClone(s);
+    const next = evolve(s, event as FulfillmentEvent);
+    expect(s).toEqual(snapshot);
+    expect(next).not.toBe(s); // a NEW context every time — stamping alone rebuilds it
+  });
+});
+
+// ── Per-command blocks: each command is packaged as ONE exported structure, so its pure
+// fields are exercised directly here.
+describe('command blocks — one structure per command', () => {
+  it('beginProductionBlock.decide is idempotent — only a freshly-received order starts', () => {
+    expect(beginProductionBlock.decide({ type: 'beginProduction', at: AT }, state())).toEqual([]);
+    expect(
+      beginProductionBlock.decide(
+        { type: 'beginProduction', at: AT },
+        state({ status: 'received' }),
+      ),
+    ).toEqual([{ type: 'ProductionStarted', at: AT }]);
+  });
+
+  it('cancelBlock.evolve.OrderCancelled cascades immutably to every order and line', () => {
+    const s = state();
+    const next = cancelBlock.evolve!.OrderCancelled!(s, eventSamples.OrderCancelled);
+    expect(next).not.toBe(s);
+    expect(next.fulfillerOrders[0].items[0].status).toBe('cancelled');
+    expect(s.fulfillerOrders[0].items[0].status).toBe('in_production'); // input untouched
+  });
+
+  it('childStatusBlock.decide projects the aggregate outcome onto the current set', () => {
+    expect(
+      childStatusBlock
+        .decide({ type: 'childStatus', update: so('delivered'), at: AT }, state())
+        .map((e) => e.type),
+    ).toEqual(['ChildStatusApplied', 'FulfillmentDelivered']);
   });
 });

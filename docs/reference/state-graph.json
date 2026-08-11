@@ -18,16 +18,31 @@
           "timeout": "30 days",
           "commands": [
             {
-              "name": "addItem"
+              "name": "addItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ]
             },
             {
-              "name": "updateQuantity"
+              "name": "updateQuantity",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ]
             },
             {
-              "name": "removeItem"
+              "name": "removeItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem"
+              ]
             },
             {
-              "name": "applyCoupon"
+              "name": "applyCoupon",
+              "guarded": true
             },
             {
               "name": "linkUser"
@@ -84,16 +99,31 @@
           "timeout": "1 hour",
           "commands": [
             {
-              "name": "addItem"
+              "name": "addItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ]
             },
             {
-              "name": "updateQuantity"
+              "name": "updateQuantity",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ]
             },
             {
-              "name": "removeItem"
+              "name": "removeItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem"
+              ]
             },
             {
-              "name": "applyCoupon"
+              "name": "applyCoupon",
+              "guarded": true
             },
             {
               "name": "linkUser"
@@ -623,7 +653,7 @@
       "states": [
         {
           "name": "pending_assignment",
-          "doc": "Transitional intake 1/3: a pure hop — the mono decides the ORDER_CAPTURE ledger\nnumbers here and posts them as the `PaymentCaptured` effect; the demo has no\naccounting, so the event carries nothing and has no effect.",
+          "doc": "Transitional intake 1/3: a pure hop — the mono decides the ORDER_CAPTURE ledger\nnumbers here and posts them as the `PaymentCaptured` effect; the demo has no\naccounting, so the event carries nothing and has no effect (see `capturePaymentBlock`).",
           "timeout": "1 minute",
           "commands": [
             {

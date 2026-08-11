@@ -99,7 +99,7 @@ export interface CartDetails {
 // block is internal: signal-mapped commands from the checkout child (see `toSignal`
 // in cart/workflows.ts) and the commands the two states' timers synthesize. The
 // decider sees these enriched with prepared data + the deterministic timestamp
-// (see `EnrichedCartCommand` in cart/cart-decider.ts).
+// (see `EnrichedCartCommand` in cart/states.ts).
 // ==================
 
 export type CartCommand =

@@ -79,7 +79,7 @@ export interface RecomputeSignal {
 // checkout/workflows.ts). `recompute` arrives on the cart's nudge signal (signal
 // transport, mapped to a command via `toSignal`); the last two are synthesized by
 // state timers (onTimeout). The decider sees these enriched with prepared data + the
-// deterministic timestamp (see `EnrichedCheckoutCommand` in checkout/checkout-decider.ts).
+// deterministic timestamp (see `EnrichedCheckoutCommand` in checkout/states.ts).
 // ==================
 
 export type CheckoutCommand =

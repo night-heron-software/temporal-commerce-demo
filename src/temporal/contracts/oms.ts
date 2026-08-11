@@ -266,7 +266,7 @@ export type OrderStateName =
  * Commands — intent arriving from outside (ADR-0024). Wire commands come from Temporal
  * updates; `fulfillmentStatus` is the child-workflow signal mapped at registration; the
  * intake steps are timer-synthesized by the transitional states. The decider sees these
- * enriched with `at` + prepared data (`EnrichedOrderCommand` in oms/oms-decider.ts).
+ * enriched with `at` + prepared data (`EnrichedOrderCommand` in oms/states.ts).
  */
 export type OrderCommand =
   // ── wire (updates) ──

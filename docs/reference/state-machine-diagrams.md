@@ -52,7 +52,7 @@ stateDiagram-v2
 
 ### State: `active`
 
-**Accepts:** `addItem` · `updateQuantity` · `removeItem` · `applyCoupon` · `linkUser` · `expireCart` · `beginCheckout` *(guarded; prepare: startChild)* — any other command is rejected.
+**Accepts:** `addItem` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `updateQuantity` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `removeItem` *(guarded; prepare: releaseCartItem)* · `applyCoupon` *(guarded)* · `linkUser` · `expireCart` · `beginCheckout` *(guarded; prepare: startChild)* — any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -67,7 +67,7 @@ stateDiagram-v2
 
 ### State: `checkout`
 
-**Accepts:** `addItem` · `updateQuantity` · `removeItem` · `applyCoupon` · `linkUser` · `beginCheckout` · `submitStarted` · `submitAborted` · `checkoutCompleted` · `checkoutTimedOut` — any other command is rejected.
+**Accepts:** `addItem` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `updateQuantity` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `removeItem` *(guarded; prepare: releaseCartItem)* · `applyCoupon` *(guarded)* · `linkUser` · `beginCheckout` · `submitStarted` · `submitAborted` · `checkoutCompleted` · `checkoutTimedOut` — any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -352,7 +352,7 @@ stateDiagram-v2
 
 Transitional intake 1/3: a pure hop — the mono decides the ORDER_CAPTURE ledger
 numbers here and posts them as the `PaymentCaptured` effect; the demo has no
-accounting, so the event carries nothing and has no effect.
+accounting, so the event carries nothing and has no effect (see `capturePaymentBlock`).
 
 **Accepts:** `capturePayment` — any other command is rejected.
 

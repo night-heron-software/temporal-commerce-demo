@@ -2,8 +2,25 @@ import { describe, it, expect } from 'vitest';
 
 // Pure Functional Core: no Temporal sandbox, no activity mocks, no uuid4 — the whole point of
 // the Chassaing rollout. `decide` is asserted on the events it emits; `evolve` on the fold.
-import { decide, evolve, cartDecider } from './cart-decider';
-import type { CartEvent, EnrichedCartCommand } from './cart-decider';
+// The per-command blocks are exported structures, so each command's guard / decide / evolve
+// entries are exercised directly in addition to the assembled dispatchers.
+import {
+  decide,
+  evolve,
+  cartDecider,
+  addItemBlock,
+  updateQuantityBlock,
+  removeItemBlock,
+  applyCouponBlock,
+  linkUserBlock,
+  beginCheckoutBlock,
+  expireCartBlock,
+  checkoutTimedOutBlock,
+  submitStartedBlock,
+  submitAbortedBlock,
+  checkoutCompletedBlock,
+} from './states';
+import type { CartEvent, EnrichedCartCommand } from './states';
 import type { CartDetails, CartWorkflowContext, CheckoutWorkflowResult } from './types';
 
 // ── Builders ────────────────────────────────────────────────────────────────
@@ -325,5 +342,184 @@ describe('evolve — version/timestamp stamping', () => {
   it('treats a missing version as 0', () => {
     const s0 = makeCtx({ cart: makeCart({ cartVersion: undefined as unknown as number }) });
     expect(evolve(s0, { type: 'CartAbandoned', at: 'T' }).cart.cartVersion).toBe(1);
+  });
+});
+
+// ── The regression net the purity refactor buys: apply EVERY CartEvent type and prove the
+// input context is untouched. The mapped-type table makes a missing event a compile-time
+// hole; the length pin keeps the net growing with the union.
+const eventSamples: { [E in CartEvent['type']]: Extract<CartEvent, { type: E }> } = {
+  ItemAdded: {
+    type: 'ItemAdded',
+    variantId: 'v2',
+    quantity: 2,
+    price: 5,
+    lineItemId: 'li-new',
+    at: 'T',
+  },
+  ItemQuantityChanged: { type: 'ItemQuantityChanged', lineItemId: 'li-1', quantity: 3, at: 'T' },
+  ItemRemoved: { type: 'ItemRemoved', lineItemId: 'li-1', at: 'T' },
+  CouponApplied: { type: 'CouponApplied', code: 'SAVE20', at: 'T' },
+  UserLinked: { type: 'UserLinked', email: 'a@b.c', userId: 'u-1', at: 'T' },
+  CheckoutEntered: {
+    type: 'CheckoutEntered',
+    checkoutWorkflowId: 'c-1',
+    checkoutVersion: 1,
+    at: 'T',
+  },
+  CheckoutDisowned: { type: 'CheckoutDisowned', at: 'T' },
+  CartAbandoned: { type: 'CartAbandoned', at: 'T' },
+  CartCompleted: {
+    type: 'CartCompleted',
+    finalState: { step: 'complete', isGuest: true, shippingCost: 5, tax: 0.8 },
+    at: 'T',
+  },
+  CheckoutFailed: { type: 'CheckoutFailed', error: 'declined', at: 'T' },
+  SubmitFreezeStarted: { type: 'SubmitFreezeStarted', at: 'T' },
+  SubmitFreezeCleared: { type: 'SubmitFreezeCleared', at: 'T' },
+};
+
+describe('evolve never mutates its input — every CartEvent type', () => {
+  it('the table covers the whole event union', () => {
+    expect(Object.keys(eventSamples)).toHaveLength(12);
+  });
+
+  it.each(Object.entries(eventSamples))('%s leaves the input context untouched', (_type, event) => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const snapshot = structuredClone(s);
+    const next = evolve(s, event as CartEvent);
+    expect(s).toEqual(snapshot);
+    expect(next).not.toBe(s); // a NEW context every time — stamping alone rebuilds it
+  });
+});
+
+// ── Per-command blocks: each command is packaged as ONE exported structure (guard /
+// prepare / decide / evolve), so its pure fields are exercised directly here (prepare is
+// I/O and is covered through the machine in states.test.ts with mocked activities).
+describe('command blocks — one structure per command', () => {
+  const editCommand = { type: 'addItem', variantId: 'v2', quantity: 1, price: 5 } as const;
+
+  it('addItemBlock.guard refuses edits while submitting, passes otherwise', () => {
+    expect(addItemBlock.guard!(makeCtx({ submitting: true }), editCommand)).toMatchObject({
+      rejected: true,
+      reason: expect.stringMatching(/being placed/i),
+    });
+    expect(addItemBlock.guard!(makeCtx(), editCommand)).toBeUndefined();
+  });
+
+  it('the edit blocks share ONE guard reference (notWhileSubmitting)', () => {
+    expect(updateQuantityBlock.guard).toBe(addItemBlock.guard);
+    expect(removeItemBlock.guard).toBe(addItemBlock.guard);
+    expect(applyCouponBlock.guard).toBe(addItemBlock.guard);
+  });
+
+  it('beginCheckoutBlock.guard refuses an empty cart', () => {
+    const empty = makeCtx({ cart: makeCart({ items: [] }) });
+    expect(beginCheckoutBlock.guard!(empty, { type: 'beginCheckout' })).toMatchObject({
+      rejected: true,
+      reason: expect.stringMatching(/empty cart/i),
+    });
+    expect(beginCheckoutBlock.guard!(makeCtx(), { type: 'beginCheckout' })).toBeUndefined();
+  });
+
+  it('addItemBlock.decide emits ItemAdded from the enriched command', () => {
+    expect(
+      addItemBlock.decide(
+        { type: 'addItem', variantId: 'v2', quantity: 2, price: 5, lineItemId: 'li-new', at },
+        makeCtx(),
+      ),
+    ).toEqual([
+      {
+        type: 'ItemAdded',
+        variantId: 'v2',
+        quantity: 2,
+        price: 5,
+        properties: undefined,
+        lineItemId: 'li-new',
+        at,
+      },
+    ]);
+  });
+
+  it('addItemBlock.evolve.ItemAdded returns a NEW context with the line appended', () => {
+    const s = makeCtx();
+    const next = addItemBlock.evolve!.ItemAdded!(s, eventSamples.ItemAdded);
+    expect(next).not.toBe(s);
+    expect(next.cart.items.map((i) => i.lineItemId)).toEqual(['li-1', 'li-new']);
+    expect(s.cart.items).toHaveLength(1); // input untouched
+  });
+
+  it('updateQuantityBlock.evolve.ItemQuantityChanged substitutes the one line and re-totals', () => {
+    const s = makeCtx();
+    const next = updateQuantityBlock.evolve!.ItemQuantityChanged!(s, {
+      type: 'ItemQuantityChanged',
+      lineItemId: 'li-1',
+      quantity: 3,
+      at,
+    });
+    expect(next.cart.items[0].quantity).toBe(3);
+    expect(next.cart.subtotalPrice).toBe(30);
+    expect(s.cart.items[0].quantity).toBe(1); // input untouched
+  });
+
+  it('updateQuantityBlock.evolve.ItemQuantityChanged on a missing line leaves the context as-is', () => {
+    const s = makeCtx();
+    const next = updateQuantityBlock.evolve!.ItemQuantityChanged!(s, {
+      type: 'ItemQuantityChanged',
+      lineItemId: 'nope',
+      quantity: 3,
+      at,
+    });
+    expect(next).toBe(s);
+  });
+
+  it('events shared by several commands reference ONE evolve function (assembly invariant)', () => {
+    expect(removeItemBlock.evolve!.ItemRemoved).toBe(updateQuantityBlock.evolve!.ItemRemoved);
+    expect(removeItemBlock.evolve!.CartAbandoned).toBe(updateQuantityBlock.evolve!.CartAbandoned);
+    expect(expireCartBlock.evolve!.CartAbandoned).toBe(removeItemBlock.evolve!.CartAbandoned);
+  });
+
+  it('applyCouponBlock.evolve.CouponApplied appends the coupon immutably', () => {
+    const s = makeCtx();
+    const next = applyCouponBlock.evolve!.CouponApplied!(s, eventSamples.CouponApplied);
+    expect(next.cart.appliedCoupons).toEqual(['SAVE20']);
+    expect(s.cart.appliedCoupons).toEqual([]); // input untouched
+  });
+
+  it('linkUser / submit-freeze blocks write only their own fields, immutably', () => {
+    const linked = linkUserBlock.evolve!.UserLinked!(makeCtx(), eventSamples.UserLinked).cart;
+    expect(linked.email).toBe('a@b.c');
+    expect(linked.userId).toBe('u-1');
+    expect(
+      submitStartedBlock.evolve!.SubmitFreezeStarted!(makeCtx(), eventSamples.SubmitFreezeStarted)
+        .submitting,
+    ).toBe(true);
+    expect(
+      submitAbortedBlock.evolve!.SubmitFreezeCleared!(
+        makeCtx({ submitting: true }),
+        eventSamples.SubmitFreezeCleared,
+      ).submitting,
+    ).toBe(false);
+  });
+
+  it('checkoutTimedOutBlock.evolve.CheckoutDisowned drops the checkout fields and the link', () => {
+    const s = makeCtx({
+      cart: makeCart({ status: 'checkout' }),
+      checkoutWorkflowId: 'c-1',
+    });
+    const next = checkoutTimedOutBlock.evolve!.CheckoutDisowned!(s, eventSamples.CheckoutDisowned);
+    expect(next.cart.status).toBe('active');
+    expect(next.cart.checkout).toBeUndefined();
+    expect(next.checkoutWorkflowId).toBeNull();
+    expect(s.checkoutWorkflowId).toBe('c-1'); // input untouched
+  });
+
+  it('checkoutCompletedBlock.evolve.CheckoutFailed returns to active, drops the link, keeps the error', () => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-1' });
+    const next = checkoutCompletedBlock.evolve!.CheckoutFailed!(s, eventSamples.CheckoutFailed);
+    expect(next.cart.status).toBe('active');
+    expect(next.cart.checkout?.error).toBe('declined');
+    expect(next.checkoutWorkflowId).toBeNull();
+    expect(s.checkoutWorkflowId).toBe('c-1'); // input untouched
   });
 });

@@ -10,11 +10,17 @@ import {
   evolve,
   aggregateShippingState,
   buildFulfillment,
-  copyOrderState,
   refundSelectionProblem,
   omsDecider,
-} from './oms-decider';
-import type { EnrichedOrderCommand, OrderEvent, ResolvedAssignment } from './oms-decider';
+  capturePaymentBlock,
+  cancelOrderBlock,
+  updateStatusBlock,
+  submitFeedbackBlock,
+  refundOrderBlock,
+  confirmReturnBlock,
+  denyReturnBlock,
+} from './states';
+import type { EnrichedOrderCommand, OrderEvent, ResolvedAssignment } from './states';
 import type {
   OrderState,
   OrderAssignment,
@@ -507,13 +513,17 @@ describe('oms evolve() — folding one event', () => {
     expect(forced.deliveredAt).toBeUndefined();
   });
 
-  it('does not mutate the input state (copyOrderState fold)', () => {
+  it('does not mutate the input state', () => {
     const state = makeState();
+    const snapshot = structuredClone(state);
     apply(state, { type: 'cancelOrder', at: AT });
-    expect(state.status).toBe('processing');
-    const copy = copyOrderState(state);
-    copy.fulfillerOrders[0].status = 'delivered';
-    expect(state.fulfillerOrders[0].status).toBe('processing');
+    expect(state).toEqual(snapshot);
+    evolve(state, {
+      type: 'FulfillmentApplied',
+      update: { fulfillerOrderId: 'so-1', status: 'shipped' },
+      at: AT,
+    });
+    expect(state).toEqual(snapshot);
   });
 });
 
@@ -635,5 +645,157 @@ describe('omsDecider — the assembled decider', () => {
 
   it('has no isTerminal — terminality is the route tables (ADR-0024)', () => {
     expect('isTerminal' in omsDecider).toBe(false);
+  });
+});
+
+// ── The regression net the purity refactor buys: apply EVERY OrderEvent type and prove
+// the input context is untouched. The mapped-type table makes a missing event a
+// compile-time hole; the length pin keeps the net growing with the union.
+const eventSamples: { [E in OrderEvent['type']]: Extract<OrderEvent, { type: E }> } = {
+  PaymentCaptured: { type: 'PaymentCaptured', at: AT },
+  FulfillersAssigned: {
+    type: 'FulfillersAssigned',
+    assignments: [makeAssignment({ assignmentId: 'asg-new' })],
+    at: AT,
+  },
+  NoFulfillersResolved: { type: 'NoFulfillersResolved', at: AT },
+  FulfillmentRequested: {
+    type: 'FulfillmentRequested',
+    fulfillerOrders: [makeFulfillerOrder({ fulfillerOrderId: 'so-9', status: 'pending' })],
+    fulfillmentInputs: [],
+    at: AT,
+  },
+  OrderCancelled: { type: 'OrderCancelled', at: AT },
+  FeedbackSubmitted: { type: 'FeedbackSubmitted', rating: 5, comment: 'Great', at: AT },
+  Refunded: {
+    type: 'Refunded',
+    record: refundRecord({ refundId: 'refund-2' }),
+    fullyRefunded: true,
+    at: AT,
+  },
+  ReturnRequested: { type: 'ReturnRequested', record: { requestedAt: AT }, at: AT },
+  ReturnConfirmed: {
+    type: 'ReturnConfirmed',
+    record: refundRecord({ refundId: 'refund-2' }),
+    at: AT,
+  },
+  ReturnDenied: { type: 'ReturnDenied', at: AT },
+  FulfillmentApplied: {
+    type: 'FulfillmentApplied',
+    update: fulfillmentUpdate(),
+    at: AT,
+  },
+  FulfillmentPartiallyShipped: { type: 'FulfillmentPartiallyShipped', at: AT },
+  FulfillmentShipped: { type: 'FulfillmentShipped', at: AT },
+  FulfillmentDelivered: { type: 'FulfillmentDelivered', at: AT },
+  OrderProcessing: { type: 'OrderProcessing', at: AT },
+  OrderPartiallyShipped: { type: 'OrderPartiallyShipped', at: AT },
+  OrderShipped: { type: 'OrderShipped', at: AT },
+  OrderDelivered: { type: 'OrderDelivered', at: AT },
+  OrderReturnRequested: { type: 'OrderReturnRequested', at: AT },
+  OrderRefunded: { type: 'OrderRefunded', at: AT },
+  OrderReturned: { type: 'OrderReturned', at: AT },
+  OrderCompleted: { type: 'OrderCompleted', at: AT },
+};
+
+describe('evolve never mutates its input — every OrderEvent type', () => {
+  it('the table covers the whole event union', () => {
+    expect(Object.keys(eventSamples)).toHaveLength(22);
+  });
+
+  // A rich input so every entry has something to touch: fulfiller orders (with matching
+  // assignments for the FulfillmentApplied cascade), an existing refund, and a pending
+  // return request.
+  const richState = () =>
+    makeState({
+      status: 'processing',
+      assignments: [makeAssignment({ assignmentId: 'asg-1' })],
+      fulfillerOrders: [
+        makeFulfillerOrder({ fulfillerOrderId: 'so-1', status: 'pending' }),
+        makeFulfillerOrder({ fulfillerOrderId: 'so-2', status: 'pending' }),
+      ],
+      refunds: [refundRecord({ refundId: 'refund-0', lines: [] })],
+      returnRequest: { requestedAt: AT },
+    });
+
+  it.each(Object.entries(eventSamples))('%s leaves the input context untouched', (_type, event) => {
+    const s = richState();
+    const snapshot = structuredClone(s);
+    evolve(s, event as OrderEvent);
+    expect(s).toEqual(snapshot);
+  });
+});
+
+// ── Per-command blocks: each command is packaged as ONE exported structure (guard /
+// prepare / decide / evolve), so its pure fields are exercised directly here (prepare is
+// I/O and is covered through the machine in states.test.ts with mocked activities).
+describe('command blocks — one structure per command', () => {
+  it('updateStatusBlock.guard rejects an unforceable status, passes a forceable one', () => {
+    expect(
+      updateStatusBlock.guard!(makeState(), {
+        type: 'updateStatus',
+        status: 'pending_assignment',
+        updatedBy: 'admin',
+      }),
+    ).toMatchObject({ rejected: true, reason: expect.stringMatching(/Unexpected status/) });
+    expect(
+      updateStatusBlock.guard!(makeState(), {
+        type: 'updateStatus',
+        status: 'shipped',
+        updatedBy: 'admin',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('refundOrderBlock.guard rejects an invalid selection, passes the full remainder', () => {
+    expect(
+      refundOrderBlock.guard!(makeState(), {
+        type: 'refundOrder',
+        lines: [{ lineItemId: 'nope', quantity: 1 }],
+      }),
+    ).toMatchObject({ rejected: true, reason: expect.stringMatching(/Unknown line item/) });
+    expect(refundOrderBlock.guard!(makeState(), { type: 'refundOrder' })).toBeUndefined();
+  });
+
+  it('confirmReturnBlock.guard validates the STORED request lines', () => {
+    const bad = makeState({
+      status: 'return_requested',
+      returnRequest: { requestedAt: AT, lines: [{ lineItemId: 'nope', quantity: 1 }] },
+    });
+    expect(confirmReturnBlock.guard!(bad, { type: 'confirmReturn' })).toMatchObject({
+      rejected: true,
+      reason: expect.stringMatching(/Unknown line item/),
+    });
+    const ok = makeState({ status: 'return_requested', returnRequest: { requestedAt: AT } });
+    expect(confirmReturnBlock.guard!(ok, { type: 'confirmReturn' })).toBeUndefined();
+  });
+
+  it('events shared by several commands reference ONE evolve function (assembly invariant)', () => {
+    expect(updateStatusBlock.evolve!.OrderCancelled).toBe(cancelOrderBlock.evolve!.OrderCancelled);
+    expect(updateStatusBlock.evolve!.OrderRefunded).toBe(refundOrderBlock.evolve!.OrderRefunded);
+  });
+
+  it('capturePaymentBlock.decide emits the bare PaymentCaptured hop (demo: no ledger)', () => {
+    expect(capturePaymentBlock.decide({ type: 'capturePayment', at: AT }, makeState())).toEqual([
+      { type: 'PaymentCaptured', at: AT },
+    ]);
+  });
+
+  it('cancelOrderBlock / denyReturnBlock decide their single event', () => {
+    expect(cancelOrderBlock.decide({ type: 'cancelOrder', at: AT }, makeState())).toEqual([
+      { type: 'OrderCancelled', at: AT },
+    ]);
+    expect(denyReturnBlock.decide({ type: 'denyReturn', at: AT }, makeState())).toEqual([
+      { type: 'ReturnDenied', at: AT },
+    ]);
+  });
+
+  it('submitFeedbackBlock.evolve.FeedbackSubmitted completes the order immutably', () => {
+    const s = makeState({ status: 'delivered' });
+    const next = submitFeedbackBlock.evolve!.FeedbackSubmitted!(s, eventSamples.FeedbackSubmitted);
+    expect(next).not.toBe(s);
+    expect(next.status).toBe('complete');
+    expect(next.customerFeedback).toEqual({ rating: 5, comment: 'Great', submittedAt: AT });
+    expect(s.status).toBe('delivered'); // input untouched
   });
 });

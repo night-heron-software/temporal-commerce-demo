@@ -1,10 +1,25 @@
 import { describe, it, expect } from 'vitest';
 
-// Pure Functional Core: no Temporal sandbox, no activity mocks. All I/O is in the states'
+// Pure Functional Core: no Temporal sandbox, no activity mocks. All I/O is in the blocks'
 // `prepare`; here `decide` is asserted on emitted events and `evolve` on the fold.
-import { decide, evolve, checkoutDecider } from './checkout-decider';
-import type { EnrichedCheckoutCommand } from './checkout-decider';
-import type { CheckoutContext, Order, QueriedCart } from './types';
+// The per-command blocks are exported structures, so each command's decide / evolve
+// entries are exercised directly in addition to the assembled dispatchers.
+import {
+  decide,
+  evolve,
+  checkoutDecider,
+  validateBlock,
+  setShippingBlock,
+  setPaymentBlock,
+  acknowledgeCartChangeBlock,
+  retargetParentBlock,
+  cancelCheckoutBlock,
+  checkoutTimedOutBlock,
+  submitOrderBlock,
+  recomputeBlock,
+} from './states';
+import type { CheckoutEvent, EnrichedCheckoutCommand } from './states';
+import type { CheckoutContext, CheckoutState, Order, QueriedCart } from './types';
 
 const at = '2026-08-09T00:00:00.000Z';
 
@@ -265,5 +280,199 @@ describe('checkoutDecider — the assembled decider', () => {
   it('exposes decide and evolve', () => {
     expect(checkoutDecider.decide).toBe(decide);
     expect(checkoutDecider.evolve).toBe(evolve);
+  });
+});
+
+// ── The regression net the block refactor keeps taut: apply EVERY CheckoutEvent type and
+// prove the input context is untouched. The mapped-type table makes a missing event a
+// compile-time hole; the length pin keeps the net growing with the union.
+const eventSamples: { [E in CheckoutEvent['type']]: Extract<CheckoutEvent, { type: E }> } = {
+  CartLoaded: {
+    type: 'CartLoaded',
+    cart: queriedCart(),
+    reservations: [{ reservationId: 'r-1' } as never],
+  },
+  ValidationFailed: { type: 'ValidationFailed', error: 'gone' },
+  ShippingSet: {
+    type: 'ShippingSet',
+    shippingAddress: address,
+    shipping: 5,
+    tax: 0.8,
+    clientSecret: 'cs',
+  },
+  ShippingFailed: {
+    type: 'ShippingFailed',
+    shippingAddress: address,
+    shipping: 5,
+    tax: 0.8,
+    error: 'nope',
+  },
+  PaymentSet: { type: 'PaymentSet', paymentMethod: { type: 'mock', token: 'tok' } },
+  CartChangeAcknowledged: { type: 'CartChangeAcknowledged', cartVersion: 4 },
+  ParentRetargeted: { type: 'ParentRetargeted', parentCartWorkflowId: 'demo.cart.other' },
+  Cancelled: {
+    type: 'Cancelled',
+    reason: 'checkout-cancelled',
+    reservations: [{ reservationId: 'r-1' } as never],
+  },
+  OrderSubmitted: { type: 'OrderSubmitted', newState: { isGuest: true } as CheckoutState },
+  SubmitRejected: { type: 'SubmitRejected', error: 'declined' },
+  Recomputed: { type: 'Recomputed', cart: queriedCart(), shipping: 5, tax: 0.8 },
+};
+
+describe('evolve never mutates its input — every CheckoutEvent type', () => {
+  it('the table covers the whole event union', () => {
+    expect(Object.keys(eventSamples)).toHaveLength(11);
+  });
+
+  it.each(Object.entries(eventSamples))('%s leaves the input context untouched', (_type, event) => {
+    const c = makeCtx({
+      reservations: [{ reservationId: 'r-0' } as never],
+      state: { step: 'shipping', isGuest: true, shippingCost: 0, tax: 0, error: 'stale' },
+    });
+    const snap = structuredClone(c);
+    evolve(c, event as CheckoutEvent);
+    expect(c).toEqual(snap);
+  });
+});
+
+// ── Per-command blocks: each command is packaged as ONE exported structure (guard /
+// prepare / decide / evolve), so its pure fields are exercised directly here (prepare is
+// I/O and is covered through the machine in states.test.ts with mocked activities).
+describe('command blocks — one structure per command', () => {
+  it('validateBlock.decide emits CartLoaded on success, ValidationFailed on failure', () => {
+    expect(
+      validateBlock.decide(
+        {
+          type: 'validate',
+          prepared: { success: true, reservations: [], cart: queriedCart() },
+          at,
+        },
+        makeCtx(),
+      ),
+    ).toEqual([{ type: 'CartLoaded', cart: queriedCart(), reservations: [] }]);
+    expect(
+      validateBlock.decide(
+        {
+          type: 'validate',
+          prepared: { success: false, reservations: [], error: 'gone', cart: queriedCart() },
+          at,
+        },
+        makeCtx(),
+      ),
+    ).toEqual([{ type: 'ValidationFailed', error: 'gone' }]);
+  });
+
+  it('validateBlock.evolve.CartLoaded returns a NEW context with pricing + reservations loaded', () => {
+    const c = makeCtx({ items: [], subtotalPrice: 0, totalPrice: 0 });
+    const next = validateBlock.evolve!.CartLoaded!(c, eventSamples.CartLoaded);
+    expect(next).not.toBe(c);
+    expect(next.subtotalPrice).toBe(10);
+    expect(next.totalPrice).toBe(10);
+    expect(next.reservations).toHaveLength(1);
+    expect(c.items).toHaveLength(0); // input untouched
+  });
+
+  it('events shared by several commands reference ONE evolve function (assembly invariant)', () => {
+    expect(checkoutTimedOutBlock.evolve!.Cancelled).toBe(cancelCheckoutBlock.evolve!.Cancelled);
+  });
+
+  it('setShippingBlock.decide falls back to the context clientSecret', () => {
+    const c = makeCtx({
+      state: { step: 'shipping', isGuest: true, shippingCost: 0, tax: 0, clientSecret: 'cs-old' },
+    });
+    expect(
+      setShippingBlock.decide(
+        {
+          type: 'setShipping',
+          shippingAddress: address,
+          prepared: { calculatedShipping: 5, calculatedTax: 0.8 },
+          at,
+        },
+        c,
+      ),
+    ).toEqual([
+      {
+        type: 'ShippingSet',
+        shippingAddress: address,
+        shipping: 5,
+        tax: 0.8,
+        clientSecret: 'cs-old',
+      },
+    ]);
+  });
+
+  it('setShippingBlock.evolve.ShippingFailed stores the address AND the error', () => {
+    const next = setShippingBlock.evolve!.ShippingFailed!(makeCtx(), eventSamples.ShippingFailed);
+    expect(next.state.shippingAddress).toEqual(address);
+    expect(next.state.error).toBe('nope');
+    expect(next.totalPrice).toBeCloseTo(10 - 0 + 5 + 0.8);
+  });
+
+  it('cancel blocks decide the reason and carry the pre-evolve reservations', () => {
+    const withHolds = makeCtx({ reservations: [{ reservationId: 'r-1' } as never] });
+    expect(cancelCheckoutBlock.decide({ type: 'cancelCheckout', at }, withHolds)).toEqual([
+      { type: 'Cancelled', reason: 'checkout-cancelled', reservations: [{ reservationId: 'r-1' }] },
+    ]);
+    expect(checkoutTimedOutBlock.decide({ type: 'checkoutTimedOut', at }, withHolds)).toEqual([
+      { type: 'Cancelled', reason: 'checkout-timeout', reservations: [{ reservationId: 'r-1' }] },
+    ]);
+  });
+
+  it('cancel evolve clears the reservations immutably (the event still carries them)', () => {
+    const withHolds = makeCtx({ reservations: [{ reservationId: 'r-1' } as never] });
+    const next = cancelCheckoutBlock.evolve!.Cancelled!(withHolds, eventSamples.Cancelled);
+    expect(next.reservations).toEqual([]);
+    expect(withHolds.reservations).toHaveLength(1); // input untouched
+  });
+
+  it('setPayment / acknowledge / retarget blocks write only their own fields, immutably', () => {
+    const paid = setPaymentBlock.evolve!.PaymentSet!(makeCtx(), eventSamples.PaymentSet);
+    expect(paid.state.paymentMethod?.token).toBe('tok');
+    const acked = acknowledgeCartChangeBlock.evolve!.CartChangeAcknowledged!(
+      makeCtx(),
+      eventSamples.CartChangeAcknowledged,
+    );
+    expect(acked.state.cartVersionAcknowledged).toBe(4);
+    const retargeted = retargetParentBlock.evolve!.ParentRetargeted!(
+      makeCtx(),
+      eventSamples.ParentRetargeted,
+    );
+    expect(retargeted.parentCartWorkflowId).toBe('demo.cart.other');
+  });
+
+  it('submitOrderBlock.decide maps the prepared saga result to OrderSubmitted / SubmitRejected', () => {
+    expect(
+      submitOrderBlock.decide(
+        {
+          type: 'submitOrder',
+          at,
+          prepared: { success: true, order, newState: { isGuest: true } as CheckoutState },
+        },
+        makeCtx(),
+      ),
+    ).toEqual([{ type: 'OrderSubmitted', newState: { isGuest: true } }]);
+    expect(
+      submitOrderBlock.decide(
+        { type: 'submitOrder', at, prepared: { success: false, error: 'declined' } },
+        makeCtx(),
+      ),
+    ).toEqual([{ type: 'SubmitRejected', error: 'declined' }]);
+  });
+
+  it('recomputeBlock.evolve.Recomputed un-checks payment and re-totals immutably', () => {
+    const priced = makeCtx({
+      state: {
+        step: 'review',
+        isGuest: true,
+        shippingCost: 5,
+        tax: 0.8,
+        paymentMethod: { type: 'mock', token: 'tok_1' },
+      },
+    });
+    const next = recomputeBlock.evolve!.Recomputed!(priced, eventSamples.Recomputed);
+    expect(next.state.paymentMethod).toBeUndefined();
+    expect(next.totalPrice).toBeCloseTo(10 - 0 + 5 + 0.8);
+    expect(priced.state.paymentMethod?.token).toBe('tok_1'); // input untouched
   });
 });

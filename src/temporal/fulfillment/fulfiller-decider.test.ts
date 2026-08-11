@@ -1,8 +1,25 @@
 import { describe, it, expect } from 'vitest';
 
-// Pure Functional Core: no Temporal sandbox, no activity mocks.
-import { decide, evolve, fulfillerDecider } from './fulfiller-decider';
-import type { EnrichedFulfillerCommand, FulfillerOrderWorkflowContext } from './fulfiller-decider';
+// Pure Functional Core: no Temporal sandbox, no activity mocks. The per-command blocks
+// are exported structures, so each command's decide / evolve entries are exercised
+// directly in addition to the assembled dispatchers.
+import {
+  decide,
+  evolve,
+  fulfillerDecider,
+  applyFulfillerUpdatePure,
+  beginSubmitBlock,
+  submittedBlock,
+  simulatedShipBlock,
+  simulatedDeliverBlock,
+  fulfillerStatusBlock,
+  cancelBlock,
+} from './fulfiller-states';
+import type {
+  EnrichedFulfillerCommand,
+  FulfillerEvent,
+  FulfillerOrderWorkflowContext,
+} from './fulfiller-states';
 import type { FulfillmentFulfillerOrderState, FulfillerStatusUpdate } from './types';
 
 const AT = '2026-02-01T00:00:00.000Z';
@@ -200,5 +217,100 @@ describe('fulfillerDecider — the assembled decider', () => {
   it('exposes decide and evolve', () => {
     expect(fulfillerDecider.decide).toBe(decide);
     expect(fulfillerDecider.evolve).toBe(evolve);
+  });
+});
+
+// ── The regression net the purity refactor buys: apply EVERY FulfillerEvent type and
+// prove the input context is untouched. The mapped-type table makes a missing event a
+// compile-time hole; the length pin keeps the net growing with the union.
+const eventSamples: { [E in FulfillerEvent['type']]: Extract<FulfillerEvent, { type: E }> } = {
+  SubmissionStarted: { type: 'SubmissionStarted', at: AT },
+  OrderSubmitted: { type: 'OrderSubmitted', fulfillerExternalId: 'ext-1', at: AT },
+  SimulatedShipped: { type: 'SimulatedShipped', trackingNumber: 'SIMABC', at: AT },
+  SimulatedDelivered: { type: 'SimulatedDelivered', at: AT },
+  FulfillerStatusApplied: { type: 'FulfillerStatusApplied', update: shippedUpdate, at: AT },
+  ShipmentProgressed: { type: 'ShipmentProgressed', at: AT },
+  DeliveryConfirmed: { type: 'DeliveryConfirmed', at: AT },
+  FulfillerOrderFailed: { type: 'FulfillerOrderFailed', errorMessage: 'boom', at: AT },
+  Cancelled: { type: 'Cancelled', at: AT },
+};
+
+describe('evolve never mutates its input — every FulfillerEvent type', () => {
+  it('the table covers the whole event union', () => {
+    expect(Object.keys(eventSamples)).toHaveLength(9);
+  });
+
+  it.each(Object.entries(eventSamples))('%s leaves the input context untouched', (_type, event) => {
+    const s = makeCtx({
+      status: 'in_production',
+      shipments: [
+        {
+          shipmentId: 'so-1-1',
+          carrier: 'UPS',
+          trackingNumber: '1Z000',
+          items: [{ sku: 'SKU-1', quantity: 1 }],
+          shippedAt: 't1',
+        },
+      ],
+    });
+    const snapshot = structuredClone(s);
+    evolve(s, event as FulfillerEvent);
+    expect(s).toEqual(snapshot);
+  });
+});
+
+// ── Per-command blocks: each command is packaged as ONE exported structure (guard /
+// prepare / decide / evolve), so its pure fields are exercised directly here (prepare is
+// I/O and is covered through the machine in fulfiller-states.test.ts with mocked
+// activities).
+describe('command blocks — one structure per command', () => {
+  it('events shared by several commands reference ONE evolve function (assembly invariant)', () => {
+    expect(fulfillerStatusBlock.evolve!.Cancelled).toBe(cancelBlock.evolve!.Cancelled);
+  });
+
+  it('beginSubmitBlock / simulatedDeliverBlock decide their single event', () => {
+    expect(beginSubmitBlock.decide({ type: 'beginSubmit', at: AT }, makeCtx())).toEqual([
+      { type: 'SubmissionStarted', at: AT },
+    ]);
+    expect(simulatedDeliverBlock.decide({ type: 'simulatedDeliver', at: AT }, makeCtx())).toEqual([
+      { type: 'SimulatedDelivered', at: AT },
+    ]);
+  });
+
+  it('submittedBlock.evolve.OrderSubmitted records the external id immutably', () => {
+    const s = makeCtx();
+    const next = submittedBlock.evolve!.OrderSubmitted!(s, eventSamples.OrderSubmitted);
+    expect(next).not.toBe(s);
+    expect(next.so.fulfillerExternalId).toBe('ext-1');
+    expect(next.so.status).toBe('in_production');
+    expect(s.so.status).toBe('received'); // input untouched
+  });
+
+  it('simulatedShipBlock.evolve.SimulatedShipped builds the shipment from the injected number', () => {
+    const s = makeCtx({ status: 'in_production' });
+    const next = simulatedShipBlock.evolve!.SimulatedShipped!(s, eventSamples.SimulatedShipped);
+    expect(next.so.trackingNumber).toBe('SIMABC');
+    expect(next.so.shipments).toHaveLength(1);
+    expect(s.so.shipments).toBeUndefined(); // input untouched
+  });
+
+  it('fulfillerStatusBlock routing markers leave the context unchanged (the applied entry owns state)', () => {
+    const s = makeCtx({ status: 'in_production' });
+    expect(
+      fulfillerStatusBlock.evolve!.ShipmentProgressed!(s, eventSamples.ShipmentProgressed),
+    ).toBe(s);
+    expect(fulfillerStatusBlock.evolve!.DeliveryConfirmed!(s, eventSamples.DeliveryConfirmed)).toBe(
+      s,
+    );
+  });
+
+  it('applyFulfillerUpdatePure returns a NEW context and never writes the input', () => {
+    const s = makeCtx({ status: 'in_production' });
+    const next = applyFulfillerUpdatePure(s, shippedUpdate);
+    expect(next).not.toBe(s);
+    expect(next.so.status).toBe('shipped');
+    expect(next.so.shipments).toHaveLength(1);
+    expect(s.so.status).toBe('in_production'); // input untouched
+    expect(s.so.shipments).toBeUndefined();
   });
 });

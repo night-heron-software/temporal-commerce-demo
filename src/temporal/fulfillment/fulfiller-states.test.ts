@@ -43,7 +43,7 @@ import {
 import { FULFILLER_ORDER_STATES, buildFulfillerOrderStates } from './fulfiller-states';
 import type { FulfillerOrderCommand } from './fulfiller-states';
 import { terminal } from '../framework';
-import type { FulfillerOrderWorkflowContext } from './fulfiller-decider';
+import type { FulfillerOrderWorkflowContext } from './fulfiller-states';
 import type { ShipmentInfo } from './types';
 
 // ── Builders ────────────────────────────────────────────────────────────────

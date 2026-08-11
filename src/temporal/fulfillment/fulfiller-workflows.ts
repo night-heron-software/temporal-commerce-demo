@@ -13,9 +13,9 @@ import {
 import { runStateMachine, StateMachineConfig, SignalRegistration } from '../framework';
 import { buildFulfillerOrderStates } from './fulfiller-states';
 import type { FulfillerOrderStateName, FulfillerOrderCommand } from './fulfiller-states';
-import type { FulfillerOrderWorkflowContext } from './fulfiller-decider';
+import type { FulfillerOrderWorkflowContext } from './fulfiller-states';
 
-export type { FulfillerOrderWorkflowContext } from './fulfiller-decider';
+export type { FulfillerOrderWorkflowContext } from './fulfiller-states';
 export { FULFILLER_ORDER_STATES } from './fulfiller-states';
 export type { FulfillerOrderStateName, FulfillerOrderCommand } from './fulfiller-states';
 
