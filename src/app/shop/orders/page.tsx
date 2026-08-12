@@ -266,8 +266,8 @@ export default function ShopOrdersPage() {
                           <span className="text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wider font-medium">
                             Order
                           </span>
-                          <span className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                            {order.confirmationNumber || order.orderId.substring(0, 8)}
+                          <span className="font-mono font-semibold break-all text-zinc-900 dark:text-zinc-100">
+                            {order.confirmationNumber || order.orderId}
                           </span>
                         </div>
                         <div className="text-xs text-zinc-400 dark:text-zinc-500">

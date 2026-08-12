@@ -7,7 +7,7 @@ import { getOrderState, updateOrderStatus, cancelOrder } from '../../admin-order
 import { getOrderCommunications } from '../../../order-communications-actions';
 import type { OrderState } from '@/temporal/oms/types';
 import type { CommunicationDocument } from '@/temporal/contracts/elasticsearch';
-import EntityIds from '@/components/EntityIds';
+import EntityIds, { IdChip } from '@/components/EntityIds';
 import OrderCommunications from '@/components/OrderCommunications';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
 
@@ -279,9 +279,7 @@ export default function AdminOrderDetailPage() {
                         {item.variantTitle ? ` — ${item.variantTitle}` : ''}
                       </div>
                     )}
-                    <span className="font-mono text-sm text-zinc-600 dark:text-zinc-400">
-                      {item.variantId.substring(0, 12)}...
-                    </span>
+                    <IdChip label="variant:" value={item.variantId} />
                     <span className="ml-2 text-zinc-500">× {item.quantity}</span>
                   </div>
                   <span className="font-medium text-zinc-900 dark:text-zinc-100">

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import EntityIds from '@/components/EntityIds';
+import EntityIds, { CopyIdButton } from '@/components/EntityIds';
 import {
   getInventoryStock,
   getInventoryReservations,
@@ -368,12 +368,15 @@ export default function AdminInventoryPage() {
                     </code>
                   </td>
                   <td className="px-4 py-3">
+                    {/* Full id (F3: no abbreviation) — link keeps navigation, the copy
+                        button beside it keeps copyability as a separate control */}
                     <a
                       href={`/admin/carts#cart-${row.cartId}`}
-                      className="text-xs font-mono text-cyan-600 dark:text-cyan-400 hover:underline"
+                      className="text-xs font-mono break-all text-cyan-600 dark:text-cyan-400 hover:underline"
                     >
-                      {row.cartId.substring(0, 8)}…
+                      {row.cartId}
                     </a>
+                    <CopyIdButton value={row.cartId} />
                     {/* Only the real journey key gets the corr: chip — the by_status
                         registry rows don't carry it, and labelling the cartId as a
                         correlation id sends operators to an empty visibility query. */}

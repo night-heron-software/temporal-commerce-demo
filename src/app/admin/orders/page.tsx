@@ -196,8 +196,8 @@ export default function AdminOrdersPage() {
                   className="border-b border-zinc-100 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-750 transition-colors"
                 >
                   <td className="px-4 py-3">
-                    <code className="bg-zinc-100 dark:bg-zinc-700 px-2 py-1 rounded text-sm font-mono">
-                      {order.confirmationNumber || order.orderId.substring(0, 8)}
+                    <code className="bg-zinc-100 dark:bg-zinc-700 px-2 py-1 rounded text-sm font-mono break-all">
+                      {order.confirmationNumber || order.orderId}
                     </code>
                     <div className="mt-1">
                       <EntityIds correlationId={order.correlationId} orderId={order.orderId} />

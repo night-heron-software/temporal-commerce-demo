@@ -8,7 +8,7 @@ import {
   type CartSearchStatus,
 } from '../admin-cart-actions';
 import type { CartDetails } from '@/app/shop/cart-actions';
-import EntityIds from '@/components/EntityIds';
+import EntityIds, { IdChip } from '@/components/EntityIds';
 
 export default function AdminCartsPage() {
   const [carts, setCarts] = useState<CartSummary[]>([]);
@@ -224,11 +224,9 @@ export default function AdminCartsPage() {
                   {expandedCart === cart.cartId ? '▼' : '▶'}
                 </span>
 
-                {/* Cart ID */}
+                {/* Cart ID — full + copyable (F3: no abbreviated uuids in admin) */}
                 <div className="min-w-0 flex-1">
-                  <code className="text-sm font-mono text-zinc-800 dark:text-zinc-200">
-                    {cart.cartId.substring(0, 8)}…
-                  </code>
+                  <IdChip label="cart:" value={cart.cartId} />
                   {cart.userId && (
                     <span className="ml-2 text-xs text-zinc-400">👤 {cart.userId}</span>
                   )}
@@ -320,9 +318,7 @@ export default function AdminCartsPage() {
                                       {item.variantTitle ? ` — ${item.variantTitle}` : ''}
                                     </div>
                                   )}
-                                  <code className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
-                                    {item.variantId.substring(0, 8)}…
-                                  </code>
+                                  <IdChip label="variant:" value={item.variantId} />
                                 </td>
                                 <td className="py-2 text-right tabular-nums text-zinc-900 dark:text-zinc-100">
                                   {item.quantity}

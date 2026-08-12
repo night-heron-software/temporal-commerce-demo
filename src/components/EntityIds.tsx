@@ -1,24 +1,21 @@
 'use client';
 
 /**
- * EntityIds — compact, copyable correlation/order ID chips for admin & devtools views.
+ * EntityIds — copyable ID chips for admin & devtools views.
  *
- * Every entity in the system is correlated by CorrelationId (the journey UUID minted at
- * cart creation, ADR-0011) and, once an order exists, by orderId. These chips make both
- * visible wherever an entity or projection is rendered: truncated for scanning,
- * click-to-copy for the full value.
+ * F3 (validation run -006, operator verbatim): "do not abbreviate uuids in the admin
+ * interface and give them all copy buttons." Chips therefore render the FULL value in a
+ * monospace face (wrapping via break-all rather than truncating) with click-to-copy.
+ * `IdChip` is the generic building block (remediation R2 / backlog #2); `CopyIdButton`
+ * is the icon-only variant for ids already rendered elsewhere (e.g. inside a link).
+ * The default export renders the common corr:/order: pair.
  */
 
 import { useState } from 'react';
 
-function short(id: string): string {
-  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
-}
-
-function IdChip({ label, value, className }: { label: string; value: string; className: string }) {
+function useCopy(value: string) {
   const [copied, setCopied] = useState(false);
-
-  const copy = async (e: React.MouseEvent) => {
+  const copy = async (e: React.MouseEvent | React.KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
     try {
@@ -26,20 +23,69 @@ function IdChip({ label, value, className }: { label: string; value: string; cla
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
-      // clipboard unavailable (http, permissions) — leave the chip inert
+      // clipboard unavailable (http, permissions) — leave the control inert
     }
   };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') copy(e);
+  };
+  return { copied, copy, onKeyDown };
+}
 
+/**
+ * Generic copyable id chip: full monospace value (break-all, never truncated), label
+ * prefix, click-to-copy with a "✓" flash. Style via className; the default is the
+ * neutral zinc chip used across admin tables.
+ */
+export function IdChip({
+  label,
+  value,
+  className = 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700',
+}: {
+  label?: string;
+  value: string;
+  className?: string;
+}) {
+  const { copied, copy, onKeyDown } = useCopy(value);
+
+  // Rendered as a span[role=button], not a <button>: chips live inside interactive
+  // containers (the carts page row header is itself a <button>), where a nested
+  // button is invalid HTML and a hydration error.
   return (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={0}
       onClick={copy}
-      title={`${label}: ${value}\nClick to copy`}
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] leading-4 cursor-pointer select-none ${className}`}
+      onKeyDown={onKeyDown}
+      title={`${label ? `${label} ` : ''}${value}\nClick to copy`}
+      className={`inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] leading-4 cursor-pointer select-none text-left ${className}`}
     >
-      <span className="opacity-60">{label}</span>
-      <span>{copied ? 'copied ✓' : short(value)}</span>
-    </button>
+      {label && <span className="opacity-60 shrink-0">{label}</span>}
+      <span className="break-all">
+        {value}
+        {copied && <span className="ml-1 opacity-80">✓</span>}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Icon-only copy affordance for an id that is already rendered (e.g. as a link text).
+ * Keeps navigation and copying as separate controls instead of hiding one behind the other.
+ */
+export function CopyIdButton({ value, className = '' }: { value: string; className?: string }) {
+  const { copied, copy, onKeyDown } = useCopy(value);
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={copy}
+      onKeyDown={onKeyDown}
+      title={`${value}\nClick to copy`}
+      className={`inline-flex items-center rounded px-1 text-[11px] leading-4 cursor-pointer select-none text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 ${className}`}
+    >
+      {copied ? '✓' : '⧉'}
+    </span>
   );
 }
 
