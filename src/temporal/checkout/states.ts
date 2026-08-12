@@ -239,6 +239,15 @@ export const validateBlock: CommandBlock<'validate'> = {
         cartVersion: cart.cartVersion,
         totalPrice: cart.subtotalPrice - cart.totalDiscounts,
         reservations: event.reservations,
+        // The approved baseline is the version validation actually pulled and priced.
+        // The workflow-input snapshot predates the cart's own CheckoutEntered version
+        // bump, so leaving atStart/acknowledged there marks every FRESH checkout as
+        // "changed" — the R3 false positive the dead banner used to hide (backlog #3).
+        state: {
+          ...context.state,
+          cartVersionAtStart: cart.cartVersion,
+          cartVersionAcknowledged: cart.cartVersion,
+        },
       };
     },
     ValidationFailed: (context, event) => ({

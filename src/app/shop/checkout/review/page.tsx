@@ -16,23 +16,33 @@ export default function ReviewPage() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch full checkout state (includes shipping/payment details)
+  // Fetch full checkout state (includes shipping/payment details) and KEEP WATCHING it
+  // (R3 / F5): a mid-checkout cart edit reverts the machine's step to 'payment' via the
+  // recompute nudge, and a one-shot fetch would leave this page offering "Place Order"
+  // for a step the machine no longer accepts until the shopper reloads. The watcher
+  // routes to the machine's actual step the moment it changes; the payment page's
+  // CartChangedBanner then explains what happened.
   useEffect(() => {
-    if (cartId && cart?.status === 'checkout') {
+    if (!cartId || cart?.status !== 'checkout') return;
+    let cancelled = false;
+
+    const check = () =>
       getCheckoutState(cartId).then((state) => {
-        if (state) {
-          setCheckoutState(state);
-          // If not on review step, redirect to the correct step
-          if (state.step !== 'review') {
-            if (state.step === 'shipping') {
-              router.replace('/shop/checkout/shipping');
-            } else if (state.step === 'payment') {
-              router.replace('/shop/checkout/payment');
-            }
-          }
+        if (!state || cancelled) return;
+        setCheckoutState(state);
+        if (state.step === 'shipping') {
+          router.replace('/shop/checkout/shipping');
+        } else if (state.step === 'payment') {
+          router.replace('/shop/checkout/payment');
         }
       });
-    }
+
+    check();
+    const timer = setInterval(check, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [cartId, cart?.status, router]);
 
   // Redirect if not in checkout

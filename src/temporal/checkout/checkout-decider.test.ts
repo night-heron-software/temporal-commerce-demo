@@ -89,6 +89,26 @@ describe('checkout decide/evolve', () => {
     expect(ctx.totalPrice).toBe(10);
   });
 
+  it('CartLoaded re-baselines cartVersionAtStart/Acknowledged to the PULLED version (R3)', () => {
+    // The workflow-input snapshot predates the cart's CheckoutEntered version bump; if
+    // the baseline stayed there, every fresh checkout would be born "changed" and the
+    // cart-changed banner would show before any edit (backlog #3 false positive).
+    const ctx = apply(
+      makeCtx({
+        items: [],
+        state: { ...makeCtx().state, cartVersionAtStart: 1, cartVersionAcknowledged: 1 },
+      }),
+      {
+        type: 'validate',
+        at,
+        prepared: { success: true, reservations: [], cart: queriedCart({ cartVersion: 2 }) },
+      },
+    );
+    expect(ctx.cartVersion).toBe(2);
+    expect(ctx.state.cartVersionAtStart).toBe(2);
+    expect(ctx.state.cartVersionAcknowledged).toBe(2);
+  });
+
   it('validate(failure) → ValidationFailed: records the reservation error', () => {
     const ctx = apply(makeCtx(), {
       type: 'validate',
