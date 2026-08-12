@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { temporalUiUrl } from '@/lib/temporal-links';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -54,7 +55,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
           <div className="flex items-center gap-4 text-sm">
             <a
-              href="http://localhost:8233"
+              href={temporalUiUrl()}
               target="_blank"
               rel="noopener noreferrer"
               className="text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1"

@@ -10,6 +10,7 @@ import type { CommunicationDocument } from '@/temporal/contracts/elasticsearch';
 import EntityIds, { IdChip } from '@/components/EntityIds';
 import OrderCommunications from '@/components/OrderCommunications';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
+import { temporalWorkflowUrl, temporalWorkflowsByCorrelationUrl } from '@/lib/temporal-links';
 
 export default function AdminOrderDetailPage() {
   const params = useParams();
@@ -188,13 +189,24 @@ export default function AdminOrderDetailPage() {
 
       {/* Temporal UI + Order Trace Links */}
       <div className="p-3 bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 rounded-lg mb-6 text-sm flex flex-wrap items-center gap-x-6 gap-y-1">
+        {/* R9: the PRIMARY link is the journey query (post-R5, one id = the whole cart
+            history); the single order workflow stays as a secondary link. Children only
+            appear with the UI's "Show Child Workflows" toggle on (not URL-addressable). */}
         <a
-          href={`http://localhost:8233/namespaces/default/workflows/${encodeURIComponent(buildWorkflowId(DEMO_STORE_ID, 'order', order.orderId))}`}
+          href={temporalWorkflowsByCorrelationUrl(order.correlationId ?? order.cartId)}
           target="_blank"
           rel="noopener noreferrer"
           className="text-cyan-700 dark:text-cyan-400 hover:underline"
         >
-          🔗 View this order workflow in Temporal UI →
+          ⚡ View this journey in Temporal UI →
+        </a>
+        <a
+          href={temporalWorkflowUrl(buildWorkflowId(DEMO_STORE_ID, 'order', order.orderId))}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cyan-700 dark:text-cyan-400 hover:underline"
+        >
+          🔗 Order workflow only →
         </a>
         <Link
           href={`/dev/order-trace?orderId=${order.orderId}`}

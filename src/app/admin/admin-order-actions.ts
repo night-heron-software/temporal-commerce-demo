@@ -9,7 +9,7 @@
 
 import { getTemporalClient } from '@/lib';
 import { executeCqlAll } from '@/lib';
-import { TEMPORAL_NAMESPACE } from '@/lib/temporal-client';
+import { temporalWorkflowsByCorrelationUrl } from '@/lib/temporal-links';
 import { createLogger } from '@/lib/logger';
 import {
   getOrderStateQuery,
@@ -43,13 +43,6 @@ export interface OrderSummary {
    * Built server-side because TEMPORAL_UI_URL is a server-only env var.
    */
   temporalUrl: string | null;
-}
-
-/** Temporal UI workflows list filtered by the journey correlationId. */
-function temporalWorkflowsByCorrelationUrl(correlationId: string): string {
-  const base = process.env.TEMPORAL_UI_URL || 'http://localhost:8233';
-  const query = encodeURIComponent(`CorrelationId="${correlationId}"`);
-  return `${base}/namespaces/${TEMPORAL_NAMESPACE}/workflows?query=${query}`;
 }
 
 /**

@@ -13,7 +13,8 @@
  * Read-only. Imported only by the /api/dev/order-trace route (never a client bundle).
  */
 
-import { getTemporalClient, TEMPORAL_NAMESPACE } from '@/lib/temporal-client';
+import { getTemporalClient } from '@/lib/temporal-client';
+import { temporalWorkflowUrl } from '@/lib/temporal-links';
 import { getElasticsearchClient } from '@/lib/es-client';
 import { getWorkflowTransitions } from '@/temporal/transition-recorder';
 import { executeCql, cassandraTypes as types } from '@/lib/cassandra-client';
@@ -171,11 +172,6 @@ export interface ResolveResult {
 // Trace assembly (I/O)
 // ============================================================================
 
-function temporalUiUrl(workflowId: string): string {
-  const base = process.env.TEMPORAL_UI_URL || 'http://localhost:8233';
-  return `${base}/namespaces/${TEMPORAL_NAMESPACE}/workflows/${encodeURIComponent(workflowId)}`;
-}
-
 type TemporalClient = Awaited<ReturnType<typeof getTemporalClient>>;
 
 /**
@@ -251,7 +247,7 @@ async function fetchNode(
     historyLength: desc.historyLength,
     state,
     transitions,
-    temporalUiUrl: temporalUiUrl(workflowId),
+    temporalUiUrl: temporalWorkflowUrl(workflowId),
   };
 }
 

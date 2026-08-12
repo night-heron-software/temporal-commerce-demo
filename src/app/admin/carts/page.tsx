@@ -9,6 +9,7 @@ import {
 } from '../admin-cart-actions';
 import type { CartDetails } from '@/app/shop/cart-actions';
 import EntityIds, { IdChip } from '@/components/EntityIds';
+import { temporalWorkflowsByTypeUrl, temporalWorkflowUrl } from '@/lib/temporal-links';
 
 export default function AdminCartsPage() {
   const [carts, setCarts] = useState<CartSummary[]>([]);
@@ -107,7 +108,7 @@ export default function AdminCartsPage() {
           </button>
         </div>
         <a
-          href="http://localhost:8233/namespaces/default/workflows?query=WorkflowType%3D%22cartWorkflow%22"
+          href={temporalWorkflowsByTypeUrl('cartWorkflow')}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm text-cyan-600 dark:text-cyan-400 hover:underline"
@@ -265,7 +266,7 @@ export default function AdminCartsPage() {
 
                 {/* Temporal link */}
                 <a
-                  href={`http://localhost:8233/namespaces/default/workflows/${cart.workflowId}`}
+                  href={temporalWorkflowUrl(cart.workflowId)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline flex-shrink-0"
@@ -381,7 +382,7 @@ export default function AdminCartsPage() {
                       {/* Workflow link */}
                       <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700 flex items-center gap-4 text-sm">
                         <a
-                          href={`http://localhost:8233/namespaces/default/workflows/${cart.workflowId}`}
+                          href={temporalWorkflowUrl(cart.workflowId)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1"
@@ -390,7 +391,7 @@ export default function AdminCartsPage() {
                         </a>
                         {cart.checkout?.workflowId && (
                           <a
-                            href={`http://localhost:8233/namespaces/default/workflows/${cart.checkout.workflowId}`}
+                            href={temporalWorkflowUrl(cart.checkout.workflowId)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1"

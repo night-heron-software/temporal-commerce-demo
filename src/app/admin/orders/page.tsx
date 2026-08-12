@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getAllOrders, type OrderSummary } from '../admin-order-actions';
 import EntityIds from '@/components/EntityIds';
+import { temporalWorkflowsByTypeUrl } from '@/lib/temporal-links';
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
@@ -94,7 +95,7 @@ export default function AdminOrdersPage() {
           </button>
         </div>
         <a
-          href="http://localhost:8233/namespaces/default/workflows?query=WorkflowType%3D%22orderWorkflow%22"
+          href={temporalWorkflowsByTypeUrl('orderWorkflow')}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm text-cyan-600 dark:text-cyan-400 hover:underline"

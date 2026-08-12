@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { AccountDropdown } from './AccountDropdown';
+import { temporalUiUrl } from '@/lib/temporal-links';
 
 interface ShopNavBarProps {
   onCartClick: () => void;
@@ -51,7 +52,7 @@ export function ShopNavBar({ onCartClick }: ShopNavBarProps) {
 
             {/* Temporal UI Link */}
             <a
-              href="http://localhost:8233"
+              href={temporalUiUrl()}
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors hidden sm:block"

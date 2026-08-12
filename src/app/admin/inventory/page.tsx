@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import EntityIds, { CopyIdButton } from '@/components/EntityIds';
+import { temporalWorkflowsByTypeUrl } from '@/lib/temporal-links';
 import {
   getInventoryStock,
   getInventoryReservations,
@@ -110,7 +111,7 @@ export default function AdminInventoryPage() {
           </button>
         </div>
         <a
-          href="http://localhost:8233/namespaces/default/workflows?query=WorkflowType%3D%22inventoryServiceWorkflow%22"
+          href={temporalWorkflowsByTypeUrl('inventoryServiceWorkflow')}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm text-cyan-600 dark:text-cyan-400 hover:underline"
