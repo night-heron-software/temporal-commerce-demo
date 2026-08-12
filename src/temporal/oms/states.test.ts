@@ -285,10 +285,21 @@ describe('requesting_fulfillment (transitional)', () => {
       status: 'requesting_fulfillment',
       order: makeOrder({
         items: [
-          { lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10, title: 'Small Print' },
-          { lineItemId: 'li-2', variantId: 'v1', quantity: 1, price: 25, title: 'Large Print' },
-          // (Cast: `title` lives on the decider's OrderCartItem view of CartItem.)
-        ] as unknown as Order['items'],
+          {
+            lineItemId: 'li-1',
+            variantId: 'v1',
+            quantity: 1,
+            price: 10,
+            productTitle: 'Small Print',
+          },
+          {
+            lineItemId: 'li-2',
+            variantId: 'v1',
+            quantity: 1,
+            price: 25,
+            productTitle: 'Large Print',
+          },
+        ] as Order['items'],
       }),
       assignments: [
         makeAssignment({ assignmentId: 'a-1', lineItemId: 'li-1' }),

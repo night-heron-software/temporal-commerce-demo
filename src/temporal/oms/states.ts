@@ -50,7 +50,7 @@ import {
   DEMO_STORE_ID,
   FULFILLMENT_TASK_QUEUE,
 } from '../contracts/constants';
-import type { Cart, Fulfillment } from '../contracts';
+import type { Fulfillment } from '../contracts';
 import {
   sendOrderStatusEmail,
   sendFeedbackThankYouEmail,
@@ -78,12 +78,8 @@ import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../fr
 // Commands and events — the machine's whole vocabulary
 // ==================
 
-/** Order line item shape with the optional display fields the intake logic reads. */
-export interface OrderCartItem extends Cart.CartItem {
-  productId?: string;
-  title?: string;
-  variantTitle?: string;
-}
+// (The former `OrderCartItem` shim is gone — `Cart.CartItem` itself now carries the
+// optional display snapshot, populated at add-to-cart. Backlog #1 / remediation R1.)
 
 /** A fulfiller resolution for one order line (positional), with its prepared assignment id. */
 export type ResolvedAssignment = {
@@ -326,16 +322,15 @@ export function buildFulfillment(
     const items: Fulfillment.FulfillmentItem[] = assignments.map((a) => {
       // Match by the assignment's own line item — assignments are line-scoped, and
       // matching on variantId would price duplicate-variant lines from the first line.
-      const orderItem = (state.order.items as OrderCartItem[]).find(
-        (i) => i.lineItemId === a.lineItemId,
-      );
+      const orderItem = state.order.items.find((i) => i.lineItemId === a.lineItemId);
       return {
         sku: a.sku || a.variantId,
         productId: a.variantId,
         variantId: a.variantId,
         quantity: a.quantity,
         unitPrice: orderItem?.price ?? 0,
-        title: orderItem?.title || orderItem?.variantTitle || `Item ${a.variantId.slice(0, 8)}`,
+        title:
+          orderItem?.productTitle || orderItem?.variantTitle || `Item ${a.variantId.slice(0, 8)}`,
       };
     });
 
@@ -489,24 +484,25 @@ export const assignFulfillersBlock: CommandBlock<'assignFulfillers'> = {
   /**
    * I/O phase: resolve fulfiller assignments (impure) and mint assignment ids; `decide`
    * stays pure and only consumes the prepared, positionally-aligned resolutions. The
-   * line-item snapshot uses display-field fallbacks (order items are bare CartItems in
-   * the demo) and the order's own creation instant as its stable snapshot marker.
+   * line-item display snapshot rides the CartItem from add-to-cart (backlog #1); the
+   * 'Unknown Product' fallbacks remain only for pre-snapshot lines, and the order's own
+   * creation instant is the stable snapshot marker.
    */
   prepare: async (context) => {
-    const lineItems: OrderLineItem[] = (context.order.items as OrderCartItem[]).map((item) => ({
+    const lineItems: OrderLineItem[] = context.order.items.map((item) => ({
       lineItemId: item.lineItemId,
       variantId: item.variantId,
       productId: item.productId || 'unknown',
       quantity: item.quantity,
-      productTitle: item.title || 'Unknown Product',
+      productTitle: item.productTitle || 'Unknown Product',
       variantTitle: item.variantTitle || 'Unknown Variant',
       unitPrice: item.price,
       currency: context.order.currency,
-      optionLabels: [],
+      optionLabels: item.optionLabels ?? [],
       productVersion: 1,
       variantVersion: 1,
       snapshotTimestamp: context.order.createdAt,
-      thumbnailUrl: '',
+      thumbnailUrl: item.thumbnailUrl ?? '',
     }));
     const resolved = await resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
     return {

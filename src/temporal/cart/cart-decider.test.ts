@@ -208,6 +208,63 @@ describe('evolve', () => {
     expect(ctx.cart.subtotalPrice).toBe(15);
   });
 
+  // ── display snapshot (backlog #1 / R1) ────────────────────────────────────
+  const snapshot = {
+    productId: 'p1',
+    productTitle: 'California Surf — Tee [Simulated]',
+    variantTitle: 'Baby Blue / 4XL',
+    optionLabels: ['Baby Blue', '4XL'],
+    thumbnailUrl: 'https://img/front.webp',
+  };
+
+  it('ItemAdded stores the display snapshot on the new line', () => {
+    const ctx = apply(makeCtx(), {
+      type: 'addItem',
+      variantId: 'v2',
+      quantity: 1,
+      price: 5,
+      lineItemId: 'li-2',
+      at,
+      ...snapshot,
+    });
+    const line = ctx.cart.items.find((i) => i.lineItemId === 'li-2')!;
+    expect(line).toMatchObject(snapshot);
+  });
+
+  it('ItemAdded without a snapshot stores NO snapshot keys (not explicit undefined)', () => {
+    const ctx = apply(makeCtx(), {
+      type: 'addItem',
+      variantId: 'v2',
+      quantity: 1,
+      price: 5,
+      lineItemId: 'li-2',
+      at,
+    });
+    const line = ctx.cart.items.find((i) => i.lineItemId === 'li-2')!;
+    // Explicit `undefined` keys would defeat the backfill merge below.
+    expect('productTitle' in line).toBe(false);
+    expect('thumbnailUrl' in line).toBe(false);
+  });
+
+  it('ItemAdded merge backfills a pre-snapshot line without disturbing its identity', () => {
+    // makeCtx()'s existing li-1/v1 line predates the snapshot fields.
+    const ctx = apply(makeCtx(), {
+      type: 'addItem',
+      variantId: 'v1',
+      quantity: 2,
+      price: 10,
+      lineItemId: 'li-ignored',
+      at,
+      ...snapshot,
+    });
+    expect(ctx.cart.items).toHaveLength(1);
+    const line = ctx.cart.items[0];
+    expect(line.lineItemId).toBe('li-1'); // existing identity wins
+    expect(line.quantity).toBe(3);
+    expect(line.productTitle).toBe(snapshot.productTitle); // backfilled
+    expect(line.variantTitle).toBe(snapshot.variantTitle);
+  });
+
   it('does not mutate the input state', () => {
     const ctx = makeCtx();
     apply(ctx, { type: 'removeItem', lineItemId: 'li-1', at });

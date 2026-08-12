@@ -273,6 +273,12 @@ export default function AdminOrderDetailPage() {
               >
                 <div className="flex justify-between items-center">
                   <div>
+                    {item.productTitle && (
+                      <div className="text-sm text-zinc-900 dark:text-zinc-100">
+                        {item.productTitle}
+                        {item.variantTitle ? ` — ${item.variantTitle}` : ''}
+                      </div>
+                    )}
                     <span className="font-mono text-sm text-zinc-600 dark:text-zinc-400">
                       {item.variantId.substring(0, 12)}...
                     </span>

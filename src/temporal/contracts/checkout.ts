@@ -1,49 +1,15 @@
-import { CartItem, Order, PaymentMethod, ShippingAddress } from './cart';
+import type { CheckoutState, PaymentMethod, ShippingAddress } from './cart';
 
-export type CheckoutStep =
-  | 'validating'
-  | 'shipping'
-  | 'payment'
-  | 'review'
-  | 'processing'
-  | 'complete'
-  | 'failed'
-  | 'cancelled';
-
-export interface CheckoutState {
-  step: CheckoutStep;
-  isGuest: boolean;
-  shippingAddress?: ShippingAddress;
-  paymentMethod?: PaymentMethod;
-  shippingCost: number;
-  tax: number;
-  cartVersionAtStart?: number;
-  cartVersionAcknowledged?: number;
-  order?: Order;
-  error?: string;
-  clientSecret?: string;
-}
-
-export interface CheckoutWorkflowInput {
-  cartId: string;
-  parentCartWorkflowId: string;
-  items: CartItem[];
-  subtotalPrice: number;
-  totalDiscounts: number;
-  currency: string;
-  appliedCoupons: string[];
-  isGuest: boolean;
-  cartVersion: number;
-}
-
-export interface CheckoutWorkflowResult {
-  success: boolean;
-  cancelled?: boolean;
-  timedOut?: boolean;
-  order?: Order;
-  error?: string;
-  finalState: CheckoutState;
-}
+// The checkout lifecycle types have ONE declaration, in contracts/cart.ts (backlog #7:
+// this file used to carry identical copies of CheckoutStep/CheckoutState and DIVERGED
+// copies of CheckoutWorkflowInput/Result — the Input here still claimed an item
+// snapshot the live design abandoned). Re-exported so `Checkout.*` consumers keep working.
+export type {
+  CheckoutStep,
+  CheckoutState,
+  CheckoutWorkflowInput,
+  CheckoutWorkflowResult,
+} from './cart';
 
 export interface SetShippingSignal {
   shippingAddress: ShippingAddress;

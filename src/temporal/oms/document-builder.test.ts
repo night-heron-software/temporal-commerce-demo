@@ -65,6 +65,27 @@ describe('buildOrderDocument', () => {
     expect(doc.orderId).toBe('o-1');
   });
 
+  it('maps the display snapshot onto item docs (backlog #1 / R1)', () => {
+    const doc = buildOrderDocument(
+      {
+        ...order,
+        items: [
+          {
+            ...order.items[0],
+            productTitle: 'California Surf — Tee [Simulated]',
+            variantTitle: 'Baby Blue / 4XL',
+          },
+        ],
+      },
+      state,
+      order.customerEmail,
+    );
+    expect(doc.items[0]).toMatchObject({
+      productTitle: 'California Surf — Tee [Simulated]',
+      variantTitle: 'Baby Blue / 4XL',
+    });
+  });
+
   it('stays communication-free — the summaries are joined by the indexOrder activity, not the pure builder', () => {
     const doc = buildOrderDocument(order, state, order.customerEmail);
     expect('communications' in doc).toBe(false);

@@ -314,6 +314,12 @@ export default function AdminCartsPage() {
                                 className="border-t border-zinc-200 dark:border-zinc-700"
                               >
                                 <td className="py-2">
+                                  {item.productTitle && (
+                                    <div className="text-xs text-zinc-900 dark:text-zinc-100">
+                                      {item.productTitle}
+                                      {item.variantTitle ? ` — ${item.variantTitle}` : ''}
+                                    </div>
+                                  )}
                                   <code className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
                                     {item.variantId.substring(0, 8)}…
                                   </code>

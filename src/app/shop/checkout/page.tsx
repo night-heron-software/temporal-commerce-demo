@@ -118,7 +118,8 @@ export default function CheckoutPage() {
             {cart.items.map((item) => (
               <div key={item.lineItemId} className="flex justify-between">
                 <span className="text-zinc-300">
-                  {item.variantId} × {item.quantity}
+                  {item.productTitle ?? item.variantId}
+                  {item.variantTitle ? ` — ${item.variantTitle}` : ''} × {item.quantity}
                 </span>
                 <span>${((item.price * item.quantity) / 100).toFixed(2)}</span>
               </div>

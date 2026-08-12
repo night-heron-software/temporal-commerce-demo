@@ -11,6 +11,7 @@ import { cookies } from 'next/headers';
 import { randomUUID } from 'crypto';
 import { createLogger } from '@/lib/logger';
 import { getTemporalClient } from '@/lib/temporal-client';
+import { resolveVariantDisplay } from '@/lib/variant-display';
 import { Cart, Checkout, Constants } from '@/temporal/contracts';
 import {
   buildWorkflowId,
@@ -179,7 +180,10 @@ export async function getCart(cartId: string): Promise<Cart.CartDetails | null> 
 }
 
 /**
- * Add an item to the cart (creates cart workflow if needed).
+ * Add an item to the cart (creates cart workflow if needed). The display snapshot is
+ * resolved server-side here (backlog #1 / remediation R1) — the client is not trusted
+ * for what the shopper bought; a failed resolution adds the line without a snapshot and
+ * the UI falls back to the variantId.
  */
 export async function addItemToCart(
   cartId: string,
@@ -187,10 +191,11 @@ export async function addItemToCart(
   quantity: number,
   price: number,
 ): Promise<Cart.CartDetails | null> {
+  const display = await resolveVariantDisplay(variantId);
   return executeCartUpdate(
     cartId,
     Cart.cartUpdate,
-    [{ type: 'addItem' as const, variantId, quantity, price }],
+    [{ type: 'addItem' as const, variantId, quantity, price, ...(display ?? {}) }],
     { createIfMissing: true },
   );
 }

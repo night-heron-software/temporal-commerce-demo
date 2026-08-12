@@ -90,6 +90,12 @@ export type CartEvent =
       properties?: Record<string, unknown>;
       lineItemId: string;
       at: string;
+      // Display snapshot resolved at add-to-cart (backlog #1); absent when resolution failed.
+      productId?: string;
+      productTitle?: string;
+      variantTitle?: string;
+      optionLabels?: string[];
+      thumbnailUrl?: string;
     }
   | { type: 'ItemQuantityChanged'; lineItemId: string; quantity: number; at: string }
   | { type: 'ItemRemoved'; lineItemId: string; at: string }
@@ -138,9 +144,14 @@ export function recalculateTotals(cart: Readonly<CartDetails>): CartDetails {
  */
 export function addItem(cart: Readonly<CartDetails>, item: CartItem): CartDetails {
   const existing = cart.items.find((i) => i.variantId === item.variantId);
+  // Merge keeps the existing line's identity (lineItemId, price) and bumps quantity;
+  // `{ ...item, ...i }` additionally backfills display-snapshot fields a pre-snapshot
+  // line is missing (existing keys win, absent keys fall through to the incoming item).
   const items = existing
     ? cart.items.map((i) =>
-        i.variantId === item.variantId ? { ...i, quantity: i.quantity + item.quantity } : i,
+        i.variantId === item.variantId
+          ? { ...item, ...i, quantity: i.quantity + item.quantity }
+          : i,
       )
     : [...cart.items, { ...item }];
   return recalculateTotals({ ...cart, items });
@@ -297,6 +308,11 @@ export const addItemBlock: CommandBlock<'addItem'> = {
       properties: command.properties,
       lineItemId: command.lineItemId,
       at: command.at,
+      productId: command.productId,
+      productTitle: command.productTitle,
+      variantTitle: command.variantTitle,
+      optionLabels: command.optionLabels,
+      thumbnailUrl: command.thumbnailUrl,
     },
   ],
 
@@ -311,6 +327,13 @@ export const addItemBlock: CommandBlock<'addItem'> = {
         quantity: event.quantity,
         price: event.price,
         properties: event.properties,
+        // Only carry the snapshot keys that resolved — an explicit `undefined` key on the
+        // stored line would defeat addItem's backfill merge for pre-snapshot lines.
+        ...(event.productId !== undefined && { productId: event.productId }),
+        ...(event.productTitle !== undefined && { productTitle: event.productTitle }),
+        ...(event.variantTitle !== undefined && { variantTitle: event.variantTitle }),
+        ...(event.optionLabels !== undefined && { optionLabels: event.optionLabels }),
+        ...(event.thumbnailUrl !== undefined && { thumbnailUrl: event.thumbnailUrl }),
       }),
     }),
   },

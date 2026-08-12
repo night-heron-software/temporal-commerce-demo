@@ -4,6 +4,16 @@ export interface CartItem {
   quantity: number;
   price: number;
   properties?: Record<string, unknown>;
+  // Display snapshot, captured at add-to-cart (backlog #1 / remediation R1). Optional:
+  // lines added before the snapshot existed fall back to showing the variantId, visibly.
+  // Mirrors OrderLineItem's naming (contracts/oms.ts) so the order path maps it through
+  // without renames. The seeded product names already carry the "[Simulated]" suffix.
+  productId?: string;
+  productTitle?: string;
+  /** Option labels joined for display, e.g. "Baby Blue / 4XL". */
+  variantTitle?: string;
+  optionLabels?: string[];
+  thumbnailUrl?: string;
 }
 
 export interface ShippingAddress {
@@ -110,6 +120,13 @@ export type CartCommand =
       quantity: number;
       price: number;
       properties?: Record<string, unknown>;
+      // Display snapshot resolved server-side at add-to-cart (see lib/variant-display.ts);
+      // absent when resolution fails — the line then falls back to its variantId.
+      productId?: string;
+      productTitle?: string;
+      variantTitle?: string;
+      optionLabels?: string[];
+      thumbnailUrl?: string;
     }
   | { type: 'updateQuantity'; lineItemId: string; quantity: number }
   | { type: 'removeItem'; lineItemId: string }

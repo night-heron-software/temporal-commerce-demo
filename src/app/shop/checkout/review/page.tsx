@@ -166,7 +166,8 @@ export default function ReviewPage() {
             {cart.items.map((item) => (
               <div key={item.lineItemId} className="flex justify-between">
                 <span className="text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)]">
-                  {item.variantId} × {item.quantity}
+                  {item.productTitle ?? item.variantId}
+                  {item.variantTitle ? ` — ${item.variantTitle}` : ''} × {item.quantity}
                 </span>
                 <span>${((item.price * item.quantity) / 100).toFixed(2)}</span>
               </div>

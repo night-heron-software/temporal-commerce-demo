@@ -213,6 +213,12 @@ export interface OrderItemDocument {
   variantId: string;
   quantity: number;
   price: number;
+  // Display snapshot captured at add-to-cart (backlog #1 / R1); absent on pre-snapshot lines
+  productId?: string;
+  productTitle?: string;
+  variantTitle?: string;
+  optionLabels?: string[];
+  thumbnailUrl?: string;
 }
 
 export interface OrderAssignmentDocument {
@@ -367,6 +373,12 @@ export interface CartItemDocument {
   variantId: string;
   quantity: number;
   price: number;
+  // Display snapshot captured at add-to-cart (backlog #1 / R1); absent on pre-snapshot lines
+  productId?: string;
+  productTitle?: string;
+  variantTitle?: string;
+  optionLabels?: string[];
+  thumbnailUrl?: string;
 }
 
 export interface CartDocument extends WorkflowLifecycleFields {

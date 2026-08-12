@@ -84,13 +84,31 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                   className="bg-zinc-800 rounded-xl p-4 border border-zinc-700"
                 >
                   <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-medium text-white text-sm truncate max-w-[200px]">
-                        SKU: {item.variantId}
-                      </h3>
-                      <p className="text-purple-400 font-semibold">
-                        ${(item.price / 100).toFixed(2)}
-                      </p>
+                    <div className="flex gap-3 min-w-0">
+                      {item.thumbnailUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={item.thumbnailUrl}
+                          alt={item.productTitle ?? ''}
+                          className="w-12 h-12 rounded-lg object-cover border border-zinc-700 flex-shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        {/* Product identity from the add-to-cart snapshot; a line without one
+                            falls back to its variantId — visibly, so a blank title reads as a
+                            data bug rather than a silent id (backlog #1). */}
+                        <h3 className="font-medium text-white text-sm truncate max-w-[200px]">
+                          {item.productTitle ?? `SKU: ${item.variantId}`}
+                        </h3>
+                        {item.variantTitle && (
+                          <p className="text-zinc-400 text-xs truncate max-w-[200px]">
+                            {item.variantTitle}
+                          </p>
+                        )}
+                        <p className="text-purple-400 font-semibold">
+                          ${(item.price / 100).toFixed(2)}
+                        </p>
+                      </div>
                     </div>
                     <button
                       onClick={() => removeItem(item.lineItemId)}

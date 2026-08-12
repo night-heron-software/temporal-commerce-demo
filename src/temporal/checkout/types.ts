@@ -44,15 +44,9 @@ export type {
 /**
  * Checkout input carries no cart-content snapshot — contents are pulled live via the
  * queryCart activity at `validating` and re-pulled on each recompute nudge.
+ * Single declaration in contracts/cart.ts (backlog #7 — this file held an identical copy).
  */
-export interface CheckoutWorkflowInput {
-  cartId: string;
-  parentCartWorkflowId: string;
-  currency: string;
-  isGuest: boolean;
-  cartVersion: number;
-  checkoutVersion: number;
-}
+export type CheckoutWorkflowInput = Cart.CheckoutWorkflowInput;
 
 /** Live cart contents as returned by the queryCart activity. */
 export interface QueriedCart {
