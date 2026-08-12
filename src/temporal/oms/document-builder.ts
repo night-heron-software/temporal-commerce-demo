@@ -97,6 +97,16 @@ export function buildOrderDocument(
       updatedBy: h.updatedBy,
     })),
     deliveredAt: state.deliveredAt,
+    // Refund ledger (backlog #4 / R4): on every push, so it survives the immediate
+    // workflow close a full refund causes.
+    refunds: state.refunds?.map((r) => ({
+      refundId: r.refundId,
+      timestamp: r.timestamp,
+      reason: r.reason,
+      lines: r.lines.map((l) => ({ lineItemId: l.lineItemId, quantity: l.quantity })),
+      refundAmount: r.refundAmount,
+      taxAmount: r.taxAmount,
+    })),
     customerFeedback: state.customerFeedback
       ? {
           rating: state.customerFeedback.rating,

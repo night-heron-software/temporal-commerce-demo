@@ -304,6 +304,50 @@ export default function AdminOrderDetailPage() {
         </div>
       </div>
 
+      {/* Refunds (backlog #4 / R4) — the ledger the projection now carries post-close */}
+      {(orderState.refunds?.length ?? 0) > 0 && (
+        <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 mb-8">
+          <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">
+            Refunds ({orderState.refunds!.length})
+          </h2>
+          <div className="space-y-3">
+            {orderState.refunds!.map((r) => (
+              <div
+                key={r.refundId}
+                className="p-4 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700"
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="font-mono text-xs text-zinc-500">{r.refundId}</span>
+                    <div className="text-sm text-zinc-900 dark:text-zinc-100 mt-1">
+                      {r.lines.map((l) => {
+                        const item = order.items.find((i) => i.lineItemId === l.lineItemId);
+                        const label = item?.productTitle ?? item?.variantId ?? l.lineItemId;
+                        return (
+                          <div key={l.lineItemId}>
+                            {label} × {l.quantity}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {r.reason && (
+                      <div className="text-xs text-zinc-500 mt-1">Reason: {r.reason}</div>
+                    )}
+                    <div className="text-xs text-zinc-400 mt-1">{formatDate(r.timestamp)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-medium text-zinc-900 dark:text-zinc-100">
+                      −{formatPrice(r.refundAmount)}
+                    </div>
+                    <div className="text-xs text-zinc-500">tax −{formatPrice(r.taxAmount)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Fulfiller Orders */}
       {fulfillerOrders.length > 0 && (
         <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 mb-8">

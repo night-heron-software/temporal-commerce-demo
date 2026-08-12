@@ -176,6 +176,12 @@ export interface OrderDocument extends WorkflowLifecycleFields {
   // Status tracking
   statusHistory: OrderStatusHistoryDocument[];
   deliveredAt?: string;
+  /**
+   * Refund ledger (backlog #4 / remediation R4). Projected on every push so it
+   * survives workflow close — a full refund closes the workflow IMMEDIATELY, and
+   * without this the records exist only in Temporal history, inside retention.
+   */
+  refunds?: OrderRefundDocument[];
   // Customer feedback
   customerFeedback?: OrderCustomerFeedbackDocument;
   /**
@@ -244,6 +250,16 @@ export interface OrderFulfillerOrderDocument {
   rejectionReason?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One refund on the order's ledger — mirrors OMS's RefundRecord (contracts/oms.ts). */
+export interface OrderRefundDocument {
+  refundId: string;
+  timestamp: string;
+  reason?: string;
+  lines: Array<{ lineItemId: string; quantity: number }>;
+  refundAmount: number;
+  taxAmount: number;
 }
 
 export interface OrderStatusHistoryDocument {
