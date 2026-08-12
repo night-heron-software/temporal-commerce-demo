@@ -135,6 +135,12 @@ describe('addItemToCart (updateWithStart lazy create)', () => {
       taskQueue: 'cart-queue',
       workflowIdConflictPolicy: 'USE_EXISTING',
       args: [{ cartId: CART_ID }],
+      // R5 (ADR-0022 one-lifecycle-id): the correlationId IS the cartId — one query
+      // returns everything this cart ever did, across every run and checkout.
+      searchAttributes: expect.objectContaining({
+        CorrelationId: [CART_ID],
+        CartId: [CART_ID],
+      }),
     });
     expect(workflow.executeUpdateWithStart).toHaveBeenCalledWith(Cart.cartUpdate, {
       startWorkflowOperation: startOps[0],

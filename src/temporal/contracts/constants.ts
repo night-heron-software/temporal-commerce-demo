@@ -132,7 +132,7 @@ export function parseWorkflowId(
  * `scripts/register-search-attributes.sh`.
  */
 export const SEARCH_ATTRIBUTE_KEYS = {
-  /** Root id tying the whole journey graph together — its own UUID minted at cart creation. */
+  /** Root id tying the whole journey graph together — the cartId (R5 / ADR-0022: one lifecycle, one id). */
   correlationId: 'CorrelationId',
   storeId: 'StoreId',
   domain: 'Domain',
@@ -148,10 +148,11 @@ export interface BuildWorkflowStartOptionsInput {
   domain: WorkflowDomain;
   entityId: string;
   /**
-   * Root id tying the journey graph together — its own UUID minted at cart creation
-   * (never defaulted from `cartId`). Required so no caller silently falls back;
-   * correlation-less singletons (e.g. the inventory service workflow) opt out by
-   * passing `undefined` explicitly.
+   * Root id tying the journey graph together — the cartId (R5, decided 2026-08-11:
+   * the mono's ADR-0022 one-lifecycle-id property; one query returns everything the
+   * cart ever did across runs and checkouts). Still REQUIRED, never defaulted, so no
+   * caller silently omits it; correlation-less singletons (e.g. the inventory service
+   * workflow) opt out by passing `undefined` explicitly.
    */
   correlationId: string | undefined;
   orderId?: string;

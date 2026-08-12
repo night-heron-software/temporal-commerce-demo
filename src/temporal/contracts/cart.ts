@@ -39,7 +39,7 @@ export interface Order {
   orderId: string;
   cartId: string;
   /**
-   * The journey's correlationId (ADR-0011) — its own UUID minted at cart creation,
+   * The journey's correlationId — the cartId (R5 / ADR-0022 one-lifecycle-id),
    * captured from the ambient correlation context when the order is created.
    */
   correlationId: string;

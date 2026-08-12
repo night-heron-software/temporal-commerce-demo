@@ -87,12 +87,15 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
   try {
     if (options.createIfMissing) {
       // Use updateWithStart to lazily create the workflow.
-      // The journey's correlationId is minted HERE, at cart creation, as its own UUID
-      // (deliberately ≠ cartId — ADR-0011). Every downstream workflow start reads it
-      // from its parent's CorrelationId Search Attribute and passes it along. When the
-      // cart workflow already exists (USE_EXISTING), this freshly minted value is
-      // ignored and the existing workflow's correlationId stays authoritative.
-      const correlationId = randomUUID();
+      // The correlationId IS the cartId (remediation R5, decided 2026-08-11 — the
+      // mono's ADR-0022 one-lifecycle-id property): one id retrieves everything a cart
+      // ever did, across every run and checkout. The per-run UUID mint this replaces
+      // gave the same cart a different correlation id on every revival, so no single
+      // query returned a cart's history (run -006 F9). Every downstream workflow start
+      // still reads the value from its parent's CorrelationId Search Attribute; when
+      // the cart workflow already exists (USE_EXISTING), the existing workflow's value
+      // stays authoritative — which is now the same value by construction.
+      const correlationId = cartId;
       const { WithStartWorkflowOperation } = await import('@temporalio/client');
       const startOp = new WithStartWorkflowOperation('cartWorkflow', {
         ...buildWorkflowStartOptions({
