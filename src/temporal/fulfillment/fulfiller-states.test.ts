@@ -183,8 +183,9 @@ describe('in_production', () => {
     const out = await FULFILLER_ORDER_STATES.in_production.fn(inProd(), timeout);
     expect(out.next).toBe('shipped');
     expect(out.context.so.status).toBe('shipped');
-    // deriveTrackingNumber prepare: `SIM` + workflowId.slice(0, 8).toUpperCase().
-    expect(out.context.so.trackingNumber).toBe('SIMDEMO.FUL');
+    // R7: `SIM-` + the entity segment of the dot-delimited workflow id — distinct per
+    // shipment (the old slice(0, 8) was the shared prefix: every number was SIMDEMO.FUL).
+    expect(out.context.so.trackingNumber).toBe('SIM-SO-1');
     expect(out.context.so.carrier).toBe('Simulated Carrier');
     expect(out.context.so.shipments).toHaveLength(1);
     // Event-keyed effects: SimulatedShipped indexes the shipment and emails the customer.
@@ -193,7 +194,7 @@ describe('in_production', () => {
         shipmentId: 'o-1-so-1-1',
         orderId: 'o-1',
         correlationId: 'cart-1',
-        trackingNumber: 'SIMDEMO.FUL',
+        trackingNumber: 'SIM-SO-1',
         itemCount: 1,
       }),
     );
@@ -201,7 +202,7 @@ describe('in_production', () => {
       'a@b.c',
       'o-1',
       'DEMO1234',
-      expect.objectContaining({ trackingNumber: 'SIMDEMO.FUL', carrier: 'Simulated Carrier' }),
+      expect.objectContaining({ trackingNumber: 'SIM-SO-1', carrier: 'Simulated Carrier' }),
     );
   });
 

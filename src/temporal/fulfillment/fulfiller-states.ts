@@ -35,6 +35,7 @@
  */
 import * as wf from '@temporalio/workflow';
 import type { Fulfillers, Fulfillment } from '../contracts';
+import { parseWorkflowId } from '../contracts/constants';
 import { defineMachine, terminal, SELF } from '../framework';
 import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
 import type { FulfillmentFulfillerOrderState, ShipmentInfo } from './types';
@@ -364,9 +365,15 @@ export const submittedBlock: CommandBlock<'submitted'> = {
 // ==================
 
 export const simulatedShipBlock: CommandBlock<'simulatedShip'> = {
-  prepare: async () => ({
-    trackingNumber: `SIM${wf.workflowInfo().workflowId.slice(0, 8).toUpperCase()}`,
-  }),
+  prepare: async () => {
+    // Derive from the ENTITY segment of the dot-delimited id (`so-<8hex>`), so every
+    // shipment gets a distinct number (R7 — the old `slice(0, 8)` of an ADR-0011 dot-id
+    // was the shared prefix, making every tracking number the constant `SIMDEMO.FUL`).
+    // The derivation-from-workflow-id itself remains the recorded divergence.
+    const { workflowId } = wf.workflowInfo();
+    const entityId = parseWorkflowId(workflowId)?.entityId ?? workflowId;
+    return { trackingNumber: `SIM-${entityId.toUpperCase()}` };
+  },
 
   decide: (command, _context) => [
     { type: 'SimulatedShipped', trackingNumber: command.trackingNumber, at: command.at },
