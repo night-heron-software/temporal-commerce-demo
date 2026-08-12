@@ -379,6 +379,21 @@ describe('cartDecider — the assembled decider', () => {
 
 // ── version/timestamp stamping (was the workflow's flushCart bump) ──────────
 describe('evolve — version/timestamp stamping', () => {
+  it('CheckoutEntered is version-NEUTRAL (entering checkout is not a content change)', () => {
+    // The checkout child snapshots the pre-command version and its validating re-pull
+    // can race this evolve — a bump here would baseline the child one behind and
+    // false-positive the cart-changed banner on every fresh checkout (R6 finding).
+    const s = makeCtx();
+    const before = s.cart.cartVersion;
+    const next = evolve(s, {
+      type: 'CheckoutEntered',
+      checkoutWorkflowId: 'demo.checkout.co-1',
+      checkoutVersion: 1,
+      at,
+    });
+    expect(next.cart.cartVersion).toBe(before);
+  });
+
   it('stamps updatedAt from the event at and bumps cartVersion on every fold', () => {
     const next = evolve(makeCtx(), {
       type: 'UserLinked',

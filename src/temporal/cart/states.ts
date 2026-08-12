@@ -552,7 +552,14 @@ export const beginCheckoutBlock: CommandBlock<'beginCheckout'> = {
   evolve: {
     CheckoutEntered: (context, event) => ({
       ...context,
-      cart: withCheckoutFields(context.cart),
+      // Entering checkout is NOT a content change: restore the version the dispatcher's
+      // generic freshness bump added. Otherwise the checkout child — whose input
+      // snapshots the PRE-command version and whose `validating` re-pull can race this
+      // very evolve — baselines one behind and the cart-changed banner false-positives
+      // on a fresh checkout (found live during R6's journey verification; the R3
+      // re-baseline narrowed the window, this closes it). Content edits still bump, so
+      // a pulled-vs-input difference now means a REAL edit.
+      cart: { ...withCheckoutFields(context.cart), cartVersion: context.cart.cartVersion - 1 },
       checkoutWorkflowId: event.checkoutWorkflowId,
       checkoutVersion: event.checkoutVersion,
     }),

@@ -83,8 +83,15 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
 ): Promise<TReturn | null> {
   const client = await getTemporalClient();
   const workflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', cartId);
+  // R6 (backlog #6): one entry line + one exit line per mutating action, correlation-
+  // tagged (post-R5 the correlationId IS the cartId), so a shopper journey is
+  // reconstructable from demo-web.log alone. Every cart mutation funnels through here;
+  // the command's own type is the action name. No payloads.
+  const command = (args[0] as { type?: string } | undefined)?.type ?? updateDef?.name;
+  log.info({ correlationId: cartId, cartId, command }, 'cart action start');
 
   try {
+    let result: TReturn | null;
     if (options.createIfMissing) {
       // Use updateWithStart to lazily create the workflow.
       // The correlationId IS the cartId (remediation R5, decided 2026-08-11 — the
@@ -111,20 +118,26 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
         workflowExecutionTimeout: '30 days',
         workflowTaskTimeout: '2m',
       });
-      return await client.workflow.executeUpdateWithStart(updateDef, {
+      result = await client.workflow.executeUpdateWithStart(updateDef, {
         startWorkflowOperation: startOp,
         args: args as unknown as [any, ...any[]],
       });
     } else {
       const handle = client.workflow.getHandle(workflowId);
-      return await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
+      result = await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
     }
+    log.info({ correlationId: cartId, cartId, command, ok: true }, 'cart action done');
+    return result;
   } catch (e) {
     const reason = classifyUpdateError(e);
     if (reason) {
-      log.info({ cartId, reason }, 'Cart update produced no result');
+      log.info({ correlationId: cartId, cartId, command, ok: false, reason }, 'cart action done');
       return null;
     }
+    log.warn(
+      { correlationId: cartId, cartId, command, err: (e as Error).message },
+      'cart action failed',
+    );
     throw e;
   }
 }
@@ -140,14 +153,24 @@ async function runCheckoutUpdate<TReturn, TArgs extends any[]>(
 ): Promise<UpdateOutcome<TReturn>> {
   const client = await getTemporalClient();
   const handle = client.workflow.getHandle(checkoutWorkflowId);
+  // R6: every checkout mutation funnels through here; the update's wire name is the
+  // action. The checkout workflow id carries the checkoutId — the journey join key
+  // (correlationId = cartId) is on the caller's cart lines.
+  const action = updateDef?.name ?? 'checkoutUpdate';
+  log.info({ checkoutWorkflowId, action }, 'checkout action start');
   try {
     const value = await handle.executeUpdate(updateDef, {
       args: args as unknown as [any, ...any[]],
     });
+    log.info({ checkoutWorkflowId, action, ok: true }, 'checkout action done');
     return { ok: true, value: value as TReturn };
   } catch (e) {
     const reason = classifyUpdateError(e);
-    if (reason) return { ok: false, reason };
+    if (reason) {
+      log.info({ checkoutWorkflowId, action, ok: false, reason }, 'checkout action done');
+      return { ok: false, reason };
+    }
+    log.warn({ checkoutWorkflowId, action, err: (e as Error).message }, 'checkout action failed');
     throw e;
   }
 }
