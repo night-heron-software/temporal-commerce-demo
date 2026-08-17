@@ -91,7 +91,7 @@ const address = {
 };
 
 /** Both prerequisites satisfied — ready to submit. */
-const readyCtx = () =>
+const readyCtx = (overrides: Partial<CheckoutContext> = {}) =>
   makeCtx({
     reservations: [{ reservationId: 'r-1' } as never],
     state: {
@@ -105,6 +105,7 @@ const readyCtx = () =>
     shippingCost: 5,
     totalTax: 0.8,
     totalPrice: 15.8,
+    ...overrides,
   });
 
 const ev = (event: CheckoutCommand) => ({ kind: 'event' as const, event, timestamp: 't' });
@@ -236,6 +237,65 @@ describe('collecting — submitOrder', () => {
     expect(out.context.state.error).toBe('CART_CHANGED');
     expect(processPayment).not.toHaveBeenCalled();
     expect(signal).toHaveBeenLastCalledWith(expect.anything(), { kind: 'submitAborted' });
+  });
+
+  /**
+   * The idempotency key, asserted as PROPERTIES rather than a literal (ported from mono #241 /
+   * `f42c3bda`). The demo's key was the bare `context.cartId` — every retry AND every re-submit
+   * at a different total shared one key, so the key distinguished nothing; and the activity
+   * discarded it anyway (`_idempotencyKey`). The mono's pre-fix key had the mirror defect
+   * (`cartId-cartVersion`, moving on every fold and defeating retry dedup) and its old test
+   * pinned that literal — the defect written down as the requirement. Properties instead:
+   * keyed on the journey + the amount actually charged, stable when the version moves but the
+   * total does not, distinct when the total moves.
+   */
+  const keyOfLastCharge = () => {
+    const calls = vi.mocked(processPayment).mock.calls;
+    return calls[calls.length - 1]?.[3];
+  };
+
+  it('the idempotency key is the journey id plus the total actually charged', async () => {
+    await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    // The cartId IS the journey correlationId here (remediation R5 / mono ADR-0022), and the
+    // total is recomputed from the freshly-queried cart: 10 - 0 + 5 + 0.8.
+    expect(keyOfLastCharge()).toBe('cart-1-15.8');
+  });
+
+  it('the key does NOT move when cartVersion moves but the total does not', async () => {
+    await CHECKOUT_STATES.collecting.fn(
+      readyCtx(),
+      ev({ type: 'submitOrder', reviewedCartVersion: 1 }),
+    );
+    const first = keyOfLastCharge();
+
+    // A later fold whose edits left the total alone. With a version-bearing key these would
+    // differ, and a retried submit would be billed as a new charge.
+    vi.mocked(queryCart).mockResolvedValueOnce({
+      items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
+      subtotalPrice: 10,
+      totalDiscounts: 0,
+      appliedCoupons: [],
+      cartVersion: 7,
+    } as never);
+    await CHECKOUT_STATES.collecting.fn(
+      readyCtx({ cartVersion: 7 }),
+      ev({ type: 'submitOrder', reviewedCartVersion: 7 }),
+    );
+    expect(keyOfLastCharge()).toBe(first);
+  });
+
+  it('a different total IS a different charge', async () => {
+    await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    const first = keyOfLastCharge();
+
+    // Move SHIPPING, not `totalPrice`: submitOrder recomputes the total from the freshly
+    // queried cart plus the context's shipping/tax, so an override of totalPrice would be
+    // discarded — the key is built from the amount actually charged, never a stale figure.
+    await CHECKOUT_STATES.collecting.fn(
+      readyCtx({ shippingCost: 25 }),
+      ev({ type: 'submitOrder' }),
+    );
+    expect(keyOfLastCharge()).not.toBe(first);
   });
 
   it('payment failure stays collecting with the error', async () => {

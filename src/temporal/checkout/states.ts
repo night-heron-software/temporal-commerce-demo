@@ -450,7 +450,16 @@ async function prepareSubmitOrder(
       context.state.paymentMethod!.token,
       context.totalPrice,
       context.currency,
-      context.cartId,
+      // Idempotency key (§7.7b): the journey id plus the total being charged — one charge per
+      // (journey, total), so a retried submit does not double-charge. The cartId IS the journey
+      // correlationId here (remediation R5 / mono ADR-0022).
+      //
+      // Ported from mono #241 (`f42c3bda`). This was the bare `context.cartId` — every retry AND
+      // every re-submit at a different total shared one key, so the key distinguished nothing.
+      // The mono's pre-fix key had the opposite defect (`cartId-cartVersion`, where cartVersion
+      // moves on every fold and defeated retry dedup); keying on the money, not the version, is
+      // what both converged on.
+      `${context.cartId}-${context.totalPrice}`,
     );
 
     if (!paymentSuccess) {

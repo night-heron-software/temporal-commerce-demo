@@ -101,16 +101,52 @@ export async function verifyPayment(paymentIntentId: string): Promise<boolean> {
 }
 
 /**
- * Process payment — always mock for demo
+ * Keys already charged in mock mode. Bounded so a long-lived dev worker cannot grow it without
+ * limit; eviction is oldest-first and only matters after thousands of distinct journeys, by which
+ * point re-charging a long-abandoned one is not the failure anyone is looking for.
+ */
+const MOCK_CHARGED_KEYS = new Set<string>();
+const MOCK_CHARGED_KEYS_MAX = 5000;
+
+function rememberMockCharge(key: string): void {
+  if (MOCK_CHARGED_KEYS.size >= MOCK_CHARGED_KEYS_MAX) {
+    const oldest = MOCK_CHARGED_KEYS.values().next().value;
+    if (oldest !== undefined) MOCK_CHARGED_KEYS.delete(oldest);
+  }
+  MOCK_CHARGED_KEYS.add(key);
+}
+
+/**
+ * Process payment — always mock for demo.
+ *
+ * The idempotency key now genuinely deduplicates (ported from mono #241 / `f42c3bda`). It was
+ * `_idempotencyKey` — accepted and DISCARDED — so mock mode could not reproduce a double-charge
+ * even in principle. The mono's validation run 013 found a triple-charge P0 that was invisible to
+ * every mock-mode run for exactly this reason: a mock that cannot exhibit the failure it stands
+ * in for is a mock that hides it.
+ *
+ * Limits, stated rather than discovered later: the store is per-process and in-memory, so it is
+ * lost on worker restart and not shared across workers. Acceptable for a dev stand-in — the point
+ * is that a repeated charge for one (journey, total) is observable locally.
  */
 export async function processPayment(
   token: string,
   amount: number,
   currency: string,
-  _idempotencyKey?: string,
+  idempotencyKey?: string,
 ): Promise<boolean> {
   log.info(`[Activity] Processing MOCK payment: ${amount} ${currency} with token ${token}`);
   await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate processing
+
+  if (idempotencyKey) {
+    if (MOCK_CHARGED_KEYS.has(idempotencyKey)) {
+      log.warn(
+        `[Activity] MOCK payment already charged for key ${idempotencyKey} — returning the first result, not charging again`,
+      );
+      return true;
+    }
+    rememberMockCharge(idempotencyKey);
+  }
   return true;
 }
 
