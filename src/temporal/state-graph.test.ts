@@ -6,7 +6,8 @@
  * guaranteed-fresh snapshot. They make structural properties of every machine —
  * "the expected machines exist", "no orphan states", "every waiting state can move" —
  * queryable instead of eyeballed. Aligned with the mono's graph-integrity suite
- * (schemaVersion 2, ADR-0024: unique machine `id`, per-state `commands`, 'event' kind).
+ * (schemaVersion 3, ADR-0024 + ADR-0026: unique machine `id`, per-state `commands` with
+ * per-command journeys, 'event' kind).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,9 +19,23 @@ interface Transition {
   kind: string;
   to: string;
 }
+interface CommandEmit {
+  event: string;
+  to: string;
+  via: 'explicit' | 'wildcard' | 'unrouted';
+  /** The block's own `routes` declaration for this event (ADR-0026), when present. */
+  declared?: string;
+}
+interface StateCommand {
+  name: string;
+  guarded?: boolean;
+  prepareActivities?: string[];
+  emits?: CommandEmit[];
+}
 interface MachineState {
   name: string;
   transitional?: boolean;
+  commands?: StateCommand[];
   transitions: Transition[];
 }
 interface Machine {
@@ -86,9 +101,9 @@ function reachableStates(machine: Machine): Set<string> {
 }
 
 describe('state-graph.json — schema', () => {
-  it('is schemaVersion 2 with machines[] and crossDomain[]', () => {
+  it('is schemaVersion 3 with machines[] and crossDomain[]', () => {
     // v2 (ADR-0024): unique machine `id`, optional per-state `commands`, 'event' kind.
-    expect(graph.schemaVersion).toBe(2);
+    expect(graph.schemaVersion).toBe(3);
     expect(Array.isArray(graph.machines)).toBe(true);
     expect(graph.machines.length).toBeGreaterThan(0);
     expect(Array.isArray(graph.crossDomain)).toBe(true);
@@ -209,5 +224,79 @@ describe('cross-domain orchestration edges', () => {
       (e: { from: string; to: string }) => e.from === e.to,
     );
     expect(selfLoops).toEqual([]);
+  });
+});
+
+// ==================
+// Per-command journeys (ADR-0026, schemaVersion 3 — ported from mono #253).
+// ==================
+
+describe('per-command journeys (ADR-0026, schemaVersion 3)', () => {
+  it('every emitted event resolves to a real state, a declared terminal, or the stay sentinel', () => {
+    // The journey join must not invent destinations: each emits.to is a state of the same
+    // machine, a terminal the machine declares, or `__self` — this graph's stay sentinel
+    // (the demo does not substitute SELF with the state name; the raw sentinel is the
+    // convention, pinned by the port's edge-triple invariant).
+    const bad: string[] = [];
+    for (const m of graph.machines) {
+      const names = new Set(m.states.map((s) => s.name));
+      for (const s of m.states) {
+        for (const c of s.commands ?? []) {
+          for (const e of c.emits ?? []) {
+            const ok = e.to.startsWith('__terminal:')
+              ? m.terminals.includes(e.to.slice('__terminal:'.length))
+              : e.to === '__self' || names.has(e.to);
+            if (!ok) bad.push(`${m.id}/${s.name}/${c.name}: '${e.event}' → '${e.to}'`);
+          }
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('a block-declared route never disagrees with the state table it lands in', () => {
+    // The ADR-0026 drift ratchet. Where a block declares `routes: { X: target }` AND the
+    // state's table routes X explicitly, the two must agree — a mismatch means the
+    // declaration and the table have drifted, which is exactly the failure mode derivation
+    // exists to remove. (via 'wildcard'/'unrouted' with a declaration is the audited
+    // weaken-to-stay exception shape: visible in the data, legal here.)
+    const drift: string[] = [];
+    for (const m of graph.machines) {
+      for (const s of m.states) {
+        for (const c of s.commands ?? []) {
+          for (const e of c.emits ?? []) {
+            if (e.declared === undefined || e.via !== 'explicit') continue;
+            if (e.to !== e.declared) {
+              drift.push(
+                `${m.id}/${s.name}/${c.name}: '${e.event}' declared '${e.declared}' but routes '${e.to}'`,
+              );
+            }
+          }
+        }
+      }
+    }
+    expect(drift).toEqual([]);
+  });
+
+  it('the pilot carries declarations for every explicitly-routed emission (migration ratchet)', () => {
+    // Cart is on the ADR-0026 convention (the mono's other pilot, inventory/transfer, has no
+    // demo counterpart): any event it emits that a state routes EXPLICITLY somewhere else must
+    // have come from a block declaration. This pins the pilot's coverage so a new routed event
+    // cannot ship declaration-less.
+    const pilots = new Set(['CART_STATES']);
+    const missing: string[] = [];
+    for (const m of graph.machines) {
+      if (!pilots.has(m.id)) continue;
+      for (const s of m.states) {
+        for (const c of s.commands ?? []) {
+          for (const e of c.emits ?? []) {
+            if (e.via === 'explicit' && e.declared === undefined) {
+              missing.push(`${m.id}/${s.name}/${c.name}: '${e.event}' routed but undeclared`);
+            }
+          }
+        }
+      }
+    }
+    expect(missing).toEqual([]);
   });
 });

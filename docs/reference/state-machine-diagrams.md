@@ -39,12 +39,12 @@ stateDiagram-v2
   active
   checkout
   [*] --> active
-  active --> checkout: CheckoutEntered / timeout
   active --> [*]: CartAbandoned / timeout → abandoned
+  active --> checkout: CheckoutEntered / timeout
   active --> active: * / timeout
-  checkout --> active: CheckoutDisowned / CheckoutFailed / timeout
-  checkout --> [*]: CartCompleted / timeout → completed
   checkout --> [*]: CartAbandoned / timeout → abandoned
+  checkout --> [*]: CartCompleted / timeout → completed
+  checkout --> active: CheckoutFailed / CheckoutDisowned / timeout
   checkout --> checkout: * / timeout
   note right of active: timeout 30 days
   note right of checkout: timeout 1 hour
@@ -52,33 +52,56 @@ stateDiagram-v2
 
 ### State: `active`
 
-**Accepts:** `addItem` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `updateQuantity` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `removeItem` *(guarded; prepare: releaseCartItem)* · `applyCoupon` *(guarded)* · `linkUser` · `expireCart` · `beginCheckout` *(guarded; prepare: startChild)* — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `addItem` *(guarded; prepare: releaseCartItem, reserveCartItem)* → `ItemAdded` ⇒ *stays*
+- `updateQuantity` *(guarded; prepare: releaseCartItem, reserveCartItem)* → `ItemQuantityChanged` ⇒ *stays* · `ItemRemoved` ⇒ *stays* · `CartAbandoned` ⇒ **abandoned** (terminal)
+- `removeItem` *(guarded; prepare: releaseCartItem)* → `ItemRemoved` ⇒ *stays* · `CartAbandoned` ⇒ **abandoned** (terminal)
+- `applyCoupon` *(guarded)* → `CouponApplied` ⇒ *stays*
+- `linkUser` → `UserLinked` ⇒ *stays*
+- `expireCart` → `CartAbandoned` ⇒ **abandoned** (terminal)
+- `beginCheckout` *(guarded; prepare: startChild)* → `CheckoutEntered` ⇒ `checkout`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `event: CheckoutEntered` | `checkout` |  |
 | `event: CartAbandoned` | ⇒ abandoned |  |
-| `event: *` | `active` |  |
-| `timeout → expireCart` | `checkout` |  |
+| `event: CheckoutEntered` | `checkout` |  |
+| `event: *` | `active` | falls through: `ItemAdded`, `ItemQuantityChanged`, `ItemRemoved`, `CouponApplied`, `UserLinked` |
 | `timeout → expireCart` | ⇒ abandoned |  |
+| `timeout → expireCart` | `checkout` |  |
 | `timeout → expireCart` | `active` |  |
 
 **Timeout:** 30 days
 
 ### State: `checkout`
 
-**Accepts:** `addItem` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `updateQuantity` *(guarded; prepare: releaseCartItem, reserveCartItem)* · `removeItem` *(guarded; prepare: releaseCartItem)* · `applyCoupon` *(guarded)* · `linkUser` · `beginCheckout` · `submitStarted` · `submitAborted` · `checkoutCompleted` · `checkoutTimedOut` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `addItem` *(guarded; prepare: releaseCartItem, reserveCartItem)* → `ItemAdded` ⇒ *stays*
+- `updateQuantity` *(guarded; prepare: releaseCartItem, reserveCartItem)* → `ItemQuantityChanged` ⇒ *stays* · `ItemRemoved` ⇒ *stays* · `CartAbandoned` ⇒ **abandoned** (terminal)
+- `removeItem` *(guarded; prepare: releaseCartItem)* → `ItemRemoved` ⇒ *stays* · `CartAbandoned` ⇒ **abandoned** (terminal)
+- `applyCoupon` *(guarded)* → `CouponApplied` ⇒ *stays*
+- `linkUser` → `UserLinked` ⇒ *stays*
+- `beginCheckout` → *(no events — idempotent no-op)*
+- `submitStarted` → `SubmitFreezeStarted` ⇒ *stays*
+- `submitAborted` → `SubmitFreezeCleared` ⇒ *stays*
+- `checkoutCompleted` → `CartCompleted` ⇒ **completed** (terminal) · `CheckoutFailed` ⇒ `active`
+- `checkoutTimedOut` → `CheckoutDisowned` ⇒ `active`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `event: CheckoutDisowned` | `active` |  |
-| `event: CheckoutFailed` | `active` |  |
-| `event: CartCompleted` | ⇒ completed |  |
 | `event: CartAbandoned` | ⇒ abandoned |  |
-| `event: *` | `checkout` |  |
-| `timeout → checkoutTimedOut` | `active` |  |
-| `timeout → checkoutTimedOut` | ⇒ completed |  |
+| `event: CartCompleted` | ⇒ completed |  |
+| `event: CheckoutFailed` | `active` |  |
+| `event: CheckoutDisowned` | `active` |  |
+| `event: *` | `checkout` | falls through: `ItemAdded`, `ItemQuantityChanged`, `ItemRemoved`, `CouponApplied`, `UserLinked`, `SubmitFreezeStarted`, `SubmitFreezeCleared` |
 | `timeout → checkoutTimedOut` | ⇒ abandoned |  |
+| `timeout → checkoutTimedOut` | ⇒ completed |  |
+| `timeout → checkoutTimedOut` | `active` |  |
 | `timeout → checkoutTimedOut` | `checkout` |  |
 
 **Timeout:** 1 hour
@@ -104,7 +127,11 @@ stateDiagram-v2
 
 ### State: `validating`
 
-**Accepts:** `validate` *(prepare: queryCart, renewReservationsForCheckout)* — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `validate` *(prepare: queryCart, renewReservationsForCheckout)* → `CartLoaded` ⇒ `collecting` · `ValidationFailed` ⇒ **failed** (terminal)
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -115,13 +142,24 @@ stateDiagram-v2
 
 ### State: `collecting`
 
-**Accepts:** `setShipping` *(prepare: prepareSetShipping)* · `setPayment` · `cancelCheckout` · `acknowledgeCartChange` · `retargetParent` · `checkoutTimedOut` · `submitOrder` *(prepare: freeze, queryCart, prepareSubmitOrder)* · `recompute` *(prepare: queryCart, calculateShipping, calculateTax)* — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `setShipping` *(prepare: prepareSetShipping)* → `ShippingSet` ⇒ *stays* · `ShippingFailed` ⇒ *stays*
+- `setPayment` → `PaymentSet` ⇒ *stays*
+- `cancelCheckout` → `Cancelled` ⇒ **cancelled** (terminal)
+- `acknowledgeCartChange` → `CartChangeAcknowledged` ⇒ *stays*
+- `retargetParent` → `ParentRetargeted` ⇒ *stays*
+- `checkoutTimedOut` → `Cancelled` ⇒ **cancelled** (terminal)
+- `submitOrder` *(prepare: freeze, queryCart, prepareSubmitOrder)* → `OrderSubmitted` ⇒ **complete** (terminal) · `SubmitRejected` ⇒ *stays*
+- `recompute` *(prepare: queryCart, calculateShipping, calculateTax)* → `Recomputed` ⇒ *stays*
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
 | `event: Cancelled` | ⇒ cancelled |  |
 | `event: OrderSubmitted` | ⇒ complete |  |
-| `event: *` | `collecting` |  |
+| `event: *` | `collecting` | falls through: `ShippingSet`, `ShippingFailed`, `PaymentSet`, `CartChangeAcknowledged`, `ParentRetargeted`, `SubmitRejected`, `Recomputed` |
 | `timeout → checkoutTimedOut` | ⇒ cancelled |  |
 | `timeout → checkoutTimedOut` | ⇒ complete |  |
 | `timeout → checkoutTimedOut` | `collecting` |  |
@@ -162,7 +200,12 @@ stateDiagram-v2
 
 received — book-keeping hop; marks the order as submitting.
 
-**Accepts:** `beginSubmit` · `cancel` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `beginSubmit` → `SubmissionStarted` ⇒ `submitting`
+- `cancel` → `Cancelled` ⇒ **cancelled** (terminal)
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -177,7 +220,12 @@ received — book-keeping hop; marks the order as submitting.
 
 submitting — submits the order to the (simulated) fulfiller.
 
-**Accepts:** `submitted` *(prepare: submitFulfillerOrder)* · `cancel` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `submitted` *(prepare: submitFulfillerOrder)* → `OrderSubmitted` ⇒ `in_production`
+- `cancel` → `Cancelled` ⇒ **cancelled** (terminal)
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -192,7 +240,13 @@ submitting — submits the order to the (simulated) fulfiller.
 
 in_production — auto-ships on timeout (unless manual mode); accepts fulfiller updates.
 
-**Accepts:** `simulatedShip` · `fulfillerStatus` · `cancel` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `simulatedShip` → `SimulatedShipped` ⇒ `shipped`
+- `fulfillerStatus` → `FulfillerStatusApplied` ⇒ *stays* · `ShipmentProgressed` ⇒ `shipped` · `DeliveryConfirmed` ⇒ **delivered** (terminal) · `FulfillerOrderFailed` ⇒ **failed** (terminal) · `Cancelled` ⇒ **cancelled** (terminal)
+- `cancel` → `Cancelled` ⇒ **cancelled** (terminal)
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -201,7 +255,7 @@ in_production — auto-ships on timeout (unless manual mode); accepts fulfiller 
 | `event: DeliveryConfirmed` | ⇒ delivered |  |
 | `event: FulfillerOrderFailed` | ⇒ failed |  |
 | `event: Cancelled` | ⇒ cancelled |  |
-| `event: *` | `in_production` |  |
+| `event: *` | `in_production` | falls through: `FulfillerStatusApplied` |
 | `timeout` | `shipped` |  |
 | `timeout` | ⇒ delivered |  |
 | `timeout` | ⇒ failed |  |
@@ -212,7 +266,13 @@ in_production — auto-ships on timeout (unless manual mode); accepts fulfiller 
 
 shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller updates.
 
-**Accepts:** `simulatedDeliver` · `fulfillerStatus` · `cancel` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `simulatedDeliver` → `SimulatedDelivered` ⇒ **delivered** (terminal)
+- `fulfillerStatus` → `FulfillerStatusApplied` ⇒ *stays* · `ShipmentProgressed` ⇒ *stays* · `DeliveryConfirmed` ⇒ **delivered** (terminal) · `FulfillerOrderFailed` ⇒ **failed** (terminal) · `Cancelled` ⇒ **cancelled** (terminal)
+- `cancel` → `Cancelled` ⇒ **cancelled** (terminal)
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -221,7 +281,7 @@ shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller upd
 | `event: FulfillerOrderFailed` | ⇒ failed |  |
 | `event: Cancelled` | ⇒ cancelled |  |
 | `event: ShipmentProgressed` | `shipped` |  |
-| `event: *` | `shipped` |  |
+| `event: *` | `shipped` | falls through: `FulfillerStatusApplied` |
 | `timeout` | ⇒ delivered |  |
 | `timeout` | ⇒ failed |  |
 | `timeout` | ⇒ cancelled |  |
@@ -248,7 +308,11 @@ stateDiagram-v2
 
 ### State: `received`
 
-**Accepts:** `beginProduction` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `beginProduction` → `ProductionStarted` ⇒ `in_production`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -257,14 +321,19 @@ stateDiagram-v2
 
 ### State: `in_production`
 
-**Accepts:** `cancel` · `childStatus` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `cancel` → `OrderCancelled` ⇒ **cancelled** (terminal)
+- `childStatus` → `ChildStatusApplied` ⇒ *stays* · `FulfillmentDelivered` ⇒ **delivered** (terminal) · `FulfillmentFailed` ⇒ **failed** (terminal)
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: FulfillmentDelivered` | ⇒ delivered |  |
 | `event: FulfillmentFailed` | ⇒ failed |  |
-| `event: *` | `in_production` |  |
+| `event: *` | `in_production` | falls through: `ChildStatusApplied` |
 
 **Timeout:** 365 days
 
@@ -354,7 +423,11 @@ Transitional intake 1/3: a pure hop — the mono decides the ORDER_CAPTURE ledge
 numbers here and posts them as the `PaymentCaptured` effect; the demo has no
 accounting, so the event carries nothing and has no effect (see `capturePaymentBlock`).
 
-**Accepts:** `capturePayment` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `capturePayment` → `PaymentCaptured` ⇒ `assigning_fulfillers`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -369,7 +442,11 @@ Transitional intake 2/3: `prepare` resolves fulfillers (impure I/O) and mints
 assignment ids; `decide` records the assignments. No resolution at all falls back
 to the manual `ready_to_fulfill` path.
 
-**Accepts:** `assignFulfillers` *(prepare: resolveFulfillerAssignments)* — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `assignFulfillers` *(prepare: resolveFulfillerAssignments)* → `FulfillersAssigned` ⇒ `requesting_fulfillment` · `NoFulfillersResolved` ⇒ `ready_to_fulfill`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -386,7 +463,11 @@ Transitional intake 3/3: `prepare` mints fulfiller-order ids; `decide` groups
 assignments into fulfiller orders; the child start + indexing are the
 `FulfillmentRequested` effect.
 
-**Accepts:** `requestFulfillment` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `requestFulfillment` → `FulfillmentRequested` ⇒ `processing`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -399,7 +480,12 @@ assignments into fulfiller orders; the child start + indexing are the
 
 No fulfiller resolved — the order waits for manual handling (admin status moves).
 
-**Accepts:** `cancelOrder` · `updateStatus` *(guarded)* — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `cancelOrder` → `OrderCancelled` ⇒ **cancelled** (terminal)
+- `updateStatus` *(guarded)* → `OrderProcessing` ⇒ `processing` · `OrderPartiallyShipped` ⇒ `partially_shipped` · `OrderShipped` ⇒ `shipped` · `OrderDelivered` ⇒ `delivered` · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -417,7 +503,13 @@ No fulfiller resolved — the order waits for manual handling (admin status move
 
 ### State: `processing`
 
-**Accepts:** `cancelOrder` · `updateStatus` *(guarded)* · `fulfillmentStatus` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `cancelOrder` → `OrderCancelled` ⇒ **cancelled** (terminal)
+- `updateStatus` *(guarded)* → `OrderProcessing` ⇒ *stays* · `OrderPartiallyShipped` ⇒ `partially_shipped` · `OrderShipped` ⇒ `shipped` · `OrderDelivered` ⇒ `delivered` · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
+- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ `partially_shipped` · `FulfillmentShipped` ⇒ `shipped` · `FulfillmentDelivered` ⇒ `delivered`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -433,13 +525,19 @@ No fulfiller resolved — the order waits for manual handling (admin status move
 | `event: OrderRefunded` | ⇒ refunded |  |
 | `event: OrderReturned` | ⇒ returned |  |
 | `event: OrderCompleted` | ⇒ complete |  |
-| `event: *` | `processing` |  |
+| `event: *` | `processing` | falls through: `FulfillmentApplied` |
 
 **Timeout:** 365 days
 
 ### State: `partially_shipped`
 
-**Accepts:** `cancelOrder` · `updateStatus` *(guarded)* · `fulfillmentStatus` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `cancelOrder` → `OrderCancelled` ⇒ **cancelled** (terminal)
+- `updateStatus` *(guarded)* → `OrderProcessing` ⇒ `processing` · `OrderPartiallyShipped` ⇒ *stays* · `OrderShipped` ⇒ `shipped` · `OrderDelivered` ⇒ `delivered` · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
+- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ *stays* · `FulfillmentShipped` ⇒ `shipped` · `FulfillmentDelivered` ⇒ `delivered`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -455,13 +553,19 @@ No fulfiller resolved — the order waits for manual handling (admin status move
 | `event: OrderRefunded` | ⇒ refunded |  |
 | `event: OrderReturned` | ⇒ returned |  |
 | `event: OrderCompleted` | ⇒ complete |  |
-| `event: *` | `partially_shipped` |  |
+| `event: *` | `partially_shipped` | falls through: `FulfillmentApplied` |
 
 **Timeout:** 365 days
 
 ### State: `shipped`
 
-**Accepts:** `cancelOrder` · `updateStatus` *(guarded)* · `fulfillmentStatus` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `cancelOrder` → `OrderCancelled` ⇒ **cancelled** (terminal)
+- `updateStatus` *(guarded)* → `OrderProcessing` ⇒ `processing` · `OrderPartiallyShipped` ⇒ `partially_shipped` · `OrderShipped` ⇒ *stays* · `OrderDelivered` ⇒ `delivered` · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
+- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ *stays* · `FulfillmentShipped` ⇒ *stays* · `FulfillmentDelivered` ⇒ `delivered`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -476,7 +580,7 @@ No fulfiller resolved — the order waits for manual handling (admin status move
 | `event: OrderRefunded` | ⇒ refunded |  |
 | `event: OrderReturned` | ⇒ returned |  |
 | `event: OrderCompleted` | ⇒ complete |  |
-| `event: *` | `shipped` |  |
+| `event: *` | `shipped` | falls through: `FulfillmentApplied`, `FulfillmentPartiallyShipped` |
 
 **Timeout:** 365 days
 
@@ -487,7 +591,14 @@ Delivered — post-delivery lifecycle (feedback, refunds, returns). An admin
 refund and trues up tax exactly (handles the case where partials came first).
 Timeouts are ignored (no `onTimeout`): the demo has no return-window auto-close.
 
-**Accepts:** `submitFeedback` · `updateStatus` *(guarded)* · `refundOrder` *(guarded)* · `requestReturn` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `submitFeedback` → `FeedbackSubmitted` ⇒ **complete** (terminal)
+- `updateStatus` *(guarded)* → *(no events — idempotent no-op)*
+- `refundOrder` *(guarded)* → `Refunded` ⇒ *stays* · `OrderRefunded` ⇒ **refunded** (terminal)
+- `requestReturn` → `ReturnRequested` ⇒ `return_requested`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
@@ -513,7 +624,12 @@ A return has been requested on a delivered order. `confirmReturn` issues the ref
 and finishes the order as `returned`; `denyReturn` clears the request and drops back
 to `delivered`. Timeouts are ignored — the demo has no review-SLA auto-close.
 
-**Accepts:** `confirmReturn` *(guarded)* · `denyReturn` — any other command is rejected.
+**Accepts** (each command → the events it can emit ⇒ where each leads):
+
+- `confirmReturn` *(guarded)* → `ReturnConfirmed` ⇒ **returned** (terminal)
+- `denyReturn` → `ReturnDenied` ⇒ `delivered`
+
+Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|

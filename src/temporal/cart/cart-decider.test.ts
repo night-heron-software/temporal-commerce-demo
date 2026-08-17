@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 // entries are exercised directly in addition to the assembled dispatchers.
 import {
   decide,
+  deriveRoutes,
   evolve,
   cartDecider,
   addItemBlock,
@@ -22,6 +23,7 @@ import {
 } from './states';
 import type { CartEvent, EnrichedCartCommand } from './states';
 import type { CartDetails, CartWorkflowContext, CheckoutWorkflowResult } from './types';
+import { terminal } from '../framework';
 
 // ── Builders ────────────────────────────────────────────────────────────────
 function makeCart(overrides: Partial<CartDetails> = {}): CartDetails {
@@ -593,5 +595,91 @@ describe('command blocks — one structure per command', () => {
     expect(next.cart.checkout?.error).toBe('declined');
     expect(next.checkoutWorkflowId).toBeNull();
     expect(s.checkoutWorkflowId).toBe('c-1'); // input untouched
+  });
+});
+
+// ==================
+// deriveRoutes (ADR-0026, ported from mono #253) — per-state route tables derived from
+// block declarations. The laws are load-time: a violation cannot reach a worker.
+// ==================
+
+describe('deriveRoutes — the three laws', () => {
+  it('shared routed events merge when every emitter declares the same destination', () => {
+    // CartAbandoned is declared by three blocks; CheckoutEntered by one. Value-equal
+    // duplicates are the premise: an event's destination is a machine-global fact.
+    expect(
+      deriveRoutes({
+        updateQuantity: updateQuantityBlock,
+        removeItem: removeItemBlock,
+        expireCart: expireCartBlock,
+        beginCheckout: beginCheckoutBlock,
+      }),
+    ).toEqual({ CartAbandoned: terminal('abandoned'), CheckoutEntered: 'checkout' });
+  });
+
+  it('derives the ACTUAL state tables equal to the old hand-written literals (port no-op proof)', () => {
+    // The port's equivalence pin: what deriveRoutes produces for each state's real commands is
+    // exactly what the deleted literal said. Kept permanently here (the mono deleted its
+    // transitional equivalents at the flip; this one doubles as the port record).
+    expect(
+      deriveRoutes(
+        {
+          addItem: addItemBlock,
+          updateQuantity: updateQuantityBlock,
+          removeItem: removeItemBlock,
+          applyCoupon: applyCouponBlock,
+          linkUser: linkUserBlock,
+          expireCart: expireCartBlock,
+          beginCheckout: beginCheckoutBlock,
+        },
+        { '*': '__self' as never },
+      ),
+    ).toEqual({
+      CheckoutEntered: 'checkout',
+      CartAbandoned: terminal('abandoned'),
+      '*': '__self',
+    });
+    expect(
+      deriveRoutes(
+        {
+          addItem: addItemBlock,
+          updateQuantity: updateQuantityBlock,
+          removeItem: removeItemBlock,
+          applyCoupon: applyCouponBlock,
+          linkUser: linkUserBlock,
+          beginCheckout: {},
+          submitStarted: submitStartedBlock,
+          submitAborted: submitAbortedBlock,
+          checkoutCompleted: checkoutCompletedBlock,
+          checkoutTimedOut: checkoutTimedOutBlock,
+        },
+        { '*': '__self' as never },
+      ),
+    ).toEqual({
+      CheckoutDisowned: 'active',
+      CheckoutFailed: 'active',
+      CartCompleted: terminal('completed'),
+      CartAbandoned: terminal('abandoned'),
+      '*': '__self',
+    });
+  });
+
+  it('throws when two blocks give one event different destinations', () => {
+    expect(() =>
+      deriveRoutes({
+        a: { routes: { CheckoutEntered: 'checkout' } },
+        b: { routes: { CheckoutEntered: 'active' } },
+      }),
+    ).toThrow(/two destinations in one state/);
+  });
+
+  it('throws when extras try to REDIRECT rather than weaken to SELF', () => {
+    expect(() =>
+      deriveRoutes({ beginCheckout: beginCheckoutBlock }, { CheckoutEntered: 'active' }),
+    ).toThrow(/may only weaken to SELF/);
+  });
+
+  it('throws when a state with commands derives an empty table', () => {
+    expect(() => deriveRoutes({ beginCheckout: {} })).toThrow(/empty route table/);
   });
 });

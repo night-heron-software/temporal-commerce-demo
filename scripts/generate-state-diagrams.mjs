@@ -558,12 +558,34 @@ function isMachineStateCall(call) {
  * distinct route target (like a conditional's branches). Effects attach their awaited
  * calls to the matching event's edge as finalize activities.
  */
+/**
+ * Resolve a named property's initializer inside an object literal to an object literal —
+ * following an identifier (`routes: sharedRoutes`) or a member access on a block
+ * (`routes: updateStatusBlock.routes`), the ADR-0026 handler-override shape.
+ * (Ported from mono #253.)
+ */
+function propObjectLiteral(obj, propKey, decls) {
+  if (!obj || !ts.isObjectLiteralExpression(obj)) return null;
+  for (const p of obj.properties) {
+    if (propName(p) !== propKey || !ts.isPropertyAssignment(p)) continue;
+    const v = unwrap(p.initializer);
+    const direct = resolveToObj(v, decls);
+    if (direct) return direct;
+    if (ts.isPropertyAccessExpression(v) && ts.isIdentifier(v.expression)) {
+      const owner = resolveToObj(v.expression, decls);
+      if (owner) return propObjectLiteral(owner, v.name.text, decls);
+    }
+  }
+  return null;
+}
+
 function machineStateFromDef(defObj, decls, _src) {
   const edges = [];
   const commands = [];
   let timeout = null;
   let transitional = false;
   let routeObj = null;
+  let deriveCall = null;
   let commandsObj = null;
   let effectsObj = null;
   let onTimeoutNode = null;
@@ -572,8 +594,20 @@ function machineStateFromDef(defObj, decls, _src) {
     const key = propName(p);
     if (!key || !ts.isPropertyAssignment(p)) continue;
     const v = unwrap(p.initializer);
-    if (key === 'route') routeObj = resolveToObj(v, decls);
-    else if (key === 'commands') commandsObj = resolveToObj(v, decls);
+    if (key === 'route') {
+      routeObj = resolveToObj(v, decls);
+      // ADR-0026 (ported from mono #253): `route: deriveRoutes(commands, extras?)` — the table
+      // is derived from the blocks' `routes` declarations. Read those declarations directly;
+      // they are object literals, exactly as statically visible as the old hand-written table.
+      if (
+        !routeObj &&
+        ts.isCallExpression(v) &&
+        ts.isIdentifier(v.expression) &&
+        v.expression.text === 'deriveRoutes'
+      ) {
+        deriveCall = v;
+      }
+    } else if (key === 'commands') commandsObj = resolveToObj(v, decls);
     else if (key === 'effects') effectsObj = resolveToObj(v, decls);
     else if (key === 'onTimeout') onTimeoutNode = v;
     else if (key === 'timeout' && ts.isStringLiteral(v)) timeout = v.text;
@@ -581,26 +615,14 @@ function machineStateFromDef(defObj, decls, _src) {
       transitional = true;
   }
 
-  if (routeObj) {
-    for (const p of routeObj.properties) {
-      if (!ts.isPropertyAssignment(p)) continue;
-      const t = evalTarget(p.initializer, decls);
-      if (t)
-        edges.push({
-          // String-literal keys (the `'*'` fallback) keep their quotes in propName — strip.
-          on: propName(p).replace(/^'(.*)'$/, '$1'),
-          kind: 'event',
-          to: t,
-          prepareActivities: [],
-          finalizeActivities: [],
-          conditions: [],
-          signalKinds: [],
-        });
-    }
-  }
+  // If the route is derived, the state's commands are deriveRoutes' first argument —
+  // resolve from there when the def's own `commands:` was not already resolvable.
+  if (deriveCall && !commandsObj) commandsObj = resolveToObj(deriveCall.arguments[0], decls);
+
+  // Shared handler groups arrive as spreads (`...lifecycleCommands`) — resolve them.
+  // (Needed before route derivation: derived tables are built FROM the handlers.)
+  const commandProps = [];
   if (commandsObj) {
-    // Shared handler groups arrive as spreads (`...lifecycleCommands`) — resolve them.
-    const commandProps = [];
     for (const p of commandsObj.properties) {
       if (ts.isSpreadAssignment(p) && ts.isIdentifier(p.expression)) {
         const spreadObj = resolveToObj(p.expression, decls);
@@ -609,21 +631,102 @@ function machineStateFromDef(defObj, decls, _src) {
       }
       commandProps.push(p);
     }
-    for (const p of commandProps) {
-      const name = propName(p);
-      if (!name) continue;
-      const handlerObj = resolveToObj(propValueNode(p, decls), decls);
-      const prepareBody = handlerObj ? findPropBody(handlerObj, 'prepare', decls) : null;
-      const guarded = !!(
-        handlerObj && handlerObj.properties.some((hp) => propName(hp) === 'guard')
-      );
-      const prepareActivities = extractAwaitedCallsInBody(prepareBody);
-      commands.push({
-        name,
-        ...(guarded ? { guarded: true } : {}),
-        ...(prepareActivities.length ? { prepareActivities } : {}),
-      });
+  }
+
+  const pushRouteEdge = (rawName, target) => {
+    if (!target) return;
+    // String-literal keys (the `'*'` fallback) keep their quotes in propName — strip.
+    const on = rawName.replace(/^'(.*)'$/, '$1');
+    const existing = edges.find((e) => e.on === on && e.kind === 'event');
+    if (existing) {
+      existing.to = target; // literal/derived merge: last write wins (deriveRoutes forbids conflicts)
+      return;
     }
+    edges.push({
+      on,
+      kind: 'event',
+      to: target,
+      prepareActivities: [],
+      finalizeActivities: [],
+      conditions: [],
+      signalKinds: [],
+    });
+  };
+
+  if (routeObj) {
+    for (const p of routeObj.properties) {
+      if (!ts.isPropertyAssignment(p)) continue;
+      pushRouteEdge(propName(p), evalTarget(p.initializer, decls));
+    }
+  } else if (deriveCall) {
+    // Mirror deriveRoutes: union of each handler's `routes` declarations…
+    for (const p of commandProps) {
+      const handlerObj = resolveToObj(propValueNode(p, decls), decls);
+      const routesObj = handlerObj ? propObjectLiteral(handlerObj, 'routes', decls) : null;
+      if (!routesObj) continue;
+      for (const rp of routesObj.properties) {
+        if (!ts.isPropertyAssignment(rp)) continue;
+        pushRouteEdge(propName(rp), evalTarget(rp.initializer, decls));
+      }
+    }
+    // …then the extras literal (wildcard / weaken-to-SELF), same reading as a route table.
+    const extrasObj = deriveCall.arguments[1] ? resolveToObj(deriveCall.arguments[1], decls) : null;
+    if (extrasObj) {
+      for (const rp of extrasObj.properties) {
+        if (!ts.isPropertyAssignment(rp)) continue;
+        pushRouteEdge(propName(rp), evalTarget(rp.initializer, decls));
+      }
+    }
+  }
+
+  for (const p of commandProps) {
+    const name = propName(p);
+    if (!name) continue;
+    const handlerObj = resolveToObj(propValueNode(p, decls), decls);
+    const prepareBody = handlerObj ? findPropBody(handlerObj, 'prepare', decls) : null;
+    const guarded = !!(handlerObj && handlerObj.properties.some((hp) => propName(hp) === 'guard'));
+    const prepareActivities = extractAwaitedCallsInBody(prepareBody);
+
+    // Per-command journey (ported from mono #253): the events this command can emit are its
+    // block's evolve-map KEYS (the CommandBlock convention: the block is the whole story),
+    // each joined against this state's route table — explicit entry, wildcard fall-through,
+    // or unrouted (both of the latter mean "stays"). `declared` records the block's own
+    // `routes` target where present, so drift between a declaration and a hand-written
+    // table is visible data (and CI-checkable).
+    const evolveObj = handlerObj ? propObjectLiteral(handlerObj, 'evolve', decls) : null;
+    const routesObj = handlerObj ? propObjectLiteral(handlerObj, 'routes', decls) : null;
+    const declaredTargets = {};
+    if (routesObj) {
+      for (const rp of routesObj.properties) {
+        if (!ts.isPropertyAssignment(rp)) continue;
+        const t = evalTarget(rp.initializer, decls);
+        if (t) declaredTargets[propName(rp).replace(/^'(.*)'$/, '$1')] = t;
+      }
+    }
+    const emits = [];
+    if (evolveObj) {
+      for (const ep of evolveObj.properties) {
+        const ev = propName(ep);
+        if (!ev) continue;
+        const explicit = edges.find((e) => e.on === ev && e.kind === 'event');
+        const wildcard = edges.find((e) => e.on === '*' && e.kind === 'event');
+        const via = explicit ? 'explicit' : wildcard ? 'wildcard' : 'unrouted';
+        const to = explicit ? explicit.to : wildcard ? wildcard.to : '__self';
+        emits.push({
+          event: ev,
+          to,
+          via,
+          ...(declaredTargets[ev] !== undefined ? { declared: declaredTargets[ev] } : {}),
+        });
+      }
+    }
+
+    commands.push({
+      name,
+      ...(guarded ? { guarded: true } : {}),
+      ...(prepareActivities.length ? { prepareActivities } : {}),
+      ...(emits.length ? { emits } : {}),
+    });
   }
   if (effectsObj) {
     for (const p of effectsObj.properties) {
@@ -1111,17 +1214,31 @@ function stateSection(s) {
   }
   if (s.commands && s.commands.length > 0) {
     lines.push('');
-    lines.push(
-      `**Accepts:** ${s.commands
-        .map((c) => {
-          const marks = [
-            c.guarded ? 'guarded' : null,
-            c.prepareActivities?.length ? `prepare: ${c.prepareActivities.join(', ')}` : null,
-          ].filter(Boolean);
-          return `\`${c.name}\`${marks.length ? ` *(${marks.join('; ')})*` : ''}`;
+    lines.push('**Accepts** (each command → the events it can emit ⇒ where each leads):');
+    lines.push('');
+    for (const c of s.commands) {
+      const marks = [
+        c.guarded ? 'guarded' : null,
+        c.prepareActivities?.length ? `prepare: ${c.prepareActivities.join(', ')}` : null,
+      ].filter(Boolean);
+      const head = `\`${c.name}\`${marks.length ? ` *(${marks.join('; ')})*` : ''}`;
+      const journey = (c.emits ?? [])
+        .map((em) => {
+          // `__self` is this graph's stay sentinel (the demo does not substitute SELF with
+          // the state name the way the mono's parser does — the raw sentinel IS the demo's
+          // graph convention, and changing it would break the port's edge-triple invariant).
+          const dest = em.to.startsWith('__terminal:')
+            ? `**${em.to.replace('__terminal:', '')}** (terminal)`
+            : em.to === s.name || em.to === '__self'
+              ? '*stays*'
+              : `\`${em.to}\``;
+          return `\`${em.event}\` ⇒ ${dest}`;
         })
-        .join(' · ')} — any other command is rejected.`,
-    );
+        .join(' · ');
+      lines.push(`- ${head}${journey ? ` → ${journey}` : ' → *(no events — idempotent no-op)*'}`);
+    }
+    lines.push('');
+    lines.push('Any other command is rejected.');
   }
   if (s.edges.length > 0) {
     lines.push('');
@@ -1137,7 +1254,22 @@ function stateSection(s) {
         ? `⇒ ${to.replace('__terminal:', '')}`
         : `\`${to}\``;
       const trigger = triggerLabel(edge);
-      const notes = formatNotes(edge);
+      let notes = formatNotes(edge);
+      if (edge.on === '*' && s.commands?.length) {
+        // Make the wildcard's cargo visible: the emitted events that actually fall
+        // through it in this state (they have no explicit route entry).
+        const fallers = [
+          ...new Set(
+            s.commands.flatMap((c) =>
+              (c.emits ?? []).filter((em) => em.via === 'wildcard').map((em) => em.event),
+            ),
+          ),
+        ];
+        if (fallers.length) {
+          const label = `falls through: ${fallers.map((f) => `\`${f}\``).join(', ')}`;
+          notes = notes ? `${notes}; ${label}` : label;
+        }
+      }
       lines.push(`| ${trigger} | ${dest} | ${notes} |`);
     }
   }
@@ -1581,7 +1713,7 @@ function buildGraph(machines, crossEdges) {
     // owning package and is NOT unique when a package owns two machines), states may carry
     // `commands` (the decider-native surface's accepted inputs, with guard/prepare info),
     // and transition `kind` may be 'event' (routed on an emitted event, not a transport).
-    schemaVersion: 2,
+    schemaVersion: 3,
     generator: 'scripts/generate-state-diagrams.mjs',
     machines: machines.map(({ machine, rel, initialState }) => {
       const terminals = new Set();

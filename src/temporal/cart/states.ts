@@ -62,7 +62,14 @@ import type {
   CheckoutWorkflowResult,
 } from './types';
 import { defineMachine, reject, terminal, SELF, workflowCorrelationId } from '../framework';
-import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
+import type {
+  EffectsMap,
+  EventRoute,
+  MachineDecider,
+  Rejection,
+  Self,
+  StateRegistry,
+} from '../framework';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 
 // ==================
@@ -253,11 +260,25 @@ type EvolveMap = {
   ) => CartWorkflowContext;
 };
 
-/** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
+/** Where an event may take the machine: a state name, a terminal, or an explicit stay. */
+type RouteTarget = CartStateName | `__terminal:${string}` | Self;
+
+/**
+ * A block's routes — keyed by EVENT TYPE, like its evolve map (ADR-0026, ported from mono #253).
+ * An event's destination is a machine-global fact (audited: no event in any machine routes to two
+ * different targets by state), so the block that emits an event declares where it goes, and each
+ * state's route table is DERIVED from its commands via `deriveRoutes` below. Absence means
+ * "stays" (the unrouted/`'*'` behavior); an explicit `SELF` is allowed where staying put is
+ * itself worth stating.
+ */
+type RouteMap = { [E in CartEvent['type']]?: RouteTarget };
+
+/** One command's whole story: refusal, I/O, decision, destination, and the evolve for what it emits. */
 export interface CommandBlock<K extends CartCommand['type']> {
   guard?: (context: Readonly<CartWorkflowContext>, command: Wire<K>) => Rejection | void;
   prepare?: (context: Readonly<CartWorkflowContext>, command: Wire<K>) => Promise<object | void>;
   decide: (command: Enriched<K>, context: Readonly<CartWorkflowContext>) => CartEvent[];
+  routes?: RouteMap;
   evolve?: EvolveMap;
 }
 
@@ -389,6 +410,7 @@ export const updateQuantityBlock: CommandBlock<'updateQuantity'> = {
     ];
   },
 
+  routes: { CartAbandoned: terminal('abandoned') },
   evolve: {
     // Substitute the one line, then re-total; an unknown line leaves the context unchanged.
     ItemQuantityChanged: (context, event) => {
@@ -433,6 +455,7 @@ export const removeItemBlock: CommandBlock<'removeItem'> = {
       : [{ type: 'ItemRemoved', lineItemId: command.lineItemId, at }];
   },
 
+  routes: { CartAbandoned: terminal('abandoned') },
   evolve: {
     ItemRemoved: evolveItemRemoved,
     CartAbandoned: evolveCartAbandoned,
@@ -549,6 +572,7 @@ export const beginCheckoutBlock: CommandBlock<'beginCheckout'> = {
     ];
   },
 
+  routes: { CheckoutEntered: 'checkout' },
   evolve: {
     CheckoutEntered: (context, event) => ({
       ...context,
@@ -573,6 +597,7 @@ export const beginCheckoutBlock: CommandBlock<'beginCheckout'> = {
 export const expireCartBlock: CommandBlock<'expireCart'> = {
   decide: (command, _context) => [{ type: 'CartAbandoned', at: command.at }],
 
+  routes: { CartAbandoned: terminal('abandoned') },
   evolve: {
     CartAbandoned: evolveCartAbandoned,
   },
@@ -587,6 +612,7 @@ export const checkoutTimedOutBlock: CommandBlock<'checkoutTimedOut'> = {
   decide: (command, context) =>
     context.cart.status === 'checkout' ? [{ type: 'CheckoutDisowned', at: command.at }] : [],
 
+  routes: { CheckoutDisowned: 'active' },
   evolve: {
     CheckoutDisowned: (context, _event) => ({
       ...context,
@@ -635,6 +661,7 @@ export const checkoutCompletedBlock: CommandBlock<'checkoutCompleted'> = {
       : [{ type: 'CheckoutFailed', error: r.error || 'Checkout failed', at }];
   },
 
+  routes: { CartCompleted: terminal('completed'), CheckoutFailed: 'active' },
   evolve: {
     // Aliasing the event's finalState into `checkout` is not a live hazard: events are
     // transient per ADR-0003, never persisted or shared.
@@ -717,6 +744,57 @@ type AnyEvolveEntry = (
  * above) — two blocks inlining different code for one event throws here, at module
  * load, so shared events cannot silently diverge.
  */
+/**
+ * Derive a state's route table from its commands' declared routes (ADR-0026, ported from mono
+ * #253 / `91e08773`), plus optional extras. Three laws, enforced at MODULE LOAD so a violation
+ * cannot reach a worker:
+ *
+ *   1. one event, one destination — two blocks in one state disagreeing about where an event
+ *      goes is a design contradiction, not a merge;
+ *   2. extras may only weaken to SELF — a state can refuse to move, never redirect an event
+ *      somewhere its block did not declare;
+ *   3. a state with commands must not derive an empty table — the symptom of a handler-override
+ *      literal that dropped its block's routes.
+ */
+export function deriveRoutes(
+  commands: Record<string, { routes?: RouteMap }>,
+  extras?: RouteMap & { '*'?: Self },
+): EventRoute<CartStateName, CartEvent> {
+  const merged: Record<string, RouteTarget> = {};
+  for (const [commandType, block] of Object.entries(commands)) {
+    for (const [eventType, target] of Object.entries(block.routes ?? {}) as [
+      string,
+      RouteTarget,
+    ][]) {
+      const existing = merged[eventType];
+      if (existing !== undefined && existing !== target) {
+        throw new Error(
+          `cart route assembly: event '${eventType}' has two destinations in one state ` +
+            `('${String(existing)}' vs '${String(target)}' via '${commandType}') — ` +
+            'an event has ONE machine-global destination; fix the blocks',
+        );
+      }
+      merged[eventType] = target;
+    }
+  }
+  for (const [eventType, target] of Object.entries(extras ?? {}) as [string, RouteTarget][]) {
+    if (eventType !== '*' && target !== SELF) {
+      throw new Error(
+        `cart route extras: '${eventType}' may only weaken to SELF — ` +
+          'a state can refuse to move, never redirect; change the block instead',
+      );
+    }
+    merged[eventType] = target;
+  }
+  if (Object.keys(merged).length === 0 && Object.keys(commands).length > 0) {
+    throw new Error(
+      'cart route assembly: a state with commands derived an empty route table — ' +
+        "a handler-override literal probably dropped its block's routes",
+    );
+  }
+  return merged as EventRoute<CartStateName, CartEvent>;
+}
+
 function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
   const merged: EvolveMap = {};
   for (const block of blockList) {
@@ -861,21 +939,22 @@ const itemEditNudges: EffectsMap<CartEvent, CartWorkflowContext> = {
 // assembled from; the framework reads only their `guard`/`prepare`.
 // ==================
 
+const activeCommands = {
+  addItem: addItemBlock,
+  updateQuantity: updateQuantityBlock,
+  removeItem: removeItemBlock,
+  applyCoupon: applyCouponBlock,
+  linkUser: linkUserBlock,
+  expireCart: expireCartBlock,
+  beginCheckout: beginCheckoutBlock,
+};
+
 const active = m.state('active', {
-  commands: {
-    addItem: addItemBlock,
-    updateQuantity: updateQuantityBlock,
-    removeItem: removeItemBlock,
-    applyCoupon: applyCouponBlock,
-    linkUser: linkUserBlock,
-    expireCart: expireCartBlock,
-    beginCheckout: beginCheckoutBlock,
-  },
-  route: {
-    CheckoutEntered: 'checkout',
-    CartAbandoned: terminal('abandoned'),
-    '*': SELF,
-  },
+  commands: activeCommands,
+  // Derived, not hand-written (ADR-0026): each block declares where its events lead, and this
+  // table is their union. Proof-of-no-op at port time: the derived table equals the old literal
+  // exactly — CheckoutEntered→checkout, CartAbandoned→terminal('abandoned'), '*'→SELF.
+  route: deriveRoutes(activeCommands, { '*': SELF }),
   timeout: '30 days',
   onTimeout: () => ({ type: 'expireCart' }),
 });
@@ -886,29 +965,29 @@ const active = m.state('active', {
 // as signal-mapped commands.
 // ==================
 
+const checkoutCommands = {
+  addItem: addItemBlock,
+  updateQuantity: updateQuantityBlock,
+  removeItem: removeItemBlock,
+  applyCoupon: applyCouponBlock,
+  linkUser: linkUserBlock,
+  // Idempotent no-op mid-checkout: deliberately NOT the beginCheckout block — no
+  // guard, no prepare → no child id → the decider emits nothing; the caller still
+  // gets the current cart back. It declares no routes, so CheckoutEntered is naturally
+  // ABSENT from this state's derived table — visible by absence, which is the point.
+  beginCheckout: {},
+  submitStarted: submitStartedBlock,
+  submitAborted: submitAbortedBlock,
+  checkoutCompleted: checkoutCompletedBlock,
+  checkoutTimedOut: checkoutTimedOutBlock,
+};
+
 const checkout = m.state('checkout', {
-  commands: {
-    addItem: addItemBlock,
-    updateQuantity: updateQuantityBlock,
-    removeItem: removeItemBlock,
-    applyCoupon: applyCouponBlock,
-    linkUser: linkUserBlock,
-    // Idempotent no-op mid-checkout: deliberately NOT the beginCheckout block — no
-    // guard, no prepare → no child id → the decider emits nothing; the caller still
-    // gets the current cart back.
-    beginCheckout: {},
-    submitStarted: submitStartedBlock,
-    submitAborted: submitAbortedBlock,
-    checkoutCompleted: checkoutCompletedBlock,
-    checkoutTimedOut: checkoutTimedOutBlock,
-  },
-  route: {
-    CheckoutDisowned: 'active',
-    CheckoutFailed: 'active',
-    CartCompleted: terminal('completed'),
-    CartAbandoned: terminal('abandoned'),
-    '*': SELF,
-  },
+  commands: checkoutCommands,
+  // Derived (ADR-0026); equals the old literal exactly — CheckoutDisowned→active,
+  // CheckoutFailed→active, CartCompleted→terminal('completed'),
+  // CartAbandoned→terminal('abandoned'), '*'→SELF.
+  route: deriveRoutes(checkoutCommands, { '*': SELF }),
   effects: itemEditNudges,
   timeout: '1 hour',
   onTimeout: () => ({ type: 'checkoutTimedOut' }),
