@@ -81,8 +81,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       } else {
         setError('Failed to add item to cart. Please try again.');
       }
-    } catch {
-      setError('Unable to connect to cart service. Please try again.');
+    } catch (err) {
+      setError(messageForShopper(err));
     } finally {
       setLoading(false);
     }
@@ -92,6 +92,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
    * Adopt an edit result: an abandoned/emptied cart (its workflow reached terminal)
    * or a missing result clears local cart state; otherwise the new cart is applied.
    */
+  /**
+   * What to put in front of the shopper when a cart action throws (mono #242).
+   *
+   * A real sentence from the domain beats a generic one every time; the generic line is reserved
+   * for the case where there genuinely is no message — which is what a transport failure looks
+   * like. `executeCartUpdate` now unwraps the decider's own sentence out of Temporal's
+   * `WorkflowUpdateFailedError`, so this no longer guesses from substrings — and no longer
+   * reports a deliberate refusal as a connectivity problem. (The mono's run 013: a shopper whose
+   * edit was refused with "Order is being placed — please wait" was told the service was
+   * unreachable, retried, and produced a triple charge.)
+   */
+  const messageForShopper = (err: unknown): string => {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message || /^workflow update failed/i.test(message) || /fetch failed/i.test(message)) {
+      return 'Unable to connect to cart service. Please try again.';
+    }
+    return message;
+  };
+
   const adoptEditedCart = (newCart: Awaited<ReturnType<typeof removeFromCart>>) => {
     if (newCart && newCart.status !== 'abandoned' && newCart.items.length > 0) {
       setCart(newCart);
@@ -107,8 +126,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       adoptEditedCart(await removeFromCart(cartId, lineItemId));
-    } catch {
-      setError('Unable to connect to cart service. Please try again.');
+    } catch (err) {
+      setError(messageForShopper(err));
     } finally {
       setLoading(false);
     }
@@ -120,8 +139,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       adoptEditedCart(await updateItemQuantity(cartId, lineItemId, quantity));
-    } catch {
-      setError('Unable to connect to cart service. Please try again.');
+    } catch (err) {
+      setError(messageForShopper(err));
     } finally {
       setLoading(false);
     }

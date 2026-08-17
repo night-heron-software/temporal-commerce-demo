@@ -18,6 +18,7 @@ import {
   buildWorkflowStartOptions,
   DEMO_STORE_ID,
 } from '@/temporal/contracts/constants';
+import { domainErrorOf, domainMessageOf } from './cart-actions-outcome';
 
 const log = createLogger('cart-actions');
 
@@ -126,7 +127,17 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
       const handle = client.workflow.getHandle(workflowId);
       result = await handle.executeUpdate(updateDef, { args: args as unknown as [any, ...any[]] });
     }
-    log.info({ correlationId: cartId, cartId, command, ok: true }, 'cart action done');
+    const domainError = domainErrorOf(result);
+    if (domainError) {
+      // NOT `ok: true`. The transport succeeded; the domain refused (mono #242 — its run 013
+      // logged a clean journey around a triple charge because this line couldn't tell).
+      log.warn(
+        { correlationId: cartId, cartId, command, ok: false, domainError },
+        'cart action reported a domain failure',
+      );
+    } else {
+      log.info({ correlationId: cartId, cartId, command, ok: true }, 'cart action done');
+    }
     return result;
   } catch (e) {
     const reason = classifyUpdateError(e);
@@ -134,10 +145,13 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
       log.info({ correlationId: cartId, cartId, command, ok: false, reason }, 'cart action done');
       return null;
     }
+    const domainReason = domainMessageOf(e);
     log.warn(
-      { correlationId: cartId, cartId, command, err: (e as Error).message },
+      { correlationId: cartId, cartId, command, err: domainReason ?? (e as Error).message },
       'cart action failed',
     );
+    // Re-throw carrying the DOMAIN's sentence so the UI can show it instead of guessing.
+    if (domainReason) throw new Error(domainReason, { cause: e });
     throw e;
   }
 }
@@ -162,7 +176,15 @@ async function runCheckoutUpdate<TReturn, TArgs extends any[]>(
     const value = await handle.executeUpdate(updateDef, {
       args: args as unknown as [any, ...any[]],
     });
-    log.info({ checkoutWorkflowId, action, ok: true }, 'checkout action done');
+    const domainError = domainErrorOf(value);
+    if (domainError) {
+      log.warn(
+        { checkoutWorkflowId, action, ok: false, domainError },
+        'checkout action reported a domain failure',
+      );
+    } else {
+      log.info({ checkoutWorkflowId, action, ok: true }, 'checkout action done');
+    }
     return { ok: true, value: value as TReturn };
   } catch (e) {
     const reason = classifyUpdateError(e);
@@ -170,7 +192,12 @@ async function runCheckoutUpdate<TReturn, TArgs extends any[]>(
       log.info({ checkoutWorkflowId, action, ok: false, reason }, 'checkout action done');
       return { ok: false, reason };
     }
-    log.warn({ checkoutWorkflowId, action, err: (e as Error).message }, 'checkout action failed');
+    const domainReason = domainMessageOf(e);
+    log.warn(
+      { checkoutWorkflowId, action, err: domainReason ?? (e as Error).message },
+      'checkout action failed',
+    );
+    if (domainReason) throw new Error(domainReason, { cause: e });
     throw e;
   }
 }
