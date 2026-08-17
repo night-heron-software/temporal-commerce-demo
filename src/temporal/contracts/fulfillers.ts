@@ -281,6 +281,17 @@ export interface FulfillerStatusUpdate {
     trackingUrl?: string;
     items: Array<{ sku: string; quantity: number }>;
   };
+  /**
+   * Why the fulfiller failed or cancelled the order, in the fulfiller's own words. Meaningful
+   * only with `status: 'failed' | 'cancelled'`.
+   *
+   * Ported from mono #281 (its #269): this shape is what an external fulfiller's webhook sends,
+   * and it had no such field while `DynamicFulfillerStatusUpdate` below has had `failureReason`
+   * all along. The asymmetry meant a real vendor rejection reached `statusOutcome` with nothing
+   * to carry, so the failure event landed with no message and the operator saw an unexplained
+   * failure. Free text, deliberately — the specifics are the vendor's to state.
+   */
+  failureReason?: string;
   timestamp: string;
 }
 

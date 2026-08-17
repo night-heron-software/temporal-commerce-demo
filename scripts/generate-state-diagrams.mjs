@@ -566,17 +566,59 @@ function isMachineStateCall(call) {
  */
 function propObjectLiteral(obj, propKey, decls) {
   if (!obj || !ts.isObjectLiteralExpression(obj)) return null;
+  let found = null;
   for (const p of obj.properties) {
+    // Look THROUGH a spread (`{ ...updateStatusBlock, enrich }`) — ported from mono #270.
+    // Without it, a handler that overrides one phase of a block reported no `evolve`, and a
+    // command that can force many statuses rendered as "(no events — idempotent no-op)" — the
+    // diagram stating the exact opposite of the truth. Precedence is JS's: later wins, and an
+    // OWN assignment replaces what a preceding spread contributed even when it is unresolvable
+    // (returning null then, rather than falling back to the spread — a handler that
+    // deliberately overrides `evolve` must not be reported as the block's).
+    if (ts.isSpreadAssignment(p)) {
+      const spreadObj = resolveToObj(unwrap(p.expression), decls);
+      if (spreadObj) {
+        const fromSpread = propObjectLiteral(spreadObj, propKey, decls);
+        if (fromSpread) found = fromSpread;
+      }
+      continue;
+    }
     if (propName(p) !== propKey || !ts.isPropertyAssignment(p)) continue;
     const v = unwrap(p.initializer);
     const direct = resolveToObj(v, decls);
-    if (direct) return direct;
+    if (direct) {
+      found = direct;
+      continue;
+    }
+    found = null;
     if (ts.isPropertyAccessExpression(v) && ts.isIdentifier(v.expression)) {
       const owner = resolveToObj(v.expression, decls);
-      if (owner) return propObjectLiteral(owner, v.name.text, decls);
+      if (owner) found = propObjectLiteral(owner, v.name.text, decls);
     }
   }
-  return null;
+  return found;
+}
+
+/**
+ * Does this handler object carry `propKey`, directly or via a spread? (Mono #270.)
+ *
+ * Separate from `propObjectLiteral` because `guard` is a FUNCTION, not an object literal —
+ * only its presence is rendered (the `*(guarded)*` marker). A spread-form handler has no
+ * literal `guard` property of its own, so a presence test that only scanned own properties
+ * silently dropped the marker.
+ */
+function hasHandlerProp(obj, propKey, decls) {
+  if (!obj || !ts.isObjectLiteralExpression(obj)) return false;
+  let found = false;
+  for (const p of obj.properties) {
+    if (ts.isSpreadAssignment(p)) {
+      const spreadObj = resolveToObj(unwrap(p.expression), decls);
+      if (spreadObj && hasHandlerProp(spreadObj, propKey, decls)) found = true;
+      continue;
+    }
+    if (propName(p) === propKey) found = true;
+  }
+  return found;
 }
 
 function machineStateFromDef(defObj, decls, _src) {
@@ -684,7 +726,7 @@ function machineStateFromDef(defObj, decls, _src) {
     if (!name) continue;
     const handlerObj = resolveToObj(propValueNode(p, decls), decls);
     const prepareBody = handlerObj ? findPropBody(handlerObj, 'prepare', decls) : null;
-    const guarded = !!(handlerObj && handlerObj.properties.some((hp) => propName(hp) === 'guard'));
+    const guarded = hasHandlerProp(handlerObj, 'guard', decls);
     const prepareActivities = extractAwaitedCallsInBody(prepareBody);
 
     // Per-command journey (ported from mono #253): the events this command can emit are its

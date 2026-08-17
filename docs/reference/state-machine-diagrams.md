@@ -594,7 +594,7 @@ Timeouts are ignored (no `onTimeout`): the demo has no return-window auto-close.
 **Accepts** (each command → the events it can emit ⇒ where each leads):
 
 - `submitFeedback` → `FeedbackSubmitted` ⇒ **complete** (terminal)
-- `updateStatus` *(guarded)* → *(no events — idempotent no-op)*
+- `updateStatus` *(guarded)* → `OrderProcessing` ⇒ `processing` · `OrderPartiallyShipped` ⇒ `partially_shipped` · `OrderShipped` ⇒ `shipped` · `OrderDelivered` ⇒ *stays* · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
 - `refundOrder` *(guarded)* → `Refunded` ⇒ *stays* · `OrderRefunded` ⇒ **refunded** (terminal)
 - `requestReturn` → `ReturnRequested` ⇒ `return_requested`
 

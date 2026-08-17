@@ -1780,7 +1780,54 @@
             },
             {
               "name": "updateStatus",
-              "guarded": true
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "OrderProcessing",
+                  "to": "processing",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderPartiallyShipped",
+                  "to": "partially_shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderDelivered",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturnRequested",
+                  "to": "return_requested",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturned",
+                  "to": "__terminal:returned",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCompleted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderRefunded",
+                  "to": "__terminal:refunded",
+                  "via": "explicit"
+                }
+              ]
             },
             {
               "name": "refundOrder",

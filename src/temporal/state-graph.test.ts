@@ -299,4 +299,55 @@ describe('per-command journeys (ADR-0026, schemaVersion 3)', () => {
     }
     expect(missing).toEqual([]);
   });
+
+  it('a command never reports zero emissions in one state and many in another', () => {
+    // The generator's blind spot, fixed in mono #270 and ported with it: emissions derive from a
+    // handler's `evolve` map, and a state that overrides one phase of a shared block used to be
+    // spelled as a BARE literal that restates no evolve — so the generator recorded `emits: 0`
+    // and the doc rendered "(no events — idempotent no-op)" for OMS `delivered.updateStatus`, a
+    // command that can force many statuses. The signature generalises: the same command emitting
+    // many events in one state and zero in another is either this bug or a genuinely inert
+    // acceptance worth an explicit justification.
+    const INTENTIONALLY_INERT = new Map<string, string>([
+      [
+        'CART_STATES/checkout/beginCheckout',
+        'idempotent no-op mid-checkout: no guard, no prepare → no child id → emits nothing, ' +
+          'and the caller still gets the cart back (src/temporal/cart/states.ts)',
+      ],
+    ]);
+
+    const suspicious: string[] = [];
+    for (const m of graph.machines) {
+      const maxEmits = new Map<string, number>();
+      for (const s of m.states) {
+        for (const c of s.commands ?? []) {
+          maxEmits.set(c.name, Math.max(maxEmits.get(c.name) ?? 0, (c.emits ?? []).length));
+        }
+      }
+      for (const s of m.states) {
+        for (const c of s.commands ?? []) {
+          const key = `${m.id}/${s.name}/${c.name}`;
+          if (INTENTIONALLY_INERT.has(key)) continue;
+          if ((c.emits ?? []).length === 0 && (maxEmits.get(c.name) ?? 0) > 0) {
+            suspicious.push(`${key}: 0 emissions here, ${maxEmits.get(c.name)} elsewhere`);
+          }
+        }
+      }
+    }
+    expect(suspicious).toEqual([]);
+  });
+
+  it('OMS delivered.updateStatus renders its full forced-status surface', () => {
+    // The specific regression, pinned by outcome rather than by mechanism: whatever shape the
+    // handler takes, this command must not lose its events again — and the layered guard
+    // (guardDeliveredUpdateStatus, a recorded demo divergence) must survive the spread.
+    const oms = graph.machines.find((m) => m.id === 'OMS_STATES');
+    const delivered = oms?.states.find((s) => s.name === 'delivered');
+    const updateStatus = delivered?.commands?.find((c) => c.name === 'updateStatus');
+
+    expect(updateStatus, 'delivered must accept updateStatus').toBeDefined();
+    expect(updateStatus?.guarded, 'the layered guard must survive the spread').toBe(true);
+    expect(updateStatus?.emits?.length ?? 0).toBeGreaterThanOrEqual(8);
+    expect(updateStatus?.emits?.map((e) => e.event)).toContain('OrderCancelled');
+  });
 });

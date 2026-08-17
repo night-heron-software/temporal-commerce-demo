@@ -314,3 +314,60 @@ describe('command blocks — one structure per command', () => {
     expect(s.so.shipments).toBeUndefined();
   });
 });
+
+/**
+ * A fulfiller-reported failure keeps the fulfiller's words (ported from mono #281 / its #269).
+ *
+ * `FulfillerStatusUpdate` — the shape a real fulfiller's webhook sends — had no failure-reason
+ * field while `DynamicFulfillerStatusUpdate` next door has had `failureReason` all along. So the
+ * reason existed on the wire and was dropped one call short of the event that needed it:
+ * `statusOutcome` received a bare status, and the failure landed with no message.
+ *
+ * (The mono also stamps a `FulfillmentErrorCode` here; the demo has no error-code taxonomy —
+ * that half depends on unported -013 work and is recorded in the sync doc, not silently skipped.)
+ */
+describe('a fulfiller-reported failure keeps its reason (#269 port)', () => {
+  const failed = (failureReason?: string): FulfillerStatusUpdate =>
+    ({
+      fulfillerOrderId: 'ext-1',
+      status: 'failed',
+      timestamp: AT,
+      ...(failureReason ? { failureReason } : {}),
+    }) as FulfillerStatusUpdate;
+
+  it('carries the fulfiller reason through to the event and onto state', () => {
+    const events = decide(
+      { type: 'fulfillerStatus', update: failed('Artwork rejected: DPI below minimum'), at: AT },
+      makeCtx(),
+    );
+    const fail = events.find((e) => e.type === 'FulfillerOrderFailed') as
+      | { type: string; errorMessage?: string }
+      | undefined;
+    expect(fail).toBeDefined();
+    expect(fail!.errorMessage).toBe('Artwork rejected: DPI below minimum');
+
+    // …and the evolve stores it, so the projection and any operator query can read it.
+    const next = evolve(makeCtx(), fail as never);
+    expect(next.so.status).toBe('failed');
+    expect(next.so.errorMessage).toBe('Artwork rejected: DPI below minimum');
+  });
+
+  it('a failure with no prose still fails the order — silence must not soften the verdict', () => {
+    const events = decide({ type: 'fulfillerStatus', update: failed(), at: AT }, makeCtx());
+    const fail = events.find((e) => e.type === 'FulfillerOrderFailed') as
+      | { type: string; errorMessage?: string }
+      | undefined;
+    expect(fail).toBeDefined();
+    expect(fail!.errorMessage).toBeUndefined();
+  });
+
+  it('CONTROL: a non-failure status is unaffected', () => {
+    // Without this, a change that stamped a message onto every outcome would pass the tests
+    // above while polluting shipped and delivered orders.
+    const events = decide({ type: 'fulfillerStatus', update: shippedUpdate, at: AT }, makeCtx());
+    expect(events.map((e) => e.type)).toEqual(['FulfillerStatusApplied', 'ShipmentProgressed']);
+    expect(events.every((e) => (e as { errorMessage?: string }).errorMessage === undefined)).toBe(
+      true,
+    );
+  });
+});

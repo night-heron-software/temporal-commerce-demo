@@ -206,19 +206,30 @@ export function applyFulfillerUpdatePure(
   return { ...context, so };
 }
 
-/** The lifecycle outcome a fulfiller-reported status implies, as an event (or none). */
+/**
+ * The lifecycle outcome a fulfiller-reported status implies, as an event (or none).
+ *
+ * Takes the whole UPDATE rather than just its status, so a failure can carry the fulfiller's
+ * reason (ported from mono #281 / its #269). It took only the status before, which meant the
+ * reason existed on the wire and was dropped one call short of the event that needed it — the
+ * failure landed with no message and read as unexplained downstream.
+ */
 function statusOutcome(
-  status: Fulfillers.FulfillerStatusUpdate['status'],
+  update: Pick<Fulfillers.FulfillerStatusUpdate, 'status' | 'failureReason'>,
   at: string,
 ): FulfillerEvent | null {
-  switch (status) {
+  switch (update.status) {
     case 'shipped':
     case 'partially_shipped':
       return { type: 'ShipmentProgressed', at };
     case 'delivered':
       return { type: 'DeliveryConfirmed', at };
     case 'failed':
-      return { type: 'FulfillerOrderFailed', at };
+      return {
+        type: 'FulfillerOrderFailed',
+        ...(update.failureReason ? { errorMessage: update.failureReason } : {}),
+        at,
+      };
     case 'cancelled':
       return { type: 'Cancelled', at };
     default:
@@ -435,7 +446,7 @@ export const fulfillerStatusBlock: CommandBlock<'fulfillerStatus'> = {
     const events: FulfillerEvent[] = [
       { type: 'FulfillerStatusApplied', update: command.update, at },
     ];
-    const outcome = statusOutcome(command.update.status, at);
+    const outcome = statusOutcome(command.update, at);
     if (outcome) events.push(outcome);
     return events;
   },

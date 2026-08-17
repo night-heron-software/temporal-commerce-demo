@@ -1321,11 +1321,24 @@ export const OMS_STATES: StateRegistry<
   delivered: m.state('delivered', {
     commands: {
       submitFeedback: submitFeedbackBlock,
-      // Deliberately NOT the bare updateStatus block: this state layers its refundability
-      // guard (demo divergence: `guardDeliveredUpdateStatus`) and an `enrich` on top (the
-      // decide/evolve still come from the blocks via the central dispatchers). Spelled as
-      // a literal so the diagram generator resolves the guard.
+      // The updateStatus block with TWO phases replaced: this state's refundability guard
+      // (demo divergence: `guardDeliveredUpdateStatus`) and an `enrich` that normalizes a
+      // 'refunded' status into a real `refundOrder` command. Everything else — decide,
+      // evolve — is the block's, which is what the spread says.
+      //
+      // Ported from mono #270 (`f0648dc0`). This was a bare `{ guard, enrich }` literal whose
+      // own comment said it was "spelled as a literal so the diagram generator resolves the
+      // guard" — a workaround for one generator limitation that created a worse one: emissions
+      // derive from the handler's evolve map, the literal carried none, and the generated
+      // diagram rendered this command as "(no events — idempotent no-op)" when it can force
+      // many statuses. A bare literal is now reserved for its honest meaning — "deliberately
+      // NOT the block", as cart's `beginCheckout: {}` uses it.
+      //
+      // Accepted imprecision: the render lists `OrderRefunded` under this command, which
+      // `enrich` actually diverts to `refundOrder`. The outcome is right; only the mechanism
+      // is indirect. Naming one edge by its effect beats silently omitting the rest.
       updateStatus: {
+        ...updateStatusBlock,
         guard: guardDeliveredUpdateStatus,
         enrich: (command, _prepared, meta) =>
           command.status === 'refunded'
