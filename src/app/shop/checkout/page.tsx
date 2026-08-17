@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { beginCheckout, getCheckoutState } from '@/app/shop/cart-actions';
 import Link from 'next/link';
+import { cartLineLabel } from '@/app/shop/cart-line-display';
 
 /** How long to wait for the checkout workflow to reach an actionable step. */
 const CHECKOUT_READY_TIMEOUT_MS =
@@ -118,8 +119,7 @@ export default function CheckoutPage() {
             {cart.items.map((item) => (
               <div key={item.lineItemId} className="flex justify-between">
                 <span className="text-zinc-300">
-                  {item.productTitle ?? item.variantId}
-                  {item.variantTitle ? ` — ${item.variantTitle}` : ''} × {item.quantity}
+                  {cartLineLabel(item)} × {item.quantity}
                 </span>
                 <span>${((item.price * item.quantity) / 100).toFixed(2)}</span>
               </div>

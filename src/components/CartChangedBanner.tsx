@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { acknowledgeCartChange, getCheckoutState } from '@/app/shop/cart-actions';
 import type { Cart } from '@/temporal/contracts';
+import { cartLineLabel } from '@/app/shop/cart-line-display';
 
 /**
  * Banner shown during checkout when the cart has been modified since the shopper last
@@ -42,10 +43,9 @@ function snapshotKey(cartId: string) {
   return `approved-cart-${cartId}`;
 }
 
-function itemLabel(item: Cart.CartItem): string {
-  const title = item.productTitle ?? `SKU ${item.variantId}`;
-  return item.variantTitle ? `${title} — ${item.variantTitle}` : title;
-}
+// One fallback rule for line identity (cart-line-display.ts): `Variant <id>`, never
+// `SKU <id>` — a variantId is not a sku (mono #252 Phase 5a).
+const itemLabel = (item: Cart.CartItem): string => cartLineLabel(item);
 
 function buildSnapshot(cart: Cart.CartDetails): ApprovedSnapshot {
   return {

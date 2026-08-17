@@ -4,6 +4,7 @@ import { useCart } from '@/context/CartContext';
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { beginCheckout } from '@/app/shop/cart-actions';
+import { cartLineTitle } from '@/app/shop/cart-line-display';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -95,10 +96,12 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                       )}
                       <div className="min-w-0">
                         {/* Product identity from the add-to-cart snapshot; a line without one
-                            falls back to its variantId — visibly, so a blank title reads as a
-                            data bug rather than a silent id (backlog #1). */}
+                            falls back to its variantId — visibly, and labelled for what it is:
+                            `Variant <id>`, never `SKU: <id>` (a variantId is not a sku). The
+                            fallback rule lives in cart-line-display.ts so this surface and the
+                            checkout summaries cannot diverge again (mono #252 Phase 5a). */}
                         <h3 className="font-medium text-white text-sm truncate max-w-[200px]">
-                          {item.productTitle ?? `SKU: ${item.variantId}`}
+                          {cartLineTitle(item)}
                         </h3>
                         {item.variantTitle && (
                           <p className="text-zinc-400 text-xs truncate max-w-[200px]">

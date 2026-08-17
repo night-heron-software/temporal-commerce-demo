@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { submitOrder, cancelCheckout, getCheckoutState } from '@/app/shop/cart-actions';
 import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
+import { cartLineLabel } from '@/app/shop/cart-line-display';
 import type { Cart } from '@/temporal/contracts';
 
 export default function ReviewPage() {
@@ -176,8 +177,10 @@ export default function ReviewPage() {
             {cart.items.map((item) => (
               <div key={item.lineItemId} className="flex justify-between">
                 <span className="text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)]">
-                  {item.productTitle ?? item.variantId}
-                  {item.variantTitle ? ` — ${item.variantTitle}` : ''} × {item.quantity}
+                  {/* One fallback rule for line identity (cart-line-display.ts): a line
+                      without a snapshot shows `Variant <id>`, never the bare UUID this
+                      surface used to render (mono #252 Phase 5a). */}
+                  {cartLineLabel(item)} × {item.quantity}
                 </span>
                 <span>${((item.price * item.quantity) / 100).toFixed(2)}</span>
               </div>
