@@ -287,6 +287,16 @@ describe('evolve', () => {
     expect(ctx.cart.userId).toBe('u-1');
   });
 
+  it('UserLinked leaves cartVersion unchanged — identity is not content (run -008 F-3)', () => {
+    // Through the CENTRAL evolve, so the dispatcher's generic freshness bump is in play:
+    // the fold must compensate it, exactly as CheckoutEntered does. Uncompensated, the
+    // guest email attach at the address step bumps the version with no content change and
+    // the cart-changed banner false-positives at review on every guest checkout.
+    const before = makeCtx();
+    const ctx = apply(before, { type: 'linkUser', email: 'a@b.c', userId: 'u-1', at });
+    expect(ctx.cart.cartVersion).toBe(before.cart.cartVersion);
+  });
+
   it('CheckoutEntered sets checkout fields and the link', () => {
     const ctx = apply(makeCtx({ checkoutVersion: 1 }), {
       type: 'beginCheckout',
@@ -397,10 +407,11 @@ describe('evolve — version/timestamp stamping', () => {
   });
 
   it('stamps updatedAt from the event at and bumps cartVersion on every fold', () => {
+    // Specimen changed from UserLinked (run -008 F-3: that fold now compensates the
+    // bump, like CheckoutEntered — identity is not content). CartAbandoned is a real
+    // content-lifecycle fold and keeps this pin about the DISPATCHER's generic stamping.
     const next = evolve(makeCtx(), {
-      type: 'UserLinked',
-      email: 'a@b.c',
-      userId: 'u-1',
+      type: 'CartAbandoned',
       at: '2026-08-04T12:00:00.000Z',
     });
     expect(next.cart.updatedAt).toBe('2026-08-04T12:00:00.000Z');

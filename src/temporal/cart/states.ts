@@ -501,7 +501,18 @@ export const linkUserBlock: CommandBlock<'linkUser'> = {
   evolve: {
     UserLinked: (context, event) => ({
       ...context,
-      cart: { ...context.cart, email: event.email, userId: event.userId },
+      // Linking a user is identity bookkeeping, NOT a content change: restore the
+      // version the dispatcher's generic freshness bump adds, exactly as the
+      // CheckoutEntered fold does. This fold was the one the CheckoutEntered fix
+      // missed — found live in run -008 (F-3): the guest email attach at the address
+      // step bumped v1→v2 with no content change, and the cart-changed banner
+      // false-positived at review on every guest checkout.
+      cart: {
+        ...context.cart,
+        email: event.email,
+        userId: event.userId,
+        cartVersion: context.cart.cartVersion - 1,
+      },
     }),
   },
 };
