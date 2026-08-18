@@ -2,7 +2,8 @@
  * Unit tests for shop cart Server Actions: cookie-backed cart identity, the
  * updateWithStart lazy-create path, tolerated update failures (workflow gone /
  * already completed → null), the setShippingAddress dead-checkout recovery flow,
- * and the submitOrder cookie cleanup. Temporal client and next/headers are mocked.
+ * and the submitOrder cookie cleanup. Temporal client, next/headers, and the R1
+ * variant-display resolver (an Elasticsearch lookup) are mocked.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
@@ -15,6 +16,9 @@ const workflow = vi.hoisted(() => ({
   getHandle: vi.fn(),
   executeUpdateWithStart: vi.fn(),
 }));
+// addItemToCart resolves the R1 display snapshot via Elasticsearch — mocked so the
+// suite stays runnable with zero containers (a real client hangs past the test timeout).
+const resolveVariantDisplay = vi.hoisted(() => vi.fn());
 interface StartOp {
   workflowType: string;
   options: Record<string, unknown>;
@@ -28,6 +32,7 @@ vi.mock('@/lib/temporal-client', () => ({
 vi.mock('@/lib/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
+vi.mock('@/lib/variant-display', () => ({ resolveVariantDisplay }));
 // cart-actions dynamically imports WithStartWorkflowOperation for the lazy-create path.
 vi.mock('@temporalio/client', () => ({
   // Capture the constructed instances so tests can assert both the options the
@@ -124,6 +129,15 @@ describe('addItemToCart (updateWithStart lazy create)', () => {
   it('starts the cart workflow with USE_EXISTING and executes the addItem update', async () => {
     const details = { cartId: CART_ID, status: 'active' };
     workflow.executeUpdateWithStart.mockResolvedValue(details);
+    // R1: the resolved display snapshot spreads into the addItem command.
+    const snapshot = {
+      productId: 'prod-1',
+      productTitle: 'Classic Tee [Simulated]',
+      variantTitle: 'Baby Blue / 4XL',
+      optionLabels: ['Baby Blue', '4XL'],
+      thumbnailUrl: 'https://cdn.example/front.png',
+    };
+    resolveVariantDisplay.mockResolvedValue(snapshot);
 
     const result = await addItemToCart(CART_ID, 'var-1', 2, 19.99);
 
@@ -144,7 +158,20 @@ describe('addItemToCart (updateWithStart lazy create)', () => {
     });
     expect(workflow.executeUpdateWithStart).toHaveBeenCalledWith(Cart.cartUpdate, {
       startWorkflowOperation: startOps[0],
-      args: [{ type: 'addItem', variantId: 'var-1', quantity: 2, price: 19.99 }],
+      args: [{ type: 'addItem', variantId: 'var-1', quantity: 2, price: 19.99, ...snapshot }],
+    });
+  });
+
+  it('adds the line without a snapshot when display resolution returns null', async () => {
+    const details = { cartId: CART_ID, status: 'active' };
+    workflow.executeUpdateWithStart.mockResolvedValue(details);
+    resolveVariantDisplay.mockResolvedValue(null);
+
+    await addItemToCart(CART_ID, 'var-1', 1, 9.99);
+
+    expect(workflow.executeUpdateWithStart).toHaveBeenCalledWith(Cart.cartUpdate, {
+      startWorkflowOperation: startOps[0],
+      args: [{ type: 'addItem', variantId: 'var-1', quantity: 1, price: 9.99 }],
     });
   });
 });
