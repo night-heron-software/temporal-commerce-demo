@@ -13,8 +13,9 @@ duplicate it.
 2. **Workflow IDs and correlation.** Build IDs with `buildWorkflowId()` — dot-delimited
    `demo.{domain}.{entityId}`, never inline (lint-enforced) — and spread
    `buildWorkflowStartOptions()` at every workflow start so the correlation Search Attributes +
-   memo are set. `correlationId` (a dedicated journey UUID minted at cart creation — not the
-   cartId) is REQUIRED; correlation-less singletons pass `undefined` explicitly. See
+   memo are set. `correlationId` (the `cartId` itself — one journey id per cart lifecycle
+   since 2026-08-12; earlier workflows keep their separately minted UUIDs) is REQUIRED;
+   correlation-less singletons pass `undefined` explicitly. See
    [ADR-0011](docs/adr/0011-workflow-id-and-correlation-tagging.md).
 3. **State machines are authored, diagrams are generated.** Domains follow prepare → decide →
    finalize with a pure Chassaing decider core ([ADR-0003](docs/adr/0003-prepare-decide-finalize-state-machines.md),
