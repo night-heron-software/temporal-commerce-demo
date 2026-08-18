@@ -47,7 +47,19 @@ export type OrderStatus =
   | 'cancelled'
   | 'refunded'
   | 'returned'
-  | 'complete';
+  | 'complete'
+  /**
+   * Every fulfillment was REJECTED by its fulfiller — nothing was made, nothing shipped, and
+   * the shopper's money needs an operator's decision (refund, or manual re-fulfillment).
+   *
+   * Exists because `aggregateShippingState` used to count `rejected` as delivered, so an
+   * all-rejected order stamped `deliveredAt` and told the shopper it had arrived (mono
+   * [#284](https://github.com/night-heron-software/nightheron-mono/issues/284), found by the
+   * mono's first live failed fulfillment ever to reach an order workflow). Terminal, like
+   * `cancelled`: refunds post against closed orders, so closing here does not strand the
+   * remediation.
+   */
+  | 'failed';
 
 export interface OrderWorkflowInput {
   order: Order;

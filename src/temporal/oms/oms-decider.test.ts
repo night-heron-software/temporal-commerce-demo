@@ -579,6 +579,60 @@ describe('aggregateShippingState', () => {
     expect(aggregateShippingState([so('shipped'), so('processing')])).toBe('partially_shipped');
     expect(aggregateShippingState([so('processing')])).toBe('processing');
   });
+
+  it('mono #284: ALL-rejected is rejection, never delivery', () => {
+    // The defect, found live by the mono's #151 harness: `rejected` counted as delivered, so a
+    // fully-rejected order stamped deliveredAt and told its shopper the goods arrived. Every
+    // layer below told the truth; the aggregation inverted it.
+    expect(aggregateShippingState([so('rejected')])).toBe('rejected');
+    expect(aggregateShippingState([so('rejected'), so('rejected')])).toBe('rejected');
+  });
+
+  it('mono #284 CONTROL: a rejected line still does not hold a MIXED order back', () => {
+    // The half of the old behaviour that was right, pinned so the fix cannot overcorrect: one
+    // rejected line among delivered ones must not turn a genuinely-arrived order into a failure.
+    expect(aggregateShippingState([so('delivered'), so('rejected')])).toBe('delivered');
+    expect(aggregateShippingState([so('shipped'), so('rejected')])).toBe('shipped');
+  });
+});
+
+describe('fulfillmentStatus — the all-rejected order fails, terminally and honestly (mono #284)', () => {
+  const rejectedUpdate = fulfillmentUpdate({
+    status: 'rejected',
+    carrier: undefined,
+    trackingNumber: undefined,
+    error: 'Artwork rejected: DPI below minimum',
+  });
+
+  it('decides FulfillmentRejected, not FulfillmentDelivered', () => {
+    const events = decide(
+      { type: 'fulfillmentStatus', update: rejectedUpdate, at: AT },
+      makeState(),
+    );
+    expect(events.map((e) => e.type)).toEqual(['FulfillmentApplied', 'FulfillmentRejected']);
+    expect(events.map((e) => e.type)).not.toContain('FulfillmentDelivered');
+  });
+
+  it('evolves to status failed with NO deliveredAt', () => {
+    const failed = apply(makeState(), {
+      type: 'fulfillmentStatus',
+      update: rejectedUpdate,
+      at: 't1',
+    });
+    expect(failed.status).toBe('failed');
+    expect(failed.deliveredAt).toBeUndefined();
+    expect(failed.fulfillerOrders[0].status).toBe('rejected');
+  });
+
+  it('CONTROL: a genuine delivery still evolves to delivered WITH deliveredAt', () => {
+    const delivered = apply(makeState(), {
+      type: 'fulfillmentStatus',
+      update: fulfillmentUpdate({ status: 'delivered' }),
+      at: 't2',
+    });
+    expect(delivered.status).toBe('delivered');
+    expect(delivered.deliveredAt).toBe('t2');
+  });
 });
 
 describe('buildFulfillment — pure construction', () => {
@@ -688,6 +742,7 @@ const eventSamples: { [E in OrderEvent['type']]: Extract<OrderEvent, { type: E }
   FulfillmentPartiallyShipped: { type: 'FulfillmentPartiallyShipped', at: AT },
   FulfillmentShipped: { type: 'FulfillmentShipped', at: AT },
   FulfillmentDelivered: { type: 'FulfillmentDelivered', at: AT },
+  FulfillmentRejected: { type: 'FulfillmentRejected', at: AT },
   OrderProcessing: { type: 'OrderProcessing', at: AT },
   OrderPartiallyShipped: { type: 'OrderPartiallyShipped', at: AT },
   OrderShipped: { type: 'OrderShipped', at: AT },
@@ -700,7 +755,7 @@ const eventSamples: { [E in OrderEvent['type']]: Extract<OrderEvent, { type: E }
 
 describe('evolve never mutates its input — every OrderEvent type', () => {
   it('the table covers the whole event union', () => {
-    expect(Object.keys(eventSamples)).toHaveLength(22);
+    expect(Object.keys(eventSamples)).toHaveLength(23);
   });
 
   // A rich input so every entry has something to touch: fulfiller orders (with matching

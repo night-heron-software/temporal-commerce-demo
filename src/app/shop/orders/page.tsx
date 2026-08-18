@@ -116,6 +116,12 @@ export default function ShopOrdersPage() {
           icon: '✕',
           label: 'Cancelled',
         };
+      case 'failed':
+        return {
+          classes: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+          icon: '✕',
+          label: 'Failed',
+        };
       default:
         return {
           classes: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
@@ -387,7 +393,7 @@ function OrderEmailsPanel({ orderId }: { orderId: string }) {
 const ORDER_STEPS = ['paid', 'processing', 'shipped', 'delivered'] as const;
 
 function OrderProgressBar({ status }: { status: string }) {
-  if (status === 'cancelled') {
+  if (status === 'cancelled' || status === 'failed') {
     return <div className="h-1 bg-red-500" />;
   }
 

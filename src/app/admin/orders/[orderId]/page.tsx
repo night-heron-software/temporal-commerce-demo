@@ -91,6 +91,7 @@ export default function AdminOrderDetailPage() {
       case 'ready_to_fulfill':
         return 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-300';
       case 'cancelled':
+      case 'failed':
         return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       default:
         return 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300';
@@ -122,7 +123,7 @@ export default function AdminOrderDetailPage() {
   const { order, status, statusHistory, fulfillerOrders = [], assignments = [] } = orderState;
 
   // Determine which fulfillment step buttons to show
-  const isTerminal = ['cancelled', 'refunded', 'complete', 'delivered'].includes(status);
+  const isTerminal = ['cancelled', 'refunded', 'complete', 'delivered', 'failed'].includes(status);
   const canProgress = !isTerminal && !isUpdating;
 
   return (

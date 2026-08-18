@@ -371,6 +371,7 @@ stateDiagram-v2
   processing --> partially_shipped: FulfillmentPartiallyShipped / OrderPartiallyShipped
   processing --> shipped: FulfillmentShipped / OrderShipped
   processing --> delivered: FulfillmentDelivered / OrderDelivered
+  processing --> [*]: FulfillmentRejected → failed
   processing --> [*]: OrderCancelled → cancelled
   processing --> processing: OrderProcessing / *
   processing --> return_requested: OrderReturnRequested
@@ -380,6 +381,7 @@ stateDiagram-v2
   partially_shipped --> partially_shipped: FulfillmentPartiallyShipped / OrderPartiallyShipped / *
   partially_shipped --> shipped: FulfillmentShipped / OrderShipped
   partially_shipped --> delivered: FulfillmentDelivered / OrderDelivered
+  partially_shipped --> [*]: FulfillmentRejected → failed
   partially_shipped --> [*]: OrderCancelled → cancelled
   partially_shipped --> processing: OrderProcessing
   partially_shipped --> return_requested: OrderReturnRequested
@@ -388,6 +390,7 @@ stateDiagram-v2
   partially_shipped --> [*]: OrderCompleted → complete
   shipped --> shipped: FulfillmentShipped / OrderShipped / *
   shipped --> delivered: FulfillmentDelivered / OrderDelivered
+  shipped --> [*]: FulfillmentRejected → failed
   shipped --> [*]: OrderCancelled → cancelled
   shipped --> processing: OrderProcessing
   shipped --> partially_shipped: OrderPartiallyShipped
@@ -507,7 +510,7 @@ Any other command is rejected.
 
 - `cancelOrder` → `OrderCancelled` ⇒ **cancelled** (terminal)
 - `updateStatus` *(guarded)* → `OrderProcessing` ⇒ *stays* · `OrderPartiallyShipped` ⇒ `partially_shipped` · `OrderShipped` ⇒ `shipped` · `OrderDelivered` ⇒ `delivered` · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
-- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ `partially_shipped` · `FulfillmentShipped` ⇒ `shipped` · `FulfillmentDelivered` ⇒ `delivered`
+- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ `partially_shipped` · `FulfillmentShipped` ⇒ `shipped` · `FulfillmentDelivered` ⇒ `delivered` · `FulfillmentRejected` ⇒ **failed** (terminal)
 
 Any other command is rejected.
 
@@ -516,6 +519,7 @@ Any other command is rejected.
 | `event: FulfillmentPartiallyShipped` | `partially_shipped` |  |
 | `event: FulfillmentShipped` | `shipped` |  |
 | `event: FulfillmentDelivered` | `delivered` |  |
+| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: OrderProcessing` | `processing` |  |
 | `event: OrderPartiallyShipped` | `partially_shipped` |  |
@@ -535,7 +539,7 @@ Any other command is rejected.
 
 - `cancelOrder` → `OrderCancelled` ⇒ **cancelled** (terminal)
 - `updateStatus` *(guarded)* → `OrderProcessing` ⇒ `processing` · `OrderPartiallyShipped` ⇒ *stays* · `OrderShipped` ⇒ `shipped` · `OrderDelivered` ⇒ `delivered` · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
-- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ *stays* · `FulfillmentShipped` ⇒ `shipped` · `FulfillmentDelivered` ⇒ `delivered`
+- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ *stays* · `FulfillmentShipped` ⇒ `shipped` · `FulfillmentDelivered` ⇒ `delivered` · `FulfillmentRejected` ⇒ **failed** (terminal)
 
 Any other command is rejected.
 
@@ -544,6 +548,7 @@ Any other command is rejected.
 | `event: FulfillmentPartiallyShipped` | `partially_shipped` |  |
 | `event: FulfillmentShipped` | `shipped` |  |
 | `event: FulfillmentDelivered` | `delivered` |  |
+| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: OrderProcessing` | `processing` |  |
 | `event: OrderPartiallyShipped` | `partially_shipped` |  |
@@ -563,7 +568,7 @@ Any other command is rejected.
 
 - `cancelOrder` → `OrderCancelled` ⇒ **cancelled** (terminal)
 - `updateStatus` *(guarded)* → `OrderProcessing` ⇒ `processing` · `OrderPartiallyShipped` ⇒ `partially_shipped` · `OrderShipped` ⇒ *stays* · `OrderDelivered` ⇒ `delivered` · `OrderReturnRequested` ⇒ `return_requested` · `OrderReturned` ⇒ **returned** (terminal) · `OrderCompleted` ⇒ **complete** (terminal) · `OrderCancelled` ⇒ **cancelled** (terminal) · `OrderRefunded` ⇒ **refunded** (terminal)
-- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ *stays* · `FulfillmentShipped` ⇒ *stays* · `FulfillmentDelivered` ⇒ `delivered`
+- `fulfillmentStatus` → `FulfillmentApplied` ⇒ *stays* · `FulfillmentPartiallyShipped` ⇒ *stays* · `FulfillmentShipped` ⇒ *stays* · `FulfillmentDelivered` ⇒ `delivered` · `FulfillmentRejected` ⇒ **failed** (terminal)
 
 Any other command is rejected.
 
@@ -571,6 +576,7 @@ Any other command is rejected.
 |---------|------|-------|
 | `event: FulfillmentShipped` | `shipped` |  |
 | `event: FulfillmentDelivered` | `delivered` |  |
+| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: OrderProcessing` | `processing` |  |
 | `event: OrderPartiallyShipped` | `partially_shipped` |  |

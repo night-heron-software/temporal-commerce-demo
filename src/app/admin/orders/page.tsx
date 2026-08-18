@@ -75,6 +75,7 @@ export default function AdminOrdersPage() {
       case 'ready_to_fulfill':
         return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300';
       case 'cancelled':
+      case 'failed':
         return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       default:
         return 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300';

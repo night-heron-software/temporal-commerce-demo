@@ -129,6 +129,7 @@ export type OrderEvent =
   | { type: 'FulfillmentPartiallyShipped'; at: string }
   | { type: 'FulfillmentShipped'; at: string }
   | { type: 'FulfillmentDelivered'; at: string }
+  | { type: 'FulfillmentRejected'; at: string }
   // ── forced status moves (admin `updateStatus`) — one event per target, so every
   //    admin jump is a route-table edge ──
   | { type: 'OrderProcessing'; at: string }
@@ -349,13 +350,25 @@ export function buildFulfillment(
 // Status aggregation (pure)
 // ==================
 
-/** The machine state implied by the aggregate status of all fulfiller orders (forward-only). */
+/**
+ * The machine state implied by the aggregate status of all fulfiller orders (forward-only).
+ *
+ * `rejected` counts as TERMINAL for aggregation — a rejected line must not hold the rest of a
+ * mixed order back — but it is not DELIVERY. The distinction is the whole of the mono's #284:
+ * the old `isDelivered = delivered || rejected` made an ALL-rejected order aggregate to
+ * `delivered`, stamp `deliveredAt`, and tell the shopper their rejected order had arrived.
+ * All-rejected now aggregates to `rejected`; mixed delivered+rejected stays `delivered`
+ * deliberately (the deliverable part genuinely arrived — the rejected line stays visible on
+ * the fulfiller order, not hidden in the aggregate).
+ */
 export function aggregateShippingState(
   fulfillerOrders: ReadonlyArray<Pick<FulfillerOrder, 'status'>>,
-): 'processing' | 'partially_shipped' | 'shipped' | 'delivered' {
+): 'processing' | 'partially_shipped' | 'shipped' | 'delivered' | 'rejected' {
   const isDelivered = (s: FulfillerOrder['status']) => s === 'delivered' || s === 'rejected';
   const isShipped = (s: FulfillerOrder['status']) =>
     s === 'shipped' || s === 'delivered' || s === 'rejected';
+  if (fulfillerOrders.length > 0 && fulfillerOrders.every((so) => so.status === 'rejected'))
+    return 'rejected';
   if (fulfillerOrders.every((so) => isDelivered(so.status))) return 'delivered';
   if (fulfillerOrders.every((so) => isShipped(so.status))) return 'shipped';
   if (fulfillerOrders.some((so) => so.status === 'shipped' || so.status === 'delivered'))
@@ -826,7 +839,8 @@ export const fulfillmentStatusBlock: CommandBlock<'fulfillmentStatus'> = {
       so.fulfillerOrderId === update.fulfillerOrderId ? { status: update.status } : so,
     );
     const aggregate = aggregateShippingState(projected);
-    if (aggregate === 'delivered') events.push({ type: 'FulfillmentDelivered', at });
+    if (aggregate === 'rejected') events.push({ type: 'FulfillmentRejected', at });
+    else if (aggregate === 'delivered') events.push({ type: 'FulfillmentDelivered', at });
     else if (aggregate === 'shipped') events.push({ type: 'FulfillmentShipped', at });
     else if (aggregate === 'partially_shipped')
       events.push({ type: 'FulfillmentPartiallyShipped', at });
@@ -898,7 +912,9 @@ export const fulfillmentStatusBlock: CommandBlock<'fulfillmentStatus'> = {
         ...context,
         fulfillerOrders,
         assignments,
-        status: aggregate,
+        // The all-rejected aggregate is the order FAILING, not arriving (mono #284) — and only
+        // a genuine delivery stamps deliveredAt.
+        status: aggregate === 'rejected' ? 'failed' : aggregate,
         ...(aggregate === 'delivered' ? { deliveredAt: at } : {}),
       };
     },
@@ -910,6 +926,7 @@ export const fulfillmentStatusBlock: CommandBlock<'fulfillmentStatus'> = {
     }),
     FulfillmentShipped: (context, _event) => ({ ...context, status: 'shipped' }),
     FulfillmentDelivered: (context, _event) => ({ ...context, status: 'delivered' }),
+    FulfillmentRejected: (context, _event) => ({ ...context, status: 'failed' }),
   },
 };
 
@@ -1248,6 +1265,7 @@ export const OMS_STATES: StateRegistry<
       FulfillmentPartiallyShipped: 'partially_shipped',
       FulfillmentShipped: 'shipped',
       FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
       OrderCancelled: terminal('cancelled'),
       OrderProcessing: SELF,
       OrderPartiallyShipped: 'partially_shipped',
@@ -1273,6 +1291,7 @@ export const OMS_STATES: StateRegistry<
       FulfillmentPartiallyShipped: SELF,
       FulfillmentShipped: 'shipped',
       FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
       OrderCancelled: terminal('cancelled'),
       OrderProcessing: 'processing',
       OrderPartiallyShipped: SELF,
@@ -1297,6 +1316,7 @@ export const OMS_STATES: StateRegistry<
     route: {
       FulfillmentShipped: SELF,
       FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
       OrderCancelled: terminal('cancelled'),
       OrderProcessing: 'processing',
       OrderPartiallyShipped: 'partially_shipped',
