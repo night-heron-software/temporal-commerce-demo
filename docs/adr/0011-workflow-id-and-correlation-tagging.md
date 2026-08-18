@@ -30,13 +30,13 @@ compile. Inline ID construction is banned by a custom ESLint rule.
 `SEARCH_ATTRIBUTE_KEYS` defines five custom **Keyword Search Attributes** set at every workflow
 start:
 
-| Attribute       | Purpose                                                                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `CorrelationId` | root id tying the whole journey together — a dedicated UUID minted at cart creation (not the `cartId`; see Amendment) |
-| `StoreId`       | store filter (`demo`)                                                                                                 |
-| `Domain`        | filter by stage                                                                                                       |
-| `OrderId`       | order-scoped queries                                                                                                  |
-| `CartId`        | cart-scoped queries                                                                                                   |
+| Attribute       | Purpose                                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------------------------- |
+| `CorrelationId` | root id tying the whole journey together — the `cartId` itself, one id per cart lifecycle (see Amendments) |
+| `StoreId`       | store filter (`demo`)                                                                                      |
+| `Domain`        | filter by stage                                                                                            |
+| `OrderId`       | order-scoped queries                                                                                       |
+| `CartId`        | cart-scoped queries                                                                                        |
 
 `memo` carries display-only, non-indexed metadata. The attributes are registered on the namespace
 by `scripts/register-search-attributes.sh` locally (on managed Temporal, once via UI or `tcld`) —
@@ -73,6 +73,8 @@ updated in place to the current truth; this section records what changed and why
 
 ### correlationId is its own UUID, not the cartId
 
+_Superseded by the 2026-08-12 amendment below — kept as the record of the intermediate state._
+
 As originally implemented, `CorrelationId` reused the `cartId`. That conflated two different
 things: the cartId identifies **one entity** in the journey, while the correlationId identifies
 **the journey itself**. The overload broke down once correlation had to outlive and cross-cut the
@@ -107,3 +109,14 @@ Activities no longer thread the correlationId by hand. The chain
   carry `correlationId`; write-side reservation rows store `correlation_id`; the
   `inventory_history` journal is **partitioned** by `correlation_id`; and
   `customer_communications` rows carry it as the journey join.
+
+## Amendment (2026-08-12) — the cartId IS the correlationId
+
+The 2026-07-25 split was reversed: both mint sites now pass `correlationId = cartId`, so the
+cartId is the journey's single lifecycle id. The re-keying scenario the split guarded against
+does not arise — a cart revival starts with `USE_EXISTING` semantics under the same cartId, so
+the revived run carries the same correlation value by construction, and a single
+`CorrelationId = '<cartId>'` query returns every execution across abandon, revival, and
+checkout. Propagation was already id-agnostic (children read the parent's `CorrelationId`
+Search Attribute), so only the mint changed. Journeys started between the two amendments keep
+their minted UUIDs — mixed ids on old data are expected, and legacy read paths accept both.

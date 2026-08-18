@@ -91,6 +91,7 @@ export async function checkoutWorkflow(
     shippingCost: 0,
     totalTax: 0,
     totalPrice: 0,
+    paymentAttempt: 1,
   };
 
   // ── Track current step (single source of truth: the driver's state) ──

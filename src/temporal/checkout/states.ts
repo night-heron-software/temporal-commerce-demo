@@ -31,7 +31,7 @@
  * *derived* from which prerequisites are satisfied (see `deriveStep` in `workflows.ts`),
  * not tracked as machine states.
  */
-import { defineSignal, getExternalWorkflowHandle, log } from '@temporalio/workflow';
+import { defineSignal, getExternalWorkflowHandle, log, workflowInfo } from '@temporalio/workflow';
 import type { Cart } from '../contracts';
 import {
   calculateShipping,
@@ -97,7 +97,18 @@ export interface ShippingPrepared {
 /** Result of the submit-order pipeline (payment → reservations → order → email → OMS). */
 export type SubmitOrderPrepared =
   | { success: true; order: Order; newState: CheckoutState }
-  | { success: false; error: string };
+  | {
+      success: false;
+      error: string;
+      /**
+       * The pipeline failed somewhere the charge state is unknowable (after payment,
+       * before the order settled). Tells the `SubmitRejected` fold to RETAIN the
+       * idempotency attempt so a retry replays the same key — the gateway returns the
+       * first result instead of charging again. Absent everywhere the charge is settled:
+       * declined, refunded, or never attempted.
+       */
+      mayHaveCharged?: true;
+    };
 
 /**
  * The command as the decider sees it: the base `CheckoutCommand` union with the fields
@@ -145,7 +156,7 @@ export type CheckoutEvent =
       reservations: ReservationInfo[];
     }
   | { type: 'OrderSubmitted'; newState: CheckoutState }
-  | { type: 'SubmitRejected'; error: string }
+  | { type: 'SubmitRejected'; error: string; mayHaveCharged?: true }
   | { type: 'Recomputed'; cart: QueriedCart; shipping: number; tax: number };
 
 /** One member of the WIRE command union (pre-enrichment), by its `type` tag. */
@@ -450,16 +461,21 @@ async function prepareSubmitOrder(
       context.state.paymentMethod!.token,
       context.totalPrice,
       context.currency,
-      // Idempotency key (§7.7b): the journey id plus the total being charged — one charge per
-      // (journey, total), so a retried submit does not double-charge. The cartId IS the journey
-      // correlationId here (remediation R5 / mono ADR-0022).
+      // Idempotency key: this checkout's own workflow id plus the attempt ordinal — a nonce
+      // naming the ATTEMPT, with the amount a parameter the gateway validates against it (a
+      // replayed key with a different amount is an ERROR, not a new charge). Never derived
+      // from mutable business data.
       //
-      // Ported from mono #241 (`f42c3bda`). This was the bare `context.cartId` — every retry AND
-      // every re-submit at a different total shared one key, so the key distinguished nothing.
-      // The mono's pre-fix key had the opposite defect (`cartId-cartVersion`, where cartVersion
-      // moves on every fold and defeated retry dedup); keying on the money, not the version, is
-      // what both converged on.
-      `${context.cartId}-${context.totalPrice}`,
+      // Replaces `${cartId}-${totalPrice}` (mono #241 / `f42c3bda`): an amount is not an
+      // identity — a same-total basket swap aliased to one key; the refund path left a
+      // "charged" key that a same-total retry deduped against; and float-formatted money
+      // makes unstable key strings. Deliberate divergence from the mono, ledgered in
+      // docs/reference/mono-sync-2026-08-17.md as a backport candidate.
+      //
+      // The workflow id is used whole, never parsed (the id-parsing lesson), and is unique
+      // per checkout instance; `paymentAttempt` moves only in the `SubmitRejected` fold,
+      // and only when the rejected attempt's charge is settled.
+      `${workflowInfo().workflowId}-pay-${context.paymentAttempt}`,
     );
 
     if (!paymentSuccess) {
@@ -512,7 +528,10 @@ async function prepareSubmitOrder(
     return { success: true, order, newState: { ...context.state, order } };
   } catch (err) {
     log.error('Failed to process order', { error: String(err) });
-    return { success: false, error: 'An error occurred. Please try again.' };
+    // Anywhere in payment → order → email → OMS may have failed, so the charge state is
+    // unknowable here: retain the attempt. A retry replays the same key — first use if
+    // nothing was charged, a no-op replay if it was.
+    return { success: false, error: 'An error occurred. Please try again.', mayHaveCharged: true };
   }
 }
 
@@ -570,13 +589,23 @@ export const submitOrderBlock: CommandBlock<'submitOrder'> = {
   decide: (command, _context) =>
     command.prepared.success
       ? [{ type: 'OrderSubmitted', newState: command.prepared.newState }]
-      : [{ type: 'SubmitRejected', error: command.prepared.error }],
+      : [
+          {
+            type: 'SubmitRejected',
+            error: command.prepared.error,
+            mayHaveCharged: command.prepared.mayHaveCharged,
+          },
+        ],
 
   evolve: {
     OrderSubmitted: (context, event) => ({ ...context, state: event.newState }),
 
     SubmitRejected: (context, event) => ({
       ...context,
+      // The attempt is consumed unless the pipeline failed with a possible charge
+      // outstanding — then the key is retained so a retry replays it (the gateway
+      // returns the first result) instead of billing a second time.
+      paymentAttempt: event.mayHaveCharged ? context.paymentAttempt : context.paymentAttempt + 1,
       state: { ...context.state, error: event.error },
     }),
   },
@@ -748,6 +777,7 @@ export const checkoutDecider: MachineDecider<
     shippingCost: 0,
     totalTax: 0,
     totalPrice: 0,
+    paymentAttempt: 1,
   },
 };
 

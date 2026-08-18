@@ -84,4 +84,14 @@ export interface CheckoutContext {
   readonly shippingCost: number;
   readonly totalTax: number;
   readonly totalPrice: number;
+  /**
+   * Payment idempotency attempt ordinal (starts at 1). The charge key is
+   * `${workflowId}-pay-${paymentAttempt}` — a nonce naming the attempt, with the amount
+   * validated against it in the gateway, never derived from it. Stable across activity
+   * retries (same workflow state → same key); the `SubmitRejected` fold bumps it when a
+   * rejected attempt's charge is settled (declined, refunded, or never made) and retains
+   * it when the pipeline failed with a possible charge outstanding, so a retry replays
+   * the key and reuses the charge instead of billing twice.
+   */
+  readonly paymentAttempt: number;
 }
