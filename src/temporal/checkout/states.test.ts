@@ -75,6 +75,7 @@ function makeCtx(overrides: Partial<CheckoutContext> = {}): CheckoutContext {
     shippingCost: 0,
     totalTax: 0,
     totalPrice: 10,
+    paymentAttempt: 1,
     ...overrides,
   };
 }
@@ -240,36 +241,40 @@ describe('collecting — submitOrder', () => {
   });
 
   /**
-   * The idempotency key, asserted as PROPERTIES rather than a literal (ported from mono #241 /
-   * `f42c3bda`). The demo's key was the bare `context.cartId` — every retry AND every re-submit
-   * at a different total shared one key, so the key distinguished nothing; and the activity
-   * discarded it anyway (`_idempotencyKey`). The mono's pre-fix key had the mirror defect
-   * (`cartId-cartVersion`, moving on every fold and defeating retry dedup) and its old test
-   * pinned that literal — the defect written down as the requirement. Properties instead:
-   * keyed on the journey + the amount actually charged, stable when the version moves but the
-   * total does not, distinct when the total moves.
+   * The idempotency key, asserted as PROPERTIES plus one shape pin. Lineage: mono #241 /
+   * `f42c3bda` keyed on the journey + the amount (`${cartId}-${totalPrice}`); rejected
+   * 2026-08-18 — an amount is not an identity (a same-total basket swap aliased to one key),
+   * the refund path left a "charged" key that a same-total retry deduped against, and
+   * float-formatted money makes unstable key strings. The key is now a NONCE naming the
+   * attempt: `${workflowId}-pay-${paymentAttempt}` — stable while the attempt is open (an
+   * activity retry replays it; the gateway validates the amount against it, see
+   * activities-impl.test.ts for the mismatch throw), consumed by the `SubmitRejected` fold
+   * when an attempt settles (declined / refunded / never charged), retained when the
+   * pipeline failed with a possible charge outstanding. Deliberate divergence from the mono,
+   * ledgered in mono-sync-2026-08-17.md as a backport candidate.
    */
   const keyOfLastCharge = () => {
     const calls = vi.mocked(processPayment).mock.calls;
     return calls[calls.length - 1]?.[3];
   };
 
-  it('the idempotency key is the journey id plus the total actually charged', async () => {
+  it('the idempotency key names this checkout and the attempt ordinal — nothing else', async () => {
     await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
-    // The cartId IS the journey correlationId here (remediation R5 / mono ADR-0022), and the
-    // total is recomputed from the freshly-queried cart: 10 - 0 + 5 + 0.8.
-    expect(keyOfLastCharge()).toBe('cart-1-15.8');
+    // workflowInfo() is mocked as demo.checkout.c-1; the context opens at attempt 1. The id
+    // is used whole (never parsed), so the key is the workflow id plus the attempt.
+    expect(keyOfLastCharge()).toBe('demo.checkout.c-1-pay-1');
   });
 
-  it('the key does NOT move when cartVersion moves but the total does not', async () => {
+  it('the key does NOT move when cartVersion or the total moves — amount is a parameter, not identity', async () => {
     await CHECKOUT_STATES.collecting.fn(
       readyCtx(),
       ev({ type: 'submitOrder', reviewedCartVersion: 1 }),
     );
     const first = keyOfLastCharge();
 
-    // A later fold whose edits left the total alone. With a version-bearing key these would
-    // differ, and a retried submit would be billed as a new charge.
+    // A later fold at a moved version AND a moved total (shipping went to 25): with the
+    // amount-bearing key this was a silently distinct charge; now the open attempt's key is
+    // unchanged and amount drift is the GATEWAY's mismatch error to raise, not a new bill.
     vi.mocked(queryCart).mockResolvedValueOnce({
       items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
       subtotalPrice: 10,
@@ -278,24 +283,39 @@ describe('collecting — submitOrder', () => {
       cartVersion: 7,
     } as never);
     await CHECKOUT_STATES.collecting.fn(
-      readyCtx({ cartVersion: 7 }),
+      readyCtx({ cartVersion: 7, shippingCost: 25 }),
       ev({ type: 'submitOrder', reviewedCartVersion: 7 }),
     );
     expect(keyOfLastCharge()).toBe(first);
   });
 
-  it('a different total IS a different charge', async () => {
-    await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
-    const first = keyOfLastCharge();
+  it('a settled rejection consumes the attempt — the next submit charges under a fresh key', async () => {
+    // Declined payment: the charge is settled (nothing outstanding), so the fold bumps.
+    vi.mocked(processPayment).mockResolvedValueOnce(false as never);
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    expect(out.context.paymentAttempt).toBe(2);
 
-    // Move SHIPPING, not `totalPrice`: submitOrder recomputes the total from the freshly
-    // queried cart plus the context's shipping/tax, so an override of totalPrice would be
-    // discarded — the key is built from the amount actually charged, never a stale figure.
     await CHECKOUT_STATES.collecting.fn(
-      readyCtx({ shippingCost: 25 }),
+      readyCtx({ paymentAttempt: out.context.paymentAttempt }),
       ev({ type: 'submitOrder' }),
     );
-    expect(keyOfLastCharge()).not.toBe(first);
+    expect(keyOfLastCharge()).toBe('demo.checkout.c-1-pay-2');
+  });
+
+  it('a pipeline crash after a possible charge RETAINS the attempt — a retry replays the key', async () => {
+    // createOrder fails after processPayment may have charged: the charge state is
+    // unknowable, so the fold must NOT bump — the retry replays the same key and the
+    // gateway returns the first result instead of billing twice.
+    vi.mocked(createOrder).mockRejectedValueOnce(new Error('boom'));
+    const out = await CHECKOUT_STATES.collecting.fn(readyCtx(), ev({ type: 'submitOrder' }));
+    expect(out.context.state.error).toMatch(/error occurred/i);
+    expect(out.context.paymentAttempt).toBe(1);
+
+    await CHECKOUT_STATES.collecting.fn(
+      readyCtx({ paymentAttempt: out.context.paymentAttempt }),
+      ev({ type: 'submitOrder' }),
+    );
+    expect(keyOfLastCharge()).toBe('demo.checkout.c-1-pay-1');
   });
 
   it('payment failure stays collecting with the error', async () => {

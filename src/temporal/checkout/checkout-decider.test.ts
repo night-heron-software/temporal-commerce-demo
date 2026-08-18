@@ -40,6 +40,7 @@ function makeCtx(overrides: Partial<CheckoutContext> = {}): CheckoutContext {
     shippingCost: 0,
     totalTax: 0,
     totalPrice: 10,
+    paymentAttempt: 1,
     ...overrides,
   };
 }
