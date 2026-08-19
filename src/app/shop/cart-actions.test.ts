@@ -266,6 +266,64 @@ describe('submitOrder', () => {
     });
   });
 
+  // ── The cookie must not outlive its cart (#10 / run -008 F-2) ──────────────────────
+  // Before this, clearing was wired to exactly ONE path (checkout reaching `complete`), so
+  // ABANDONING a cart left the cookie behind and the next add-to-cart started a second RUN
+  // under the same workflow id. Post-R5 the cartId IS the journey correlationId, so run -008
+  // ended with five shopping trips sharing one id.
+  it('retires the cookie when emptying the cart abandons it', async () => {
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockResolvedValueOnce({
+      cartId: CART_ID,
+      status: 'abandoned',
+      items: [],
+    });
+
+    await removeFromCart(CART_ID, 'li-1');
+    expect(cookieStore.deleted).toEqual(['cartId']);
+  });
+
+  it('keeps the cookie while the cart is still shoppable', async () => {
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockResolvedValueOnce({
+      cartId: CART_ID,
+      status: 'active',
+      items: [{ lineItemId: 'li-2' }],
+    });
+
+    await removeFromCart(CART_ID, 'li-1');
+    expect(cookieStore.deleted).toEqual([]);
+  });
+
+  it('retires the cookie when the cart workflow is gone', async () => {
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockRejectedValueOnce(workflowNotFound());
+
+    expect(await removeFromCart(CART_ID, 'li-1')).toBeNull();
+    expect(cookieStore.deleted).toEqual(['cartId']); // a cookie naming a dead workflow is worse than none
+  });
+
+  it("leaves a DIFFERENT cart's cookie alone", async () => {
+    // Two tabs: this command ends an older cart while the cookie already names a newer one.
+    const handles = installHandles();
+    cookieStore.set('cartId', 'a-newer-cart');
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockResolvedValueOnce({
+      cartId: CART_ID,
+      status: 'abandoned',
+      items: [],
+    });
+
+    await removeFromCart(CART_ID, 'li-1');
+    expect(cookieStore.deleted).toEqual([]);
+  });
+
   it('returns null without touching the cookie when there is no checkout workflow', async () => {
     const handles = installHandles();
     cookieStore.set('cartId', CART_ID);

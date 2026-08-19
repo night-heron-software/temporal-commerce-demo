@@ -48,6 +48,39 @@ export async function getOrCreateCartId(): Promise<string> {
 }
 
 /**
+ * Terminal cart statuses — a cart in one of these will never accept another command.
+ */
+const TERMINAL_CART_STATUSES = ['completed', 'abandoned', 'failed'];
+
+/**
+ * Retire the cart cookie once its cart can no longer be shopped.
+ *
+ * The cookie outlives the cart unless something clears it, and `updateWithStart` happily
+ * starts a NEW RUN under the same workflow id — so the next add-to-cart resumed a dead
+ * journey's id. Post-R5 the cartId IS the journey correlationId, so reuse silently widens
+ * "one query returns everything this cart did" into "…everything this browser ever did":
+ * validation run -008 ended with FIVE shopping trips, three orders and two checkouts sharing
+ * one correlationId, and its journal reads had to be filtered by SKU and time to mean
+ * anything (backlog #10).
+ *
+ * Clearing was previously wired to exactly one path — a checkout reaching `complete`. This
+ * covers every way a cart can end: abandoned (emptied), failed, completed, and the cases
+ * where the workflow is simply gone.
+ */
+async function retireCartCookie(cartId: string, why: string): Promise<void> {
+  const cookieStore = await cookies();
+  if (cookieStore.get(CART_ID_COOKIE)?.value !== cartId) return; // already moved on
+  cookieStore.delete(CART_ID_COOKIE);
+  log.info({ correlationId: cartId, cartId, why }, 'cart cookie retired');
+}
+
+/** Did this result come back as a cart that has reached a terminal state? */
+function terminalCartStatusOf(result: unknown): string | undefined {
+  const status = (result as { status?: unknown } | null)?.status;
+  return typeof status === 'string' && TERMINAL_CART_STATUSES.includes(status) ? status : undefined;
+}
+
+/**
  * Get the current cart ID (cookie only).
  */
 export async function getCartId(): Promise<string | null> {
@@ -138,11 +171,19 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
     } else {
       log.info({ correlationId: cartId, cartId, command, ok: true }, 'cart action done');
     }
+    // The cart may have just ended (emptying it decides CartAbandoned; a completed checkout
+    // decides CartCompleted). Retire the cookie so the next add starts a genuinely new
+    // journey instead of a second run under this id (#10).
+    const terminal = terminalCartStatusOf(result);
+    if (terminal) await retireCartCookie(cartId, `cart ${terminal}`);
     return result;
   } catch (e) {
     const reason = classifyUpdateError(e);
     if (reason) {
       log.info({ correlationId: cartId, cartId, command, ok: false, reason }, 'cart action done');
+      // The id in the cookie names a workflow that is gone or closed — keeping it would point
+      // every later command at a dead journey (#10).
+      await retireCartCookie(cartId, reason);
       return null;
     }
     const domainReason = domainMessageOf(e);
