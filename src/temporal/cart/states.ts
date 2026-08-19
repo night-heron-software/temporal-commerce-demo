@@ -892,12 +892,27 @@ export function evolve(
   event: CartEvent,
 ): CartWorkflowContext {
   const bump = CONTENT_EVENTS[event.type] ? 1 : 0;
+
+  // A failed-checkout mirror describes ONE past attempt, not the cart's standing condition,
+  // so anything the cart does afterwards clears it. `CheckoutFailed` is the event that sets
+  // it, so it is the one event exempt here.
+  //
+  // Uncleared, the mirror latches: the web tier asks "did this command fail?" by reading the
+  // result (`domainErrorOf` checks `checkout.error` / `checkout.step`), so every later action
+  // inherited the old failure. Validation run -008 logged
+  // `command: removeItem, ok: false, domainError: "Checkout failed"` for a removeItem that
+  // SUCCEEDED — it emptied the cart and recorded its transition (F-9 / backlog #14). That is
+  // the mirror image of the defect `926a323` fixed, which stopped `ok: true` being logged
+  // over a real refusal; false failure erodes the signal exactly as false success does.
+  const staleFailure = event.type !== 'CheckoutFailed' && context.cart.checkout?.step === 'failed';
+
   const stamped: CartWorkflowContext = {
     ...context,
     cart: {
       ...context.cart,
       updatedAt: event.at,
       cartVersion: (context.cart.cartVersion || 0) + bump,
+      ...(staleFailure ? { checkout: undefined } : {}),
     },
   };
   const entry = evolveByEvent[event.type];

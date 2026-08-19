@@ -527,6 +527,47 @@ describe('cartVersion bumps for content events only', () => {
     expect(next.cart.cartVersion).toBe(s.cart.cartVersion);
   });
 
+  it('a failed-checkout mirror is cleared by the next event (F-9)', () => {
+    // The live sequence from run -008: the checkout child failed, then the shopper emptied
+    // the cart. That removeItem SUCCEEDED, but the stale mirror made the web tier log
+    // `ok: false, domainError: "Checkout failed"` — a false failure on a working action.
+    const failed = evolve(makeCtx({ checkoutWorkflowId: 'c-0' }), {
+      type: 'CheckoutFailed',
+      error: 'Checkout failed',
+      at,
+    });
+    expect(failed.cart.checkout).toMatchObject({ step: 'failed', error: 'Checkout failed' });
+
+    const afterEdit = evolve(failed, { type: 'ItemRemoved', lineItemId: 'li-1', at });
+    expect(afterEdit.cart.checkout).toBeUndefined();
+  });
+
+  it('CheckoutFailed itself still records the failure — it is the one exemption', () => {
+    // Clearing must not eat the event that sets it, or the shopper is never told.
+    const failed = evolve(makeCtx({ checkoutWorkflowId: 'c-0' }), {
+      type: 'CheckoutFailed',
+      error: 'Payment failed. Please try again.',
+      at,
+    });
+    expect(failed.cart.checkout?.error).toBe('Payment failed. Please try again.');
+  });
+
+  it('a fresh checkout is not treated as a stale failure', () => {
+    const failed = evolve(makeCtx({ checkoutWorkflowId: 'c-0' }), {
+      type: 'CheckoutFailed',
+      error: 'Checkout failed',
+      at,
+    });
+    const reentered = evolve(failed, {
+      type: 'CheckoutEntered',
+      checkoutWorkflowId: 'demo.checkout.c-2',
+      checkoutVersion: 2,
+      at,
+    });
+    expect(reentered.cart.checkout?.step).not.toBe('failed');
+    expect(reentered.checkoutWorkflowId).toBe('demo.checkout.c-2');
+  });
+
   it('a full submit-freeze cycle is version-neutral (F-4)', () => {
     // The exact live sequence that produced the false banner: a CART_CHANGED bounce signals
     // submitStarted then submitAborted. Content never changed, so neither must the version.
