@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { beginCheckout } from '@/app/shop/cart-actions';
 import { cartLineTitle } from '@/app/shop/cart-line-display';
+import { IdChip } from '@/components/EntityIds';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -184,6 +185,24 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
               <span>Total</span>
               <span>${(cart.totalPrice / 100).toFixed(2)}</span>
             </div>
+
+            {/* The cartId IS the journey's correlationId (remediation R5), so it is the one
+                value every diagnostic keys off: `temporal workflow describe demo.cart.<id>`,
+                an inventory_history query, a validation station, a bug report. Surfacing it
+                here is deliberate — this repo's shopper surface is developer-facing, and the
+                alternative was fishing the id out of a cookie by hand (backlog #9, raised
+                mid-run in validation session -008). Reuses R2's IdChip so the copy affordance
+                behaves identically to the admin ones; the palette is passed explicitly
+                because the drawer is unconditionally dark and IdChip's default is not. */}
+            {cartId && (
+              <div className="flex justify-between items-baseline gap-2 pt-1">
+                <span className="text-zinc-500 text-xs shrink-0">Cart</span>
+                <IdChip
+                  value={cartId}
+                  className="bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 border border-zinc-700"
+                />
+              </div>
+            )}
             {checkoutError && (
               <div className="text-red-400 text-sm text-center">{checkoutError}</div>
             )}
