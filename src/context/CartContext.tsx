@@ -15,6 +15,17 @@ import type { Cart } from '@/temporal/contracts';
 interface CartContextType {
   cartId: string | null;
   cart: Cart.CartDetails | null;
+  /**
+   * Has the initial cart lookup FINISHED? `cart === null` means two different things —
+   * "not looked yet" and "there is no active cart" — and a page that cannot tell them apart
+   * renders a spinner forever for the second. That is backlog #12: a terminal cart is
+   * deliberately not adopted (see below), so after any completed order the review page sat on
+   * "Loading review…" with no redirect and no message.
+   *
+   * `loading` is NOT this: it tracks in-flight mutations (add/remove/update), not the initial
+   * resolution. Guard "there is no cart" branches on `resolved`, never on `loading`.
+   */
+  resolved: boolean;
   loading: boolean;
   error: string | null;
   addItem: (sku: string, quantity: number, price: number) => Promise<void>;
@@ -31,26 +42,34 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cartId, setCartId] = useState<string | null>(null);
   const [cart, setCart] = useState<Cart.CartDetails | null>(null);
+  const [resolved, setResolved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
 
-  // Initialize cart ID from cookie on mount
+  // Initialize cart ID from cookie on mount. No cookie means resolution is already finished
+  // and the answer is "no cart" — the completed-order path deletes it (see cart-actions).
   useEffect(() => {
     getCartId().then((id) => {
       if (id) setCartId(id);
+      else setResolved(true);
     });
   }, []);
 
-  // Fetch cart when cartId is set
+  // Fetch cart when cartId is set. A TERMINAL cart is deliberately not adopted: `cart` is the
+  // ACTIVE cart, and completed/abandoned/failed ones must not keep driving shopping UI. Either
+  // way the lookup is finished, so `resolved` flips — that is what lets a page say "there is no
+  // cart" instead of spinning (#12).
   useEffect(() => {
     if (cartId) {
-      getCart(cartId).then((cartData) => {
-        if (cartData && !['completed', 'abandoned', 'failed'].includes(cartData.status)) {
-          setCart(cartData);
-        }
-      });
+      getCart(cartId)
+        .then((cartData) => {
+          if (cartData && !['completed', 'abandoned', 'failed'].includes(cartData.status)) {
+            setCart(cartData);
+          }
+        })
+        .finally(() => setResolved(true));
     }
   }, [cartId]);
 
@@ -166,6 +185,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const clearCart = useCallback(() => {
     setCart(null);
     setCartId(null);
+    // Resolution stands: we KNOW there is no cart now. Leaving this false would put the
+    // checkout pages back into "still loading" and reintroduce #12 after every order.
+    setResolved(true);
   }, []);
 
   return (
@@ -173,6 +195,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       value={{
         cartId,
         cart,
+        resolved,
         loading,
         error,
         addItem,
