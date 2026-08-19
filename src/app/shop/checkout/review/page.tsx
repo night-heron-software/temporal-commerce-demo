@@ -6,41 +6,56 @@ import { useState, useEffect } from 'react';
 import { submitOrder, cancelCheckout, getCheckoutState } from '@/app/shop/cart-actions';
 import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
+import { cartLineLabel } from '@/app/shop/cart-line-display';
 import type { Cart } from '@/temporal/contracts';
 
 export default function ReviewPage() {
   const router = useRouter();
-  const { cart, cartId, refreshCart, clearCart } = useCart();
+  const { cart, cartId, resolved, refreshCart, clearCart } = useCart();
   const [checkoutState, setCheckoutState] = useState<Cart.CheckoutState | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch full checkout state (includes shipping/payment details)
+  // Fetch full checkout state (includes shipping/payment details) and KEEP WATCHING it
+  // (R3 / F5): a mid-checkout cart edit reverts the machine's step to 'payment' via the
+  // recompute nudge, and a one-shot fetch would leave this page offering "Place Order"
+  // for a step the machine no longer accepts until the shopper reloads. The watcher
+  // routes to the machine's actual step the moment it changes; the payment page's
+  // CartChangedBanner then explains what happened.
   useEffect(() => {
-    if (cartId && cart?.status === 'checkout') {
+    if (!cartId || cart?.status !== 'checkout') return;
+    let cancelled = false;
+
+    const check = () =>
       getCheckoutState(cartId).then((state) => {
-        if (state) {
-          setCheckoutState(state);
-          // If not on review step, redirect to the correct step
-          if (state.step !== 'review') {
-            if (state.step === 'shipping') {
-              router.replace('/shop/checkout/shipping');
-            } else if (state.step === 'payment') {
-              router.replace('/shop/checkout/payment');
-            }
-          }
+        if (!state || cancelled) return;
+        setCheckoutState(state);
+        if (state.step === 'shipping') {
+          router.replace('/shop/checkout/shipping');
+        } else if (state.step === 'payment') {
+          router.replace('/shop/checkout/payment');
         }
       });
-    }
+
+    check();
+    const timer = setInterval(check, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [cartId, cart?.status, router]);
 
-  // Redirect if not in checkout
+  // Redirect a cart that LEFT checkout (back to active) — but only once resolution has
+  // finished. Guarding on `cart` alone could never fire for the case that needs it most:
+  // CartContext does not adopt a terminal cart, so `cart` is null exactly when the checkout
+  // is over, and this page sat on its spinner forever (#12). "No cart" is handled in the
+  // render below with an explanation rather than a silent bounce.
   useEffect(() => {
-    if (cart && cart.status !== 'checkout') {
+    if (resolved && cart && cart.status !== 'checkout') {
       router.replace('/shop');
     }
-  }, [cart, router]);
+  }, [resolved, cart, router]);
 
   const handlePlaceOrder = async () => {
     if (!cartId) return;
@@ -80,6 +95,37 @@ export default function ReviewPage() {
       setIsCancelling(false);
     }
   };
+
+  // "There is no cart" is its OWN state, not a slow load (#12). Reached by pressing Back after
+  // an order (the completed path deletes the cart cookie) or by the cart going terminal in
+  // another tab. Before this split, both rendered the spinner below — forever, with no
+  // redirect, because the redirect above needs a cart to fire.
+  if (resolved && !cart) {
+    return (
+      <div className="min-h-screen bg-[var(--heron-cream-light)] dark:bg-[var(--heron-forest-dark)] text-[var(--heron-slate-dark)] dark:text-[var(--heron-cream)] flex items-center justify-center p-8">
+        <div className="max-w-md text-center">
+          <h1 className="text-2xl font-semibold mb-2">This checkout is finished</h1>
+          <p className="text-[var(--heron-slate)] dark:text-[var(--heron-slate-light)] mb-6">
+            There is no cart in progress. If you just placed an order, it is on its way.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <Link
+              href="/shop/orders"
+              className="px-4 py-2 rounded-lg bg-[var(--heron-forest)] text-[var(--heron-cream)] hover:opacity-90"
+            >
+              View your orders
+            </Link>
+            <Link
+              href="/shop"
+              className="px-4 py-2 rounded-lg border border-[var(--heron-slate)] hover:bg-[var(--heron-cream)] dark:hover:bg-[var(--heron-forest)]"
+            >
+              Continue shopping
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!cart || !checkoutState) {
     return (
@@ -166,7 +212,10 @@ export default function ReviewPage() {
             {cart.items.map((item) => (
               <div key={item.lineItemId} className="flex justify-between">
                 <span className="text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)]">
-                  {item.variantId} × {item.quantity}
+                  {/* One fallback rule for line identity (cart-line-display.ts): a line
+                      without a snapshot shows `Variant <id>`, never the bare UUID this
+                      surface used to render (mono #252 Phase 5a). */}
+                  {cartLineLabel(item)} × {item.quantity}
                 </span>
                 <span>${((item.price * item.quantity) / 100).toFixed(2)}</span>
               </div>

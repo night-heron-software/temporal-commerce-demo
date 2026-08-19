@@ -1,14 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ── Mock the workflow sandbox + activity I/O so the co-located `decide` logic can be
-// exercised as pure functions. `prepare` activities return controlled values; `decide`
-// is what we assert.
+// ── Mock the workflow sandbox + activity I/O so the co-located machine states can be
+// exercised as pure functions. `prepare` activities return controlled values; the
+// decider's events + the route tables are what we assert.
 vi.mock('@temporalio/workflow', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  defineSignal: vi.fn((name: string) => ({ name })),
   startChild: vi.fn(async () => ({ workflowId: 'checkout-child' })),
-  ParentClosePolicy: { PARENT_CLOSE_POLICY_REQUEST_CANCEL: 'PARENT_CLOSE_POLICY_REQUEST_CANCEL' },
+  ParentClosePolicy: { REQUEST_CANCEL: 'REQUEST_CANCEL' },
   uuid4: () => 'uuid-fixed',
   getExternalWorkflowHandle: vi.fn(() => ({ signal: vi.fn(), cancel: vi.fn() })),
+  ApplicationFailure: {
+    nonRetryable: (message: string, type: string) =>
+      Object.assign(new Error(message), { type, nonRetryable: true }),
+  },
   // Needed by the framework's transition-sink / identity resolver, which load with '../framework'.
   proxyActivities: vi.fn(() => ({ persistWorkflowTransitions: vi.fn(async () => undefined) })),
   workflowInfo: vi.fn(() => ({
@@ -30,11 +35,16 @@ vi.mock('./activities', () => ({
   validateInventory: vi.fn(async () => true),
 }));
 
-import { startChild } from '@temporalio/workflow';
+import { startChild, workflowInfo } from '@temporalio/workflow';
 import { reserveCartItem, releaseCartItem } from './activities';
 import { CART_STATES } from './states';
 import { terminal } from '../framework';
-import type { CartDetails, CartEvent, CartWorkflowContext, CheckoutWorkflowResult } from './types';
+import type {
+  CartCommand,
+  CartDetails,
+  CartWorkflowContext,
+  CheckoutWorkflowResult,
+} from './types';
 
 // ── Builders ────────────────────────────────────────────────────────────────
 function makeCart(overrides: Partial<CartDetails> = {}): CartDetails {
@@ -60,19 +70,9 @@ function makeCtx(overrides: Partial<CartWorkflowContext> = {}): CartWorkflowCont
   return { cart: makeCart(), checkoutWorkflowId: null, checkoutVersion: 0, ...overrides };
 }
 
-const ev = (event: CartEvent) => ({ kind: 'event' as const, event, timestamp: 't' });
-// The combined inbound signal ('checkoutCompleted' on the wire) — completion results are
-// wrapped as {kind:'completed'}; the submit-freeze phases are their own kinds.
-const sig = (result: CheckoutWorkflowResult) => ({
-  kind: 'signal' as const,
-  result: { kind: 'completed' as const, result },
-  timestamp: 't',
-});
-const freezeSig = (kind: 'submitStarted' | 'submitAborted') => ({
-  kind: 'signal' as const,
-  result: { kind },
-  timestamp: 't',
-});
+const ev = (event: CartCommand) => ({ kind: 'event' as const, event, timestamp: 't' });
+// Signals arrive at the state fn already mapped to commands (toSignal in workflows.ts).
+const sig = (result: CartCommand) => ({ kind: 'signal' as const, result, timestamp: 't' });
 const timeout = { kind: 'timeout' as const, timestamp: 't' };
 
 const okResult = (over: Partial<CheckoutWorkflowResult> = {}): CheckoutWorkflowResult => ({
@@ -98,14 +98,16 @@ describe('active — item lifecycle', () => {
     expect(reserveCartItem).toHaveBeenCalledWith('cart-1', 'v1', 3);
   });
 
-  it('addItem reservation failure rejects the edit with an error and rolls back', async () => {
+  it('addItem reservation failure REJECTS the edit (error, no transition) and rolls back', async () => {
     vi.mocked(reserveCartItem).mockResolvedValueOnce(null as never);
     const out = await CART_STATES.active.fn(
       makeCtx(),
       ev({ type: 'addItem', variantId: 'v1', quantity: 2, price: 10 }),
     );
+    // prepare threw OutOfStockError → framework stays in-state and relays the error.
     expect(out.next).toBe('active');
     expect(out.error).toMatch(/insufficient inventory/i);
+    expect(out.rejected).toBe(true); // no transition, no recording, no projection
     expect(out.context.cart.items[0].quantity).toBe(1);
     // Rollback re-reserve at the old quantity
     expect(reserveCartItem).toHaveBeenLastCalledWith('cart-1', 'v1', 1);
@@ -165,15 +167,19 @@ describe('active — item lifecycle', () => {
     expect(out.context.cart.email).toBe('a@b.c');
   });
 
-  it('idle timeout abandons the cart', async () => {
+  it('idle timeout synthesizes expireCart and abandons the cart', async () => {
     const out = await CART_STATES.active.fn(makeCtx(), timeout);
     expect(out.next).toBe(terminal('abandoned'));
     expect(out.context.cart.status).toBe('abandoned');
   });
 
-  it('a stale completion signal in active is ignored', async () => {
-    const out = await CART_STATES.active.fn(makeCtx(), sig(okResult()));
+  it('a stale completion signal in active is REJECTED (state does not accept it)', async () => {
+    const out = await CART_STATES.active.fn(
+      makeCtx(),
+      sig({ type: 'checkoutCompleted', result: okResult() }),
+    );
     expect(out.next).toBe('active');
+    expect(out.rejected).toBe(true);
     expect(out.context.cart.status).toBe('active');
   });
 });
@@ -205,11 +211,37 @@ describe('active — beginCheckout', () => {
     );
   });
 
+  it('falls back to the cartId when the cart workflow itself is untagged', async () => {
+    // A legacy/untagged cart roots the journey on its cartId rather than producing an
+    // untagged child — an untagged child drops out of every CorrelationId visibility
+    // query and ES journey sweep, orphaning the downstream projections.
+    vi.mocked(workflowInfo).mockReturnValueOnce({
+      workflowId: 'demo.cart.cart-1',
+      runId: 'run-1',
+      searchAttributes: {},
+      workflowType: 'cartWorkflow',
+    } as never);
+
+    await CART_STATES.active.fn(makeCtx(), ev({ type: 'beginCheckout' }));
+
+    const opts = (
+      vi.mocked(startChild).mock.calls[0] as unknown as [
+        unknown,
+        { searchAttributes: Record<string, unknown> },
+      ]
+    )[1];
+    expect(opts.searchAttributes).toMatchObject({
+      CorrelationId: ['cart-1'],
+      CartId: ['cart-1'],
+    });
+  });
+
   it('rejects checkout on an empty cart (no child started)', async () => {
     const ctx = makeCtx({ cart: makeCart({ items: [], subtotalPrice: 0 }) });
     const out = await CART_STATES.active.fn(ctx, ev({ type: 'beginCheckout' }));
     expect(out.next).toBe('active');
     expect(out.error).toMatch(/empty cart/i);
+    expect(out.rejected).toBe(true); // guard fired before prepare
     expect(startChild).not.toHaveBeenCalled();
   });
 });
@@ -236,7 +268,7 @@ describe('checkout — editable mid-checkout + submit freeze + completion signal
   });
 
   it('submitStarted freezes the cart: edits rejected without reservation writes', async () => {
-    const frozen = await CART_STATES.checkout.fn(inCheckout(), freezeSig('submitStarted'));
+    const frozen = await CART_STATES.checkout.fn(inCheckout(), sig({ type: 'submitStarted' }));
     expect(frozen.next).toBe('checkout');
     expect(frozen.context.submitting).toBe(true);
 
@@ -246,13 +278,14 @@ describe('checkout — editable mid-checkout + submit freeze + completion signal
     );
     expect(out.next).toBe('checkout');
     expect(out.error).toMatch(/being placed/i);
+    expect(out.rejected).toBe(true);
     expect(out.context.cart.items.map((i) => i.variantId)).not.toContain('v2');
     expect(reserveCartItem).not.toHaveBeenCalled();
   });
 
   it('submitAborted clears the freeze: edits work again', async () => {
-    const frozen = await CART_STATES.checkout.fn(inCheckout(), freezeSig('submitStarted'));
-    const thawed = await CART_STATES.checkout.fn(frozen.context, freezeSig('submitAborted'));
+    const frozen = await CART_STATES.checkout.fn(inCheckout(), sig({ type: 'submitStarted' }));
+    const thawed = await CART_STATES.checkout.fn(frozen.context, sig({ type: 'submitAborted' }));
     expect(thawed.context.submitting).toBe(false);
 
     const out = await CART_STATES.checkout.fn(
@@ -264,7 +297,10 @@ describe('checkout — editable mid-checkout + submit freeze + completion signal
   });
 
   it('completed(success) terminates the cart as completed with final totals', async () => {
-    const out = await CART_STATES.checkout.fn(inCheckout(), sig(okResult()));
+    const out = await CART_STATES.checkout.fn(
+      inCheckout(),
+      sig({ type: 'checkoutCompleted', result: okResult() }),
+    );
     expect(out.next).toBe(terminal('completed'));
     expect(out.context.cart.status).toBe('completed');
     expect(out.context.cart.shippingCost).toBe(5);
@@ -274,17 +310,20 @@ describe('checkout — editable mid-checkout + submit freeze + completion signal
   it('completed(failure) returns to active with the checkout link dropped', async () => {
     const out = await CART_STATES.checkout.fn(
       inCheckout(),
-      sig(okResult({ success: false, order: undefined, error: 'declined' })),
+      sig({
+        type: 'checkoutCompleted',
+        result: okResult({ success: false, order: undefined, error: 'declined' }),
+      }),
     );
     expect(out.next).toBe('active');
     expect(out.context.checkoutWorkflowId).toBeNull();
     expect(out.context.cart.status).toBe('active');
   });
 
-  it('a stale checkoutVersion is ignored (stays in checkout)', async () => {
+  it('a stale checkoutVersion is ignored (no events → stays in checkout)', async () => {
     const out = await CART_STATES.checkout.fn(
       inCheckout({ checkoutVersion: 5 }),
-      sig(okResult({ checkoutVersion: 2 })),
+      sig({ type: 'checkoutCompleted', result: okResult({ checkoutVersion: 2 }) }),
     );
     expect(out.next).toBe('checkout');
   });

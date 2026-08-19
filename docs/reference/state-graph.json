@@ -1,8 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "generator": "scripts/generate-state-diagrams.mjs",
   "machines": [
     {
+      "id": "CART_STATES",
       "domain": "cart",
       "registry": "CART_STATES",
       "source": "src/temporal/cart/states.ts",
@@ -15,118 +16,148 @@
         {
           "name": "active",
           "timeout": "30 days",
+          "commands": [
+            {
+              "name": "addItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ],
+              "emits": [
+                {
+                  "event": "ItemAdded",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "updateQuantity",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ],
+              "emits": [
+                {
+                  "event": "ItemQuantityChanged",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "ItemRemoved",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "CartAbandoned",
+                  "to": "__terminal:abandoned",
+                  "via": "explicit",
+                  "declared": "__terminal:abandoned"
+                }
+              ]
+            },
+            {
+              "name": "removeItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem"
+              ],
+              "emits": [
+                {
+                  "event": "ItemRemoved",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "CartAbandoned",
+                  "to": "__terminal:abandoned",
+                  "via": "explicit",
+                  "declared": "__terminal:abandoned"
+                }
+              ]
+            },
+            {
+              "name": "applyCoupon",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "CouponApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "linkUser",
+              "emits": [
+                {
+                  "event": "UserLinked",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "expireCart",
+              "emits": [
+                {
+                  "event": "CartAbandoned",
+                  "to": "__terminal:abandoned",
+                  "via": "explicit",
+                  "declared": "__terminal:abandoned"
+                }
+              ]
+            },
+            {
+              "name": "beginCheckout",
+              "guarded": true,
+              "prepareActivities": [
+                "startChild"
+              ],
+              "emits": [
+                {
+                  "event": "CheckoutEntered",
+                  "to": "checkout",
+                  "via": "explicit",
+                  "declared": "checkout"
+                }
+              ]
+            }
+          ],
           "transitional": false,
-          "hasPrepare": true,
+          "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "addItem",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CartAbandoned",
+              "kind": "event",
+              "to": "__terminal:abandoned"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CheckoutEntered",
+              "kind": "event",
+              "to": "checkout"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
-            },
-            {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
-            },
-            {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
-            },
-            {
-              "on": "applyCoupon",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "ctx.submitting"
-              ]
-            },
-            {
-              "on": "linkUser",
-              "kind": "update",
+              "on": "*",
+              "kind": "event",
               "to": "active"
             },
             {
-              "on": "beginCheckout",
-              "kind": "update",
-              "to": "active",
-              "conditions": [
-                "prepared.empty"
-              ],
-              "prepareActivities": [
-                "startChild"
-              ]
-            },
-            {
-              "on": "beginCheckout",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "prepared.empty"
-              ],
-              "prepareActivities": [
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
+              "on": "expireCart",
               "kind": "timeout",
               "to": "__terminal:abandoned"
             },
             {
-              "on": "signal",
-              "kind": "signal",
+              "on": "expireCart",
+              "kind": "timeout",
+              "to": "checkout"
+            },
+            {
+              "on": "expireCart",
+              "kind": "timeout",
               "to": "active"
             }
           ]
@@ -134,148 +165,196 @@
         {
           "name": "checkout",
           "timeout": "1 hour",
+          "commands": [
+            {
+              "name": "addItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ],
+              "emits": [
+                {
+                  "event": "ItemAdded",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "updateQuantity",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem",
+                "reserveCartItem"
+              ],
+              "emits": [
+                {
+                  "event": "ItemQuantityChanged",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "ItemRemoved",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "CartAbandoned",
+                  "to": "__terminal:abandoned",
+                  "via": "explicit",
+                  "declared": "__terminal:abandoned"
+                }
+              ]
+            },
+            {
+              "name": "removeItem",
+              "guarded": true,
+              "prepareActivities": [
+                "releaseCartItem"
+              ],
+              "emits": [
+                {
+                  "event": "ItemRemoved",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "CartAbandoned",
+                  "to": "__terminal:abandoned",
+                  "via": "explicit",
+                  "declared": "__terminal:abandoned"
+                }
+              ]
+            },
+            {
+              "name": "applyCoupon",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "CouponApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "linkUser",
+              "emits": [
+                {
+                  "event": "UserLinked",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "beginCheckout"
+            },
+            {
+              "name": "submitStarted",
+              "emits": [
+                {
+                  "event": "SubmitFreezeStarted",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "submitAborted",
+              "emits": [
+                {
+                  "event": "SubmitFreezeCleared",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "checkoutCompleted",
+              "emits": [
+                {
+                  "event": "CartCompleted",
+                  "to": "__terminal:completed",
+                  "via": "explicit",
+                  "declared": "__terminal:completed"
+                },
+                {
+                  "event": "CheckoutFailed",
+                  "to": "active",
+                  "via": "explicit",
+                  "declared": "active"
+                }
+              ]
+            },
+            {
+              "name": "checkoutTimedOut",
+              "emits": [
+                {
+                  "event": "CheckoutDisowned",
+                  "to": "active",
+                  "via": "explicit",
+                  "declared": "active"
+                }
+              ]
+            }
+          ],
           "transitional": false,
-          "hasPrepare": true,
+          "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "addItem",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CartAbandoned",
+              "kind": "event",
+              "to": "__terminal:abandoned"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CartCompleted",
+              "kind": "event",
+              "to": "__terminal:completed"
             },
             {
-              "on": "updateQuantity",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "prepared.reserveError",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem",
-                "reserveCartItem"
-              ]
+              "on": "CheckoutFailed",
+              "kind": "event",
+              "to": "active"
             },
             {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
+              "on": "CheckoutDisowned",
+              "kind": "event",
+              "to": "active"
             },
             {
-              "on": "removeItem",
-              "kind": "update",
-              "to": "__terminal:abandoned",
-              "conditions": [
-                "ctx.submitting",
-                "context.cart.items.length === 0"
-              ],
-              "prepareActivities": [
-                "releaseCartItem"
-              ]
-            },
-            {
-              "on": "applyCoupon",
-              "kind": "update",
-              "to": "checkout",
-              "conditions": [
-                "ctx.submitting"
-              ]
-            },
-            {
-              "on": "linkUser",
-              "kind": "update",
+              "on": "*",
+              "kind": "event",
               "to": "checkout"
             },
             {
-              "on": "beginCheckout",
-              "kind": "update",
-              "to": "checkout"
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "__terminal:abandoned"
             },
             {
-              "on": "timeout",
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "__terminal:completed"
+            },
+            {
+              "on": "checkoutTimedOut",
               "kind": "timeout",
               "to": "active"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "checkout",
-              "conditions": [
-                "signal.kind === 'submitStarted'",
-                "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
-                "context.cart.status === 'completed'"
-              ],
-              "signalKinds": [
-                "submitStarted",
-                "submitAborted"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:completed",
-              "conditions": [
-                "signal.kind === 'submitStarted'",
-                "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
-                "context.cart.status === 'completed'"
-              ],
-              "signalKinds": [
-                "submitStarted",
-                "submitAborted"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "active",
-              "conditions": [
-                "signal.kind === 'submitStarted'",
-                "signal.kind === 'submitAborted'",
-                "result.checkoutVersion !== undefined &&\n          result.checkoutVersion !== ctx.checkoutVersion",
-                "context.cart.status === 'completed'"
-              ],
-              "signalKinds": [
-                "submitStarted",
-                "submitAborted"
-              ]
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "checkout"
             }
           ]
         }
       ]
     },
     {
+      "id": "CHECKOUT_STATES",
       "domain": "checkout",
       "registry": "CHECKOUT_STATES",
       "source": "src/temporal/checkout/states.ts",
@@ -288,18 +367,49 @@
       "states": [
         {
           "name": "validating",
+          "commands": [
+            {
+              "name": "validate",
+              "prepareActivities": [
+                "queryCart",
+                "renewReservationsForCheckout"
+              ],
+              "emits": [
+                {
+                  "event": "CartLoaded",
+                  "to": "collecting",
+                  "via": "explicit"
+                },
+                {
+                  "event": "ValidationFailed",
+                  "to": "__terminal:failed",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": true,
           "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "(auto)",
-              "kind": "auto",
+              "on": "CartLoaded",
+              "kind": "event",
               "to": "collecting"
             },
             {
-              "on": "(auto)",
-              "kind": "auto",
+              "on": "ValidationFailed",
+              "kind": "event",
+              "to": "__terminal:failed"
+            },
+            {
+              "on": "validate",
+              "kind": "timeout",
+              "to": "collecting"
+            },
+            {
+              "on": "validate",
+              "kind": "timeout",
               "to": "__terminal:failed"
             }
           ]
@@ -307,90 +417,151 @@
         {
           "name": "collecting",
           "timeout": "1 hour",
-          "transitional": false,
-          "hasPrepare": true,
-          "hasFinalize": true,
-          "transitions": [
+          "commands": [
             {
-              "on": "setShipping",
-              "kind": "update",
-              "to": "collecting",
-              "conditions": [
-                "prepared.paymentIntentError"
-              ]
-            },
-            {
-              "on": "setPayment",
-              "kind": "update",
-              "to": "collecting"
-            },
-            {
-              "on": "cancelCheckout",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "releaseReservations"
-              ]
-            },
-            {
-              "on": "acknowledgeCartChange",
-              "kind": "update",
-              "to": "collecting"
-            },
-            {
-              "on": "retargetParent",
-              "kind": "update",
-              "to": "collecting"
-            },
-            {
-              "on": "submitOrder",
-              "kind": "update",
-              "to": "collecting",
-              "conditions": [
-                "!prepared.success"
+              "name": "setShipping",
+              "prepareActivities": [
+                "prepareSetShipping"
               ],
+              "emits": [
+                {
+                  "event": "ShippingSet",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "ShippingFailed",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "setPayment",
+              "emits": [
+                {
+                  "event": "PaymentSet",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "cancelCheckout",
+              "emits": [
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "acknowledgeCartChange",
+              "emits": [
+                {
+                  "event": "CartChangeAcknowledged",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "retargetParent",
+              "emits": [
+                {
+                  "event": "ParentRetargeted",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
+              ]
+            },
+            {
+              "name": "checkoutTimedOut",
+              "emits": [
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "submitOrder",
               "prepareActivities": [
                 "freeze",
                 "queryCart",
                 "prepareSubmitOrder"
-              ]
-            },
-            {
-              "on": "submitOrder",
-              "kind": "update",
-              "to": "__terminal:complete",
-              "conditions": [
-                "!prepared.success"
               ],
-              "prepareActivities": [
-                "freeze",
-                "queryCart",
-                "prepareSubmitOrder"
+              "emits": [
+                {
+                  "event": "OrderSubmitted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                },
+                {
+                  "event": "SubmitRejected",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
               ]
             },
             {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "releaseReservations"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "collecting",
+              "name": "recompute",
               "prepareActivities": [
                 "queryCart",
                 "calculateShipping",
                 "calculateTax"
+              ],
+              "emits": [
+                {
+                  "event": "Recomputed",
+                  "to": "__self",
+                  "via": "wildcard"
+                }
               ]
+            }
+          ],
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "Cancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "OrderSubmitted",
+              "kind": "event",
+              "to": "__terminal:complete"
+            },
+            {
+              "on": "*",
+              "kind": "event",
+              "to": "collecting"
+            },
+            {
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "__terminal:complete"
+            },
+            {
+              "on": "checkoutTimedOut",
+              "kind": "timeout",
+              "to": "collecting"
             }
           ]
         }
       ]
     },
     {
+      "id": "FULFILLER_ORDER_STATES",
       "domain": "fulfillment",
       "registry": "FULFILLER_ORDER_STATES",
       "source": "src/temporal/fulfillment/fulfiller-states.ts",
@@ -405,22 +576,51 @@
           "name": "received",
           "doc": "received — book-keeping hop; marks the order as submitting.",
           "timeout": "1 millisecond",
+          "commands": [
+            {
+              "name": "beginSubmit",
+              "emits": [
+                {
+                  "event": "SubmissionStarted",
+                  "to": "submitting",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "cancel",
+              "emits": [
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "timeout",
+              "on": "SubmissionStarted",
+              "kind": "event",
+              "to": "submitting"
+            },
+            {
+              "on": "Cancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "beginSubmit",
               "kind": "timeout",
               "to": "submitting"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
+              "on": "beginSubmit",
+              "kind": "timeout",
+              "to": "__terminal:cancelled"
             }
           ]
         },
@@ -428,185 +628,288 @@
           "name": "submitting",
           "doc": "submitting — submits the order to the (simulated) fulfiller.",
           "timeout": "1 millisecond",
-          "transitional": false,
-          "hasPrepare": true,
-          "hasFinalize": false,
-          "transitions": [
+          "commands": [
             {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "in_production",
+              "name": "submitted",
               "prepareActivities": [
                 "submitFulfillerOrder"
+              ],
+              "emits": [
+                {
+                  "event": "OrderSubmitted",
+                  "to": "in_production",
+                  "via": "explicit"
+                }
               ]
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
+              "name": "cancel",
+              "emits": [
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
               ]
+            }
+          ],
+          "transitional": false,
+          "hasPrepare": false,
+          "hasFinalize": false,
+          "transitions": [
+            {
+              "on": "OrderSubmitted",
+              "kind": "event",
+              "to": "in_production"
+            },
+            {
+              "on": "Cancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "submitted",
+              "kind": "timeout",
+              "to": "in_production"
+            },
+            {
+              "on": "submitted",
+              "kind": "timeout",
+              "to": "__terminal:cancelled"
             }
           ]
         },
         {
           "name": "in_production",
           "doc": "in_production — auto-ships on timeout (unless manual mode); accepts fulfiller updates.",
+          "commands": [
+            {
+              "name": "simulatedShip",
+              "emits": [
+                {
+                  "event": "SimulatedShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "fulfillerStatus",
+              "emits": [
+                {
+                  "event": "FulfillerStatusApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "ShipmentProgressed",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "DeliveryConfirmed",
+                  "to": "__terminal:delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillerOrderFailed",
+                  "to": "__terminal:failed",
+                  "via": "explicit"
+                },
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "cancel",
+              "emits": [
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
-          "hasFinalize": true,
+          "hasFinalize": false,
           "transitions": [
             {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "in_production",
-              "conditions": [
-                "ctx.manualMode"
-              ]
+              "on": "SimulatedShipped",
+              "kind": "event",
+              "to": "shipped"
+            },
+            {
+              "on": "ShipmentProgressed",
+              "kind": "event",
+              "to": "shipped"
+            },
+            {
+              "on": "DeliveryConfirmed",
+              "kind": "event",
+              "to": "__terminal:delivered"
+            },
+            {
+              "on": "FulfillerOrderFailed",
+              "kind": "event",
+              "to": "__terminal:failed"
+            },
+            {
+              "on": "Cancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "*",
+              "kind": "event",
+              "to": "in_production"
             },
             {
               "on": "timeout",
               "kind": "timeout",
-              "to": "shipped",
-              "conditions": [
-                "ctx.manualMode"
-              ]
+              "to": "shipped"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:delivered"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipped",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:failed"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:delivered",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:cancelled"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:failed",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "in_production",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "in_production"
             }
           ]
         },
         {
           "name": "shipped",
           "doc": "shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller updates.",
+          "commands": [
+            {
+              "name": "simulatedDeliver",
+              "emits": [
+                {
+                  "event": "SimulatedDelivered",
+                  "to": "__terminal:delivered",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "fulfillerStatus",
+              "emits": [
+                {
+                  "event": "FulfillerStatusApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "ShipmentProgressed",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "DeliveryConfirmed",
+                  "to": "__terminal:delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillerOrderFailed",
+                  "to": "__terminal:failed",
+                  "via": "explicit"
+                },
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "cancel",
+              "emits": [
+                {
+                  "event": "Cancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
-          "hasFinalize": true,
+          "hasFinalize": false,
           "transitions": [
             {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "shipped",
-              "conditions": [
-                "ctx.manualMode"
-              ]
+              "on": "SimulatedDelivered",
+              "kind": "event",
+              "to": "__terminal:delivered"
+            },
+            {
+              "on": "DeliveryConfirmed",
+              "kind": "event",
+              "to": "__terminal:delivered"
+            },
+            {
+              "on": "FulfillerOrderFailed",
+              "kind": "event",
+              "to": "__terminal:failed"
+            },
+            {
+              "on": "Cancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "ShipmentProgressed",
+              "kind": "event",
+              "to": "shipped"
+            },
+            {
+              "on": "*",
+              "kind": "event",
+              "to": "shipped"
             },
             {
               "on": "timeout",
               "kind": "timeout",
-              "to": "__terminal:delivered",
-              "conditions": [
-                "ctx.manualMode"
-              ]
+              "to": "__terminal:delivered"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:failed"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipped",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "__terminal:cancelled"
             },
             {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:delivered",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:failed",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "in_production",
-              "finalizeActivities": [
-                "indexNewestShipment"
-              ],
-              "signalKinds": [
-                "fulfillerStatus"
-              ]
+              "on": "timeout",
+              "kind": "timeout",
+              "to": "shipped"
             }
           ]
         }
       ]
     },
     {
+      "id": "FULFILLMENT_STATES",
       "domain": "fulfillment",
       "registry": "FULFILLMENT_STATES",
       "source": "src/temporal/fulfillment/states.ts",
@@ -619,13 +922,30 @@
       "states": [
         {
           "name": "received",
+          "commands": [
+            {
+              "name": "beginProduction",
+              "emits": [
+                {
+                  "event": "ProductionStarted",
+                  "to": "in_production",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": true,
           "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "(auto)",
-              "kind": "auto",
+              "on": "ProductionStarted",
+              "kind": "event",
+              "to": "in_production"
+            },
+            {
+              "on": "beginProduction",
+              "kind": "timeout",
               "to": "in_production"
             }
           ]
@@ -633,67 +953,68 @@
         {
           "name": "in_production",
           "timeout": "365 days",
+          "commands": [
+            {
+              "name": "cancel",
+              "emits": [
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "childStatus",
+              "emits": [
+                {
+                  "event": "ChildStatusApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "FulfillmentDelivered",
+                  "to": "__terminal:delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentFailed",
+                  "to": "__terminal:failed",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "timeout",
-              "kind": "timeout",
+              "on": "OrderCancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "FulfillmentDelivered",
+              "kind": "event",
+              "to": "__terminal:delivered"
+            },
+            {
+              "on": "FulfillmentFailed",
+              "kind": "event",
+              "to": "__terminal:failed"
+            },
+            {
+              "on": "*",
+              "kind": "event",
               "to": "in_production"
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:cancelled",
-              "signalKinds": [
-                "cancel"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:delivered",
-              "conditions": [
-                "context.status === 'delivered'",
-                "context.status === 'failed'",
-                "context.status === 'cancelled'"
-              ],
-              "signalKinds": [
-                "childStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "__terminal:failed",
-              "conditions": [
-                "context.status === 'delivered'",
-                "context.status === 'failed'",
-                "context.status === 'cancelled'"
-              ],
-              "signalKinds": [
-                "childStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "in_production",
-              "conditions": [
-                "context.status === 'delivered'",
-                "context.status === 'failed'",
-                "context.status === 'cancelled'"
-              ],
-              "signalKinds": [
-                "childStatus"
-              ]
             }
           ]
         }
       ]
     },
     {
+      "id": "OMS_STATES",
       "domain": "oms",
       "registry": "OMS_STATES",
       "source": "src/temporal/oms/states.ts",
@@ -701,1158 +1022,977 @@
       "terminals": [
         "cancelled",
         "complete",
+        "failed",
         "refunded",
         "returned"
       ],
       "states": [
         {
           "name": "pending_assignment",
-          "doc": "Transitional initial state. (The mono posts the ORDER_CAPTURE accounting transaction\nhere; the demo has no ledger, so this is a pure hop to `assigning_fulfillers`.)",
+          "doc": "Transitional intake 1/3: a pure hop — the mono decides the ORDER_CAPTURE ledger\nnumbers here and posts them as the `PaymentCaptured` effect; the demo has no\naccounting, so the event carries nothing and has no effect (see `capturePaymentBlock`).",
           "timeout": "1 minute",
+          "commands": [
+            {
+              "name": "capturePayment",
+              "emits": [
+                {
+                  "event": "PaymentCaptured",
+                  "to": "assigning_fulfillers",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": true,
           "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "(auto)",
-              "kind": "auto",
+              "on": "PaymentCaptured",
+              "kind": "event",
+              "to": "assigning_fulfillers"
+            },
+            {
+              "on": "capturePayment",
+              "kind": "timeout",
               "to": "assigning_fulfillers"
             }
           ]
         },
         {
           "name": "assigning_fulfillers",
-          "doc": "Transitional state. `prepare` calls the fulfiller-resolution activity (impure I/O);\n`decide` records the resulting assignments on the order. Advances to\n`requesting_fulfillment` when at least one assignment resolved, otherwise falls back\nto the manual `ready_to_fulfill` path.",
+          "doc": "Transitional intake 2/3: `prepare` resolves fulfillers (impure I/O) and mints\nassignment ids; `decide` records the assignments. No resolution at all falls back\nto the manual `ready_to_fulfill` path.",
           "timeout": "1 minute",
+          "commands": [
+            {
+              "name": "assignFulfillers",
+              "prepareActivities": [
+                "resolveFulfillerAssignments"
+              ],
+              "emits": [
+                {
+                  "event": "FulfillersAssigned",
+                  "to": "requesting_fulfillment",
+                  "via": "explicit"
+                },
+                {
+                  "event": "NoFulfillersResolved",
+                  "to": "ready_to_fulfill",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": true,
           "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "(auto)",
-              "kind": "auto",
+              "on": "FulfillersAssigned",
+              "kind": "event",
               "to": "requesting_fulfillment"
             },
             {
-              "on": "(auto)",
-              "kind": "auto",
+              "on": "NoFulfillersResolved",
+              "kind": "event",
+              "to": "ready_to_fulfill"
+            },
+            {
+              "on": "assignFulfillers",
+              "kind": "timeout",
+              "to": "requesting_fulfillment"
+            },
+            {
+              "on": "assignFulfillers",
+              "kind": "timeout",
               "to": "ready_to_fulfill"
             }
           ]
         },
         {
           "name": "requesting_fulfillment",
+          "doc": "Transitional intake 3/3: `prepare` mints fulfiller-order ids; `decide` groups\nassignments into fulfiller orders; the child start + indexing are the\n`FulfillmentRequested` effect.",
           "timeout": "1 minute",
+          "commands": [
+            {
+              "name": "requestFulfillment",
+              "emits": [
+                {
+                  "event": "FulfillmentRequested",
+                  "to": "processing",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": true,
           "hasPrepare": false,
           "hasFinalize": false,
           "transitions": [
             {
-              "on": "(auto)",
-              "kind": "auto",
+              "on": "FulfillmentRequested",
+              "kind": "event",
+              "to": "processing"
+            },
+            {
+              "on": "requestFulfillment",
+              "kind": "timeout",
               "to": "processing"
             }
           ]
         },
         {
           "name": "ready_to_fulfill",
+          "doc": "No fulfiller resolved — the order waits for manual handling (admin status moves).",
           "timeout": "365 days",
+          "commands": [
+            {
+              "name": "cancelOrder",
+              "emits": [
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "updateStatus",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "OrderProcessing",
+                  "to": "processing",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderPartiallyShipped",
+                  "to": "partially_shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderDelivered",
+                  "to": "delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturnRequested",
+                  "to": "return_requested",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturned",
+                  "to": "__terminal:returned",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCompleted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderRefunded",
+                  "to": "__terminal:refunded",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
           "hasFinalize": true,
           "transitions": [
             {
-              "on": "cancelOrder",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderCancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "processing",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderProcessing",
+              "kind": "event",
+              "to": "processing"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "partially_shipped",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "OrderShipped",
+              "kind": "event",
               "to": "shipped",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "OrderDelivered",
+              "kind": "event",
               "to": "delivered",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "return_requested",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderRefunded",
+              "kind": "event",
+              "to": "__terminal:refunded"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:refunded",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturned",
+              "kind": "event",
+              "to": "__terminal:returned"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:returned",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:complete",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "ready_to_fulfill",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "ready_to_fulfill",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderCompleted",
+              "kind": "event",
+              "to": "__terminal:complete"
             }
           ]
         },
         {
           "name": "processing",
           "timeout": "365 days",
+          "commands": [
+            {
+              "name": "cancelOrder",
+              "emits": [
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "updateStatus",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "OrderProcessing",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderPartiallyShipped",
+                  "to": "partially_shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderDelivered",
+                  "to": "delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturnRequested",
+                  "to": "return_requested",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturned",
+                  "to": "__terminal:returned",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCompleted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderRefunded",
+                  "to": "__terminal:refunded",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "fulfillmentStatus",
+              "emits": [
+                {
+                  "event": "FulfillmentApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "FulfillmentPartiallyShipped",
+                  "to": "partially_shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentDelivered",
+                  "to": "delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentRejected",
+                  "to": "__terminal:failed",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
           "hasFinalize": true,
           "transitions": [
             {
-              "on": "cancelOrder",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "processing",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentShipped",
+              "kind": "event",
+              "to": "shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "partially_shipped",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentDelivered",
+              "kind": "event",
+              "to": "delivered"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "FulfillmentRejected",
+              "kind": "event",
+              "to": "__terminal:failed"
+            },
+            {
+              "on": "OrderCancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "OrderProcessing",
+              "kind": "event",
+              "to": "processing"
+            },
+            {
+              "on": "OrderPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
+            },
+            {
+              "on": "OrderShipped",
+              "kind": "event",
               "to": "shipped",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "OrderDelivered",
+              "kind": "event",
               "to": "delivered",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "return_requested",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderRefunded",
+              "kind": "event",
+              "to": "__terminal:refunded"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:refunded",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturned",
+              "kind": "event",
+              "to": "__terminal:returned"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:returned",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderCompleted",
+              "kind": "event",
+              "to": "__terminal:complete"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:complete",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "processing",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "processing",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "delivered",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipped",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "partially_shipped",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
+              "on": "*",
+              "kind": "event",
+              "to": "processing"
             }
           ]
         },
         {
           "name": "partially_shipped",
           "timeout": "365 days",
+          "commands": [
+            {
+              "name": "cancelOrder",
+              "emits": [
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "updateStatus",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "OrderProcessing",
+                  "to": "processing",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderPartiallyShipped",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderDelivered",
+                  "to": "delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturnRequested",
+                  "to": "return_requested",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturned",
+                  "to": "__terminal:returned",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCompleted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderRefunded",
+                  "to": "__terminal:refunded",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "fulfillmentStatus",
+              "emits": [
+                {
+                  "event": "FulfillmentApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "FulfillmentPartiallyShipped",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentDelivered",
+                  "to": "delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentRejected",
+                  "to": "__terminal:failed",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
           "hasFinalize": true,
           "transitions": [
             {
-              "on": "cancelOrder",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "processing",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentShipped",
+              "kind": "event",
+              "to": "shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "partially_shipped",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentDelivered",
+              "kind": "event",
+              "to": "delivered"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "FulfillmentRejected",
+              "kind": "event",
+              "to": "__terminal:failed"
+            },
+            {
+              "on": "OrderCancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "OrderProcessing",
+              "kind": "event",
+              "to": "processing"
+            },
+            {
+              "on": "OrderPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
+            },
+            {
+              "on": "OrderShipped",
+              "kind": "event",
               "to": "shipped",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "OrderDelivered",
+              "kind": "event",
               "to": "delivered",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "return_requested",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderRefunded",
+              "kind": "event",
+              "to": "__terminal:refunded"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:refunded",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturned",
+              "kind": "event",
+              "to": "__terminal:returned"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:returned",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderCompleted",
+              "kind": "event",
+              "to": "__terminal:complete"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:complete",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "partially_shipped",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "partially_shipped",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "delivered",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipped",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "processing",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
+              "on": "*",
+              "kind": "event",
+              "to": "partially_shipped"
             }
           ]
         },
         {
           "name": "shipped",
           "timeout": "365 days",
+          "commands": [
+            {
+              "name": "cancelOrder",
+              "emits": [
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "updateStatus",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "OrderProcessing",
+                  "to": "processing",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderPartiallyShipped",
+                  "to": "partially_shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderShipped",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderDelivered",
+                  "to": "delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturnRequested",
+                  "to": "return_requested",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturned",
+                  "to": "__terminal:returned",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCompleted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderRefunded",
+                  "to": "__terminal:refunded",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "fulfillmentStatus",
+              "emits": [
+                {
+                  "event": "FulfillmentApplied",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "FulfillmentPartiallyShipped",
+                  "to": "__self",
+                  "via": "wildcard"
+                },
+                {
+                  "event": "FulfillmentShipped",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentDelivered",
+                  "to": "delivered",
+                  "via": "explicit"
+                },
+                {
+                  "event": "FulfillmentRejected",
+                  "to": "__terminal:failed",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
           "hasFinalize": true,
           "transitions": [
             {
-              "on": "cancelOrder",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentShipped",
+              "kind": "event",
+              "to": "shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "processing",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentDelivered",
+              "kind": "event",
+              "to": "delivered"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "partially_shipped",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FulfillmentRejected",
+              "kind": "event",
+              "to": "__terminal:failed"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "OrderCancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "OrderProcessing",
+              "kind": "event",
+              "to": "processing"
+            },
+            {
+              "on": "OrderPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
+            },
+            {
+              "on": "OrderShipped",
+              "kind": "event",
               "to": "shipped",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
+              "on": "OrderDelivered",
+              "kind": "event",
               "to": "delivered",
               "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
+                "sendOrderStatusEmail"
               ]
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "return_requested",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderRefunded",
+              "kind": "event",
+              "to": "__terminal:refunded"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:refunded",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturned",
+              "kind": "event",
+              "to": "__terminal:returned"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:returned",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderCompleted",
+              "kind": "event",
+              "to": "__terminal:complete"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:complete",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "shipped",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "shipped",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "delivered",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "partially_shipped",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "processing",
-              "conditions": [
-                "facts.length === 0",
-                "agg === 'delivered'",
-                "agg === 'shipped'",
-                "agg === 'partially_shipped'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ],
-              "signalKinds": [
-                "applyFulfillmentStatus"
-              ]
+              "on": "*",
+              "kind": "event",
+              "to": "shipped"
             }
           ]
         },
         {
           "name": "delivered",
+          "doc": "Delivered — post-delivery lifecycle (feedback, refunds, returns). An admin\n'refunded' status is enriched into a real `refundOrder` command, so it records a\nrefund and trues up tax exactly (handles the case where partials came first).\nTimeouts are ignored (no `onTimeout`): the demo has no return-window auto-close.",
           "timeout": "30 days",
+          "commands": [
+            {
+              "name": "submitFeedback",
+              "emits": [
+                {
+                  "event": "FeedbackSubmitted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "updateStatus",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "OrderProcessing",
+                  "to": "processing",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderPartiallyShipped",
+                  "to": "partially_shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderShipped",
+                  "to": "shipped",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderDelivered",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturnRequested",
+                  "to": "return_requested",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderReturned",
+                  "to": "__terminal:returned",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCompleted",
+                  "to": "__terminal:complete",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderCancelled",
+                  "to": "__terminal:cancelled",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderRefunded",
+                  "to": "__terminal:refunded",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "refundOrder",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "Refunded",
+                  "to": "__self",
+                  "via": "explicit"
+                },
+                {
+                  "event": "OrderRefunded",
+                  "to": "__terminal:refunded",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "requestReturn",
+              "emits": [
+                {
+                  "event": "ReturnRequested",
+                  "to": "return_requested",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
-          "hasFinalize": true,
+          "hasFinalize": false,
           "transitions": [
             {
-              "on": "submitFeedback",
-              "kind": "update",
-              "to": "__terminal:complete",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "FeedbackSubmitted",
+              "kind": "event",
+              "to": "__terminal:complete"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:refunded",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "Refunded",
+              "kind": "event",
+              "to": "delivered"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "delivered",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "ReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "processing",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderCancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "partially_shipped",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderProcessing",
+              "kind": "event",
+              "to": "processing"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "shipped",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "return_requested",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderShipped",
+              "kind": "event",
+              "to": "shipped"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:cancelled",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderDelivered",
+              "kind": "event",
+              "to": "delivered"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:returned",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
             },
             {
-              "on": "updateStatus",
-              "kind": "update",
-              "to": "__terminal:complete",
-              "conditions": [
-                "event.status === 'refunded'"
-              ],
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderRefunded",
+              "kind": "event",
+              "to": "__terminal:refunded"
             },
             {
-              "on": "refundOrder",
-              "kind": "update",
-              "to": "__terminal:refunded",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderReturned",
+              "kind": "event",
+              "to": "__terminal:returned"
             },
             {
-              "on": "refundOrder",
-              "kind": "update",
-              "to": "delivered",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "requestReturn",
-              "kind": "update",
-              "to": "return_requested",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "delivered",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "delivered",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "OrderCompleted",
+              "kind": "event",
+              "to": "__terminal:complete"
             }
           ]
         },
         {
           "name": "return_requested",
-          "doc": "A return has been requested on a delivered order. `confirmReturn` issues the refund\n(via the decider's ReturnConfirmed fact) and finishes the order as `returned`; `denyReturn`\nclears the request and drops back to `delivered`.",
+          "doc": "A return has been requested on a delivered order. `confirmReturn` issues the refund\n(the decided `ReturnConfirmed` carries the record; the customer email is its effect)\nand finishes the order as `returned`; `denyReturn` clears the request and drops back\nto `delivered`. Timeouts are ignored — the demo has no review-SLA auto-close.",
           "timeout": "30 days",
+          "commands": [
+            {
+              "name": "confirmReturn",
+              "guarded": true,
+              "emits": [
+                {
+                  "event": "ReturnConfirmed",
+                  "to": "__terminal:returned",
+                  "via": "explicit"
+                }
+              ]
+            },
+            {
+              "name": "denyReturn",
+              "emits": [
+                {
+                  "event": "ReturnDenied",
+                  "to": "delivered",
+                  "via": "explicit"
+                }
+              ]
+            }
+          ],
           "transitional": false,
           "hasPrepare": false,
-          "hasFinalize": true,
+          "hasFinalize": false,
           "transitions": [
             {
-              "on": "confirmReturn",
-              "kind": "update",
-              "to": "__terminal:returned",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "ReturnConfirmed",
+              "kind": "event",
+              "to": "__terminal:returned"
             },
             {
-              "on": "denyReturn",
-              "kind": "update",
-              "to": "delivered",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "return_requested",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
-            },
-            {
-              "on": "signal",
-              "kind": "signal",
-              "to": "return_requested",
-              "finalizeActivities": [
-                "sendOrderStatusEmail",
-                "triggerFulfillmentCancel",
-                "sendFeedbackThankYouEmail",
-                "indexFulfillerOrder",
-                "startChild"
-              ]
+              "on": "ReturnDenied",
+              "kind": "event",
+              "to": "delivered"
             }
           ]
         }

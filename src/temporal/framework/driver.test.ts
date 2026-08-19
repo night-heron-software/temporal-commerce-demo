@@ -396,3 +396,90 @@ describe('runStateMachine — projection completion at close', () => {
     expect(markedCalls).toEqual([]);
   });
 });
+
+describe('runStateMachine — per-execution state timeouts (ADR-0024)', () => {
+  it('resolves a timeout function from the live context each iteration', async () => {
+    const resolved: number[] = [];
+    const config: StateMachineConfig<'live', never, Ctx, void> = {
+      states: {
+        live: {
+          timeout: (ctx: Ctx) => {
+            resolved.push(ctx.count);
+            return '5 minutes';
+          },
+          fn: async (ctx: Ctx) =>
+            ctx.count >= 2
+              ? { context: ctx, next: '__terminal:done' }
+              : { context: { count: ctx.count + 1 }, next: 'live' },
+        },
+      } as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+    };
+    await runStateMachine(config, { count: 0 }, [], []);
+    // Called once per wait, with the CURRENT context — 0, then 1, then 2.
+    expect(resolved).toEqual([0, 1, 2]);
+  });
+});
+
+describe('runStateMachine — rejected outputs (ADR-0024)', () => {
+  type Ev = { type: 'bad' } | { type: 'good' } | { type: 'finish' };
+
+  it('a rejection releases the caller with the error but neither transitions nor records', async () => {
+    const transitions: Array<{ from: string; to: string }> = [];
+    const contextUpdates: number[] = [];
+    const config: StateMachineConfig<'live', Ev, Ctx, Ctx> = {
+      states: {
+        live: {
+          fn: async (ctx: Ctx, input: { kind: string; event?: Ev }) => {
+            if (input.kind !== 'event') return { context: ctx, next: 'live' };
+            if (input.event!.type === 'bad') {
+              // What the decider-native surface returns for a guard refusal:
+              // error out, context untouched, marked rejected.
+              return { context: ctx, next: 'live', error: 'guard said no', rejected: true };
+            }
+            if (input.event!.type === 'finish') {
+              return { context: ctx, next: '__terminal:done' };
+            }
+            return {
+              context: { count: ctx.count + 1 },
+              next: 'live',
+              response: { count: ctx.count + 1 },
+            };
+          },
+        },
+      } as Any,
+      initialState: 'live',
+      onContextUpdate: (ctx) => {
+        contextUpdates.push(ctx.count);
+      },
+      onTransition: async (from, to) => {
+        transitions.push({ from, to });
+      },
+    };
+    const updateDef = { name: 'apply' };
+
+    const promise = runStateMachine(config, { count: 0 }, updateDef as Any);
+    const apply = handlers.get(updateDef)! as (e: Ev) => Promise<Ctx>;
+
+    // Rejected: the caller gets the typed error (single-update form throws it).
+    await expect(apply({ type: 'bad' })).rejects.toThrow('guard said no');
+    // Accepted: normal transition, response returned.
+    await expect(apply({ type: 'good' })).resolves.toEqual({ count: 1 });
+    await apply({ type: 'finish' });
+    await promise;
+
+    // The rejection fired no hooks: onContextUpdate/onTransition saw only the two
+    // real transitions (good → live, finish → terminal).
+    expect(transitions).toEqual([
+      { from: 'live', to: 'live' },
+      { from: 'live', to: '__terminal:done' },
+    ]);
+    expect(contextUpdates).toEqual([1, 1]);
+
+    // And recorded nothing: initial start record + the two real transitions only —
+    // no record whose trigger is the rejected 'bad' command.
+    const records = persistedBatches.flat();
+    expect(records.map((r) => r.triggerName ?? r.triggerKind)).toEqual(['start', 'good', 'finish']);
+  });
+});

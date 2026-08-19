@@ -4,6 +4,7 @@ import { useCart } from '@/context/CartContext';
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { beginCheckout } from '@/app/shop/cart-actions';
+import { cartLineTitle } from '@/app/shop/cart-line-display';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -84,13 +85,33 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                   className="bg-zinc-800 rounded-xl p-4 border border-zinc-700"
                 >
                   <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-medium text-white text-sm truncate max-w-[200px]">
-                        SKU: {item.variantId}
-                      </h3>
-                      <p className="text-purple-400 font-semibold">
-                        ${(item.price / 100).toFixed(2)}
-                      </p>
+                    <div className="flex gap-3 min-w-0">
+                      {item.thumbnailUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={item.thumbnailUrl}
+                          alt={item.productTitle ?? ''}
+                          className="w-12 h-12 rounded-lg object-cover border border-zinc-700 flex-shrink-0"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        {/* Product identity from the add-to-cart snapshot; a line without one
+                            falls back to its variantId — visibly, and labelled for what it is:
+                            `Variant <id>`, never `SKU: <id>` (a variantId is not a sku). The
+                            fallback rule lives in cart-line-display.ts so this surface and the
+                            checkout summaries cannot diverge again (mono #252 Phase 5a). */}
+                        <h3 className="font-medium text-white text-sm truncate max-w-[200px]">
+                          {cartLineTitle(item)}
+                        </h3>
+                        {item.variantTitle && (
+                          <p className="text-zinc-400 text-xs truncate max-w-[200px]">
+                            {item.variantTitle}
+                          </p>
+                        )}
+                        <p className="text-purple-400 font-semibold">
+                          ${(item.price / 100).toFixed(2)}
+                        </p>
+                      </div>
                     </div>
                     <button
                       onClick={() => removeItem(item.lineItemId)}

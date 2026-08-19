@@ -117,6 +117,12 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           variantId: { type: 'keyword' },
           quantity: { type: 'integer' },
           price: { type: 'integer' },
+          // Display snapshot captured at add-to-cart (backlog #1 / R1)
+          productId: { type: 'keyword' },
+          productTitle: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+          variantTitle: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+          optionLabels: { type: 'keyword' },
+          thumbnailUrl: { type: 'keyword', index: false },
         },
       },
       itemCount: { type: 'integer' },
@@ -160,6 +166,24 @@ export const INDEX_MAPPINGS: Record<string, any> = {
         },
       },
       deliveredAt: { type: 'date' },
+      // Refund ledger (backlog #4 / R4) — survives the workflow close a full refund causes
+      refunds: {
+        type: 'nested',
+        properties: {
+          refundId: { type: 'keyword' },
+          timestamp: { type: 'date' },
+          reason: { type: 'text' },
+          lines: {
+            properties: {
+              lineItemId: { type: 'keyword' },
+              quantity: { type: 'integer' },
+            },
+          },
+          // double, not integer: the tax pro-rate produces fractional amounts
+          refundAmount: { type: 'double' },
+          taxAmount: { type: 'double' },
+        },
+      },
       customerFeedback: {
         properties: {
           rating: { type: 'integer' },
@@ -307,6 +331,12 @@ export const INDEX_MAPPINGS: Record<string, any> = {
           variantId: { type: 'keyword' },
           quantity: { type: 'integer' },
           price: { type: 'integer' },
+          // Display snapshot captured at add-to-cart (backlog #1 / R1)
+          productId: { type: 'keyword' },
+          productTitle: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+          variantTitle: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+          optionLabels: { type: 'keyword' },
+          thumbnailUrl: { type: 'keyword', index: false },
         },
       },
       itemCount: { type: 'integer' },

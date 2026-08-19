@@ -7,7 +7,7 @@ export type {
   CheckoutStep,
   CheckoutState,
   CartDetails,
-  CartEvent,
+  CartCommand,
   CartUpdateResponse,
   CartInboundSignal,
   CheckoutWorkflowInput,

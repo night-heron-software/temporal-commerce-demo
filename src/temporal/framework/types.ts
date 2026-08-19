@@ -8,8 +8,8 @@ export type StateInput<TEvent, TSignal = never> =
 /**
  * "Stay in the current state" sentinel for a decision's `next`.
  *
- * A `decide` that means "remain where I am" returns `next: SELF` instead of naming
- * its own state. The driver (`definePureState`) substitutes the enclosing `selfState`
+ * A route-table entry that means "remain where I am" uses SELF instead of naming
+ * its own state. The machine compiler (`defineMachine`) substitutes the enclosing state
  * before the decision leaves the state function, so downstream code and history never
  * see the sentinel. This lets handlers that are SHARED across states (e.g. a guard that
  * rejects an edit and stays put) avoid hardcoding one state's name — which both reads as
@@ -19,58 +19,23 @@ export type StateInput<TEvent, TSignal = never> =
 export const SELF = '__self' as const;
 export type Self = typeof SELF;
 
-/**
- * The result of the pure decide phase — the transition decision
- * and any instructions for the finalize phase.
- */
-export interface DecisionResult<TState extends string, TContext, TResponse, TFinalize = void> {
-  context: TContext;
-  next: TState | `__terminal:${string}` | Self;
-  response?: TResponse;
-  error?: string;
-  /** Data to pass to the finalize phase. Omit or set to undefined to skip finalization. */
-  finalize?: TFinalize;
-}
-
-/**
- * A state handler structured as prepare → decide → finalize.
- *
- * - prepare:  Gather data from activities. MAY throw. MAY be omitted.
- * - decide:   Pure function. MUST NOT call activities. MUST NOT throw. MUST be synchronous.
- * - finalize: Execute side effects based on the decision. MAY throw. MAY be omitted.
- */
-export interface PureStateHandler<
-  TState extends string,
-  TEvent,
-  TContext,
-  TResponse,
-  TSignal = never,
-  TPrepared = void,
-  TFinalize = void,
-> {
-  /** Gather data from activities before the decision. */
-  prepare?: (ctx: Readonly<TContext>, input: StateInput<TEvent, TSignal>) => Promise<TPrepared>;
-
-  /** Pure decision function. MUST be synchronous. MUST NOT call activities or throw. */
-  decide: (
-    ctx: Readonly<TContext>,
-    input: StateInput<TEvent, TSignal>,
-    prepared: TPrepared,
-  ) => DecisionResult<TState, TContext, TResponse, TFinalize>;
-
-  /** Execute side effects after the decision. */
-  finalize?: (
-    ctx: Readonly<TContext>,
-    decision: DecisionResult<TState, TContext, TResponse, TFinalize>,
-  ) => Promise<void>;
-}
-
 /** A captured activity call — its name, arguments, and result (or error). Values are size-capped. */
 export interface ActivityCall {
   name: string;
   args?: unknown;
   result?: unknown;
   error?: string;
+  /**
+   * Milliseconds the WORKFLOW waited on this activity — measured in workflow time, so it
+   * spans dispatch + queue + execution (schedule-to-close as the workflow experienced it),
+   * not the activity's own runtime. That is deliberately the number that explains a slow
+   * transition: an activity doing 3ms of work behind 60ms of dispatch reads ~63ms here.
+   *
+   * Replay-safe: `Date.now()` inside a workflow is SDK-patched to workflow time, which is
+   * reconstructed from history event timestamps — a replay recomputes the identical value.
+   * Absent for calls whose completion the workflow never observed.
+   */
+  durationMs?: number;
 }
 
 export interface StateOutput<TState extends string, TContext, TResponse> {
@@ -79,9 +44,18 @@ export interface StateOutput<TState extends string, TContext, TResponse> {
   response?: TResponse;
   error?: string;
   /**
+   * The input was REJECTED (ADR-0024): a guard refused it, prepare threw, or the state
+   * does not accept the command. `error` carries the reason; `context` is unchanged and
+   * `next` is the same state. The driver releases the caller with the error and skips
+   * `onContextUpdate`, `onTransition`, and transition recording — a rejection is not a
+   * transition and must not project. Only the decider-native surface sets this; outputs
+   * without it behave exactly as before.
+   */
+  rejected?: boolean;
+  /**
    * Activities called during this state's `prepare` and `finalize` phases (ADR-0010), with their
-   * args + results. Populated by `definePureState` via the activity-capture interceptor; absent for
-   * raw states.
+   * args + results. Populated by the machine compiler (`defineMachine`) via the activity-capture
+   * interceptor; absent for raw states.
    */
   activities?: { prepare: ActivityCall[]; finalize: ActivityCall[] };
 }
@@ -93,7 +67,13 @@ export type StateFunction<TState extends string, TEvent, TContext, TResponse, TS
 
 export interface StateConfig<TState extends string, TEvent, TContext, TResponse, TSignal = never> {
   fn: StateFunction<TState, TEvent, TContext, TResponse, TSignal>;
-  timeout?: Duration;
+  /**
+   * How long this state waits for input before a timeout tick. A function form
+   * resolves per loop iteration from the live context (ADR-0024: per-execution
+   * timeouts — e.g. a fulfiller strategy descriptor tuning its poll cadence) —
+   * deterministic inputs only, like everything in the sandbox.
+   */
+  timeout?: Duration | ((ctx: Readonly<TContext>) => Duration);
   transitional?: boolean;
 }
 
@@ -313,23 +293,7 @@ export interface SignalRegistration<TSignal, TArgs extends any[] = any[]> {
 /** Extract the terminal reason from '__terminal:reason' strings */
 export type TerminalSuffix<T extends string> = T extends `__terminal:${infer R}` ? R : never;
 
-/**
- * Jérémie Chassaing's Functional Event Sourcing Decider, in TypeScript
- * (see docs/research/functional-event-sourcing-decider.md).
- *
- * A pure, infrastructure-free bundle: `decide` turns a command + current state into the
- * facts (`Event[]`) that happened; `evolve` folds one fact into state and is the only writer.
- * `initialState` and `isTerminal` give the aggregate a defined birth and death.
- *
- * This type is ADDITIVE and consumed by nothing in the driver — it exists so a domain that
- * chooses to express its core in Chassaing's shape (currently the inventory `transfer` pilot,
- * Theme 1 P3 / Option B) references one shared definition instead of re-inventing it. The
- * framework driver still runs the `prepare → decide → finalize` handlers unchanged; a domain
- * using this type wires it in behind those handlers.
- */
-export interface Decider<Command, Event, State> {
-  decide: (command: Command, state: State) => Event[];
-  evolve: (state: State, event: Event) => State;
-  initialState: State;
-  isTerminal: (state: State) => boolean;
-}
+// The shared `Decider` interface that once lived here (with `isTerminal` and a required
+// `initialState`) was retired in clarity-plan Phase 4 — domains implement `MachineDecider`
+// from './machine' instead: terminality belongs to route tables, and `initialState` is an
+// optional test seam.

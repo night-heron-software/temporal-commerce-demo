@@ -53,9 +53,11 @@ const eslintConfig = defineConfig([
   {
     // Architecture invariants for domain state-machine code (ported from nightheron-mono):
     // no raw '__terminal:' strings (use terminal()/isTerminal()/deriveDisplayStatus from
-    // the framework) and no raw definePureState authoring (use defineDomain()/transitions()
-    // or the domain.state() escape hatch). The framework implements the encoding itself and
-    // tests may assert on it, so both are exempt.
+    // the framework), and the retired first-generation authoring surface (defineDomain /
+    // defineTransitions / definePureState / route and their types) must not return —
+    // defineMachine is the only authoring surface (ADR-0024, mono clarity plan Phase 4).
+    // The framework implements the terminal encoding itself and tests may assert on it,
+    // so both are exempt from the terminal-literal ban.
     files: ["src/temporal/**/*.ts"],
     ignores: ["src/temporal/framework/**", "**/*.test.ts"],
     rules: {
@@ -67,13 +69,33 @@ const eslintConfig = defineConfig([
             "Do not hardcode '__terminal:...' strings. Construct terminal targets with " +
             "terminal('reason') and test them with isTerminal(state, 'reason') from the framework.",
         },
-        {
+        // The names were DELETED from the vendored framework in the 2026-08-09 sync
+        // (mono clarity-plan Phase 4); this ban keeps them from being re-invented.
+        // Matched on imports whose source ends in 'framework' (the vendored copy's
+        // relative import path) — 'route' and 'Decider' are generic enough to be
+        // legitimate names elsewhere. Type imports are banned too: the types are gone.
+        ...[
+          "defineDomain",
+          "defineTransitions",
+          "definePureState",
+          "route",
+          "PureStateHandler",
+          "DecisionResult",
+          "TransitionHandler",
+          "SignalHandler",
+          "SignalMap",
+          "InputHandlers",
+          "TransitionMap",
+          "RouteTable",
+          "Decider",
+        ].map((name) => ({
           selector:
-            'ImportDeclaration:not([importKind="type"]) > ImportSpecifier[imported.name="definePureState"][local.name="definePureState"]',
+            `ImportDeclaration[source.value=/framework$/] ImportSpecifier[imported.name="${name}"]`,
           message:
-            "Use defineDomain().transitions() (or the domain.state() escape hatch) from the " +
-            "authoring layer instead of raw definePureState().",
-        },
+            `'${name}' is the retired first-generation authoring surface, deleted in the mono's ` +
+            "clarity-plan Phase 4 (ADR-0024). Author machines with defineMachine: a pure " +
+            "MachineDecider (decide/evolve) plus per-state commands / route / effects declarations.",
+        })),
       ],
     },
   },

@@ -18,9 +18,10 @@ the outcome across its domains.
 
 Domains express their pure core as a Chassaing **decider**: `decide(command, state) => facts`
 (pure, emits past-tense facts) and `evolve(state, fact) => state` (pure, the **only** writer of
-state). Each domain has a co-located `*-decider.ts`
-([cart-decider.ts](../../src/temporal/cart/cart-decider.ts),
-[oms-decider.ts](../../src/temporal/oms/oms-decider.ts), …). The `prepare → decide → finalize`
+state). Each domain's decider is co-located in its machine's states file
+([cart/states.ts](../../src/temporal/cart/states.ts),
+[oms/states.ts](../../src/temporal/oms/states.ts), …; originally a separate `*-decider.ts`,
+merged by the CommandBlock sweep — see the 2026-08-10 sync). The `prepare → decide → finalize`
 handler stays the shell: its `decide` runs the pure decider, folds the facts with `evolve`, and
 returns the driver's `{ context, next }`. **The `runStateMachine` driver is unchanged.**
 

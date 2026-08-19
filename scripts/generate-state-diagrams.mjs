@@ -48,14 +48,14 @@ const SKIP_DIRS = new Set(['framework', 'transition-recorder']);
 const OUT = path.join(ROOT, 'docs/reference/state-machine-diagrams.md');
 const OUT_JSON = path.join(ROOT, 'docs/reference/state-graph.json');
 
+const ARGS = new Set(process.argv.slice(2));
+const CHECK = ARGS.has('--check');
+const STRICT = ARGS.has('--strict');
+
 /** Domain name for a path relative to ROOT: src/temporal/<domain>/… */
 function domainOfRel(rel) {
   return rel.split(path.sep)[2];
 }
-
-const ARGS = new Set(process.argv.slice(2));
-const CHECK = ARGS.has('--check');
-const STRICT = ARGS.has('--strict');
 
 // ============================================================================
 // File traversal
@@ -534,6 +534,287 @@ function handlerEdges(on, kind, handlerNode, decls, src, locals = new Map()) {
   }));
 }
 
+// ============================================================================
+// Decider-native surface (ADR-0024 `defineMachine`) — routing is DATA
+// ============================================================================
+
+/** True for `m.state('name', { …, route: {…} })` — the ADR-0024 surface (the legacy
+ *  `.state(name, handler)` escape hatch has no `route` property). */
+function isMachineStateCall(call) {
+  if (!call || !ts.isCallExpression(call)) return false;
+  const callee = call.expression;
+  if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== 'state') return false;
+  const def = call.arguments[1] && unwrap(call.arguments[1]);
+  if (!def || !ts.isObjectLiteralExpression(def)) return false;
+  return def.properties.some((p) => propName(p) === 'route');
+}
+
+/**
+ * Extract a decider-native state's edges, accepted commands, and config from its
+ * definition object. Routing is a data table (event type → target), so edges are read
+ * directly — no decide-body scanning. Commands are the state's accepted inputs; each
+ * carries the awaited calls of its `prepare`. `onTimeout` synthesizes a command whose
+ * emitted events we cannot know statically, so it contributes timeout edges to every
+ * distinct route target (like a conditional's branches). Effects attach their awaited
+ * calls to the matching event's edge as finalize activities.
+ */
+/**
+ * Resolve a named property's initializer inside an object literal to an object literal —
+ * following an identifier (`routes: sharedRoutes`) or a member access on a block
+ * (`routes: updateStatusBlock.routes`), the ADR-0026 handler-override shape.
+ * (Ported from mono #253.)
+ */
+function propObjectLiteral(obj, propKey, decls) {
+  if (!obj || !ts.isObjectLiteralExpression(obj)) return null;
+  let found = null;
+  for (const p of obj.properties) {
+    // Look THROUGH a spread (`{ ...updateStatusBlock, enrich }`) — ported from mono #270.
+    // Without it, a handler that overrides one phase of a block reported no `evolve`, and a
+    // command that can force many statuses rendered as "(no events — idempotent no-op)" — the
+    // diagram stating the exact opposite of the truth. Precedence is JS's: later wins, and an
+    // OWN assignment replaces what a preceding spread contributed even when it is unresolvable
+    // (returning null then, rather than falling back to the spread — a handler that
+    // deliberately overrides `evolve` must not be reported as the block's).
+    if (ts.isSpreadAssignment(p)) {
+      const spreadObj = resolveToObj(unwrap(p.expression), decls);
+      if (spreadObj) {
+        const fromSpread = propObjectLiteral(spreadObj, propKey, decls);
+        if (fromSpread) found = fromSpread;
+      }
+      continue;
+    }
+    if (propName(p) !== propKey || !ts.isPropertyAssignment(p)) continue;
+    const v = unwrap(p.initializer);
+    const direct = resolveToObj(v, decls);
+    if (direct) {
+      found = direct;
+      continue;
+    }
+    found = null;
+    if (ts.isPropertyAccessExpression(v) && ts.isIdentifier(v.expression)) {
+      const owner = resolveToObj(v.expression, decls);
+      if (owner) found = propObjectLiteral(owner, v.name.text, decls);
+    }
+  }
+  return found;
+}
+
+/**
+ * Does this handler object carry `propKey`, directly or via a spread? (Mono #270.)
+ *
+ * Separate from `propObjectLiteral` because `guard` is a FUNCTION, not an object literal —
+ * only its presence is rendered (the `*(guarded)*` marker). A spread-form handler has no
+ * literal `guard` property of its own, so a presence test that only scanned own properties
+ * silently dropped the marker.
+ */
+function hasHandlerProp(obj, propKey, decls) {
+  if (!obj || !ts.isObjectLiteralExpression(obj)) return false;
+  let found = false;
+  for (const p of obj.properties) {
+    if (ts.isSpreadAssignment(p)) {
+      const spreadObj = resolveToObj(unwrap(p.expression), decls);
+      if (spreadObj && hasHandlerProp(spreadObj, propKey, decls)) found = true;
+      continue;
+    }
+    if (propName(p) === propKey) found = true;
+  }
+  return found;
+}
+
+function machineStateFromDef(defObj, decls, _src) {
+  const edges = [];
+  const commands = [];
+  let timeout = null;
+  let transitional = false;
+  let routeObj = null;
+  let deriveCall = null;
+  let commandsObj = null;
+  let effectsObj = null;
+  let onTimeoutNode = null;
+
+  for (const p of defObj.properties) {
+    const key = propName(p);
+    if (!key || !ts.isPropertyAssignment(p)) continue;
+    const v = unwrap(p.initializer);
+    if (key === 'route') {
+      routeObj = resolveToObj(v, decls);
+      // ADR-0026 (ported from mono #253): `route: deriveRoutes(commands, extras?)` — the table
+      // is derived from the blocks' `routes` declarations. Read those declarations directly;
+      // they are object literals, exactly as statically visible as the old hand-written table.
+      if (
+        !routeObj &&
+        ts.isCallExpression(v) &&
+        ts.isIdentifier(v.expression) &&
+        v.expression.text === 'deriveRoutes'
+      ) {
+        deriveCall = v;
+      }
+    } else if (key === 'commands') commandsObj = resolveToObj(v, decls);
+    else if (key === 'effects') effectsObj = resolveToObj(v, decls);
+    else if (key === 'onTimeout') onTimeoutNode = v;
+    else if (key === 'timeout' && ts.isStringLiteral(v)) timeout = v.text;
+    else if (key === 'transitional' && p.initializer.kind === ts.SyntaxKind.TrueKeyword)
+      transitional = true;
+  }
+
+  // If the route is derived, the state's commands are deriveRoutes' first argument —
+  // resolve from there when the def's own `commands:` was not already resolvable.
+  if (deriveCall && !commandsObj) commandsObj = resolveToObj(deriveCall.arguments[0], decls);
+
+  // Shared handler groups arrive as spreads (`...lifecycleCommands`) — resolve them.
+  // (Needed before route derivation: derived tables are built FROM the handlers.)
+  const commandProps = [];
+  if (commandsObj) {
+    for (const p of commandsObj.properties) {
+      if (ts.isSpreadAssignment(p) && ts.isIdentifier(p.expression)) {
+        const spreadObj = resolveToObj(p.expression, decls);
+        if (spreadObj) commandProps.push(...spreadObj.properties);
+        continue;
+      }
+      commandProps.push(p);
+    }
+  }
+
+  const pushRouteEdge = (rawName, target) => {
+    if (!target) return;
+    // String-literal keys (the `'*'` fallback) keep their quotes in propName — strip.
+    const on = rawName.replace(/^'(.*)'$/, '$1');
+    const existing = edges.find((e) => e.on === on && e.kind === 'event');
+    if (existing) {
+      existing.to = target; // literal/derived merge: last write wins (deriveRoutes forbids conflicts)
+      return;
+    }
+    edges.push({
+      on,
+      kind: 'event',
+      to: target,
+      prepareActivities: [],
+      finalizeActivities: [],
+      conditions: [],
+      signalKinds: [],
+    });
+  };
+
+  if (routeObj) {
+    for (const p of routeObj.properties) {
+      if (!ts.isPropertyAssignment(p)) continue;
+      pushRouteEdge(propName(p), evalTarget(p.initializer, decls));
+    }
+  } else if (deriveCall) {
+    // Mirror deriveRoutes: union of each handler's `routes` declarations…
+    for (const p of commandProps) {
+      const handlerObj = resolveToObj(propValueNode(p, decls), decls);
+      const routesObj = handlerObj ? propObjectLiteral(handlerObj, 'routes', decls) : null;
+      if (!routesObj) continue;
+      for (const rp of routesObj.properties) {
+        if (!ts.isPropertyAssignment(rp)) continue;
+        pushRouteEdge(propName(rp), evalTarget(rp.initializer, decls));
+      }
+    }
+    // …then the extras literal (wildcard / weaken-to-SELF), same reading as a route table.
+    const extrasObj = deriveCall.arguments[1] ? resolveToObj(deriveCall.arguments[1], decls) : null;
+    if (extrasObj) {
+      for (const rp of extrasObj.properties) {
+        if (!ts.isPropertyAssignment(rp)) continue;
+        pushRouteEdge(propName(rp), evalTarget(rp.initializer, decls));
+      }
+    }
+  }
+
+  for (const p of commandProps) {
+    const name = propName(p);
+    if (!name) continue;
+    const handlerObj = resolveToObj(propValueNode(p, decls), decls);
+    const prepareBody = handlerObj ? findPropBody(handlerObj, 'prepare', decls) : null;
+    const guarded = hasHandlerProp(handlerObj, 'guard', decls);
+    const prepareActivities = extractAwaitedCallsInBody(prepareBody);
+
+    // Per-command journey (ported from mono #253): the events this command can emit are its
+    // block's evolve-map KEYS (the CommandBlock convention: the block is the whole story),
+    // each joined against this state's route table — explicit entry, wildcard fall-through,
+    // or unrouted (both of the latter mean "stays"). `declared` records the block's own
+    // `routes` target where present, so drift between a declaration and a hand-written
+    // table is visible data (and CI-checkable).
+    const evolveObj = handlerObj ? propObjectLiteral(handlerObj, 'evolve', decls) : null;
+    const routesObj = handlerObj ? propObjectLiteral(handlerObj, 'routes', decls) : null;
+    const declaredTargets = {};
+    if (routesObj) {
+      for (const rp of routesObj.properties) {
+        if (!ts.isPropertyAssignment(rp)) continue;
+        const t = evalTarget(rp.initializer, decls);
+        if (t) declaredTargets[propName(rp).replace(/^'(.*)'$/, '$1')] = t;
+      }
+    }
+    const emits = [];
+    if (evolveObj) {
+      for (const ep of evolveObj.properties) {
+        const ev = propName(ep);
+        if (!ev) continue;
+        const explicit = edges.find((e) => e.on === ev && e.kind === 'event');
+        const wildcard = edges.find((e) => e.on === '*' && e.kind === 'event');
+        const via = explicit ? 'explicit' : wildcard ? 'wildcard' : 'unrouted';
+        const to = explicit ? explicit.to : wildcard ? wildcard.to : '__self';
+        emits.push({
+          event: ev,
+          to,
+          via,
+          ...(declaredTargets[ev] !== undefined ? { declared: declaredTargets[ev] } : {}),
+        });
+      }
+    }
+
+    commands.push({
+      name,
+      ...(guarded ? { guarded: true } : {}),
+      ...(prepareActivities.length ? { prepareActivities } : {}),
+      ...(emits.length ? { emits } : {}),
+    });
+  }
+  if (effectsObj) {
+    for (const p of effectsObj.properties) {
+      const ev = propName(p);
+      if (!ev) continue;
+      const calls = extractAwaitedCallsInBody(findPropBody(effectsObj, ev, decls));
+      if (!calls.length) continue;
+      const edge = edges.find((e) => e.on === ev);
+      if (edge) edge.finalizeActivities = calls;
+    }
+  }
+  if (onTimeoutNode) {
+    // Label with the synthesized command's literal type when derivable.
+    let cmdName = 'timeout';
+    const body =
+      ts.isArrowFunction(onTimeoutNode) || ts.isFunctionExpression(onTimeoutNode)
+        ? unwrap(onTimeoutNode.body) // expression-body arrows parenthesize the object literal
+        : null;
+    const ret = body ? findReturnedObjectLiteral(body) : null;
+    if (ret) {
+      for (const rp of ret.properties) {
+        if (
+          propName(rp) === 'type' &&
+          ts.isPropertyAssignment(rp) &&
+          ts.isStringLiteral(unwrap(rp.initializer))
+        ) {
+          cmdName = unwrap(rp.initializer).text;
+        }
+      }
+    }
+    for (const to of new Set(edges.map((e) => e.to))) {
+      edges.push({
+        on: cmdName,
+        kind: 'timeout',
+        to,
+        prepareActivities: [],
+        finalizeActivities: [],
+        conditions: [],
+        signalKinds: [],
+      });
+    }
+  }
+
+  return { edges, commands, timeout, transitional };
+}
+
 /** Extract edges [{on, kind, to, prepareActivities, finalizeActivities, conditions, signalKinds}] from a domain authoring call. */
 function edgesFromCall(call, decls, src) {
   const edges = [];
@@ -668,6 +949,9 @@ function edgesFromCall(call, decls, src) {
           });
       }
     }
+  } else if (method === 'state' && isMachineStateCall(call)) {
+    // Decider-native surface: routing is data; SELF resolution happens below.
+    edges.push(...machineStateFromDef(unwrap(args[1]), decls, src).edges);
   } else if (method === 'state') {
     const node =
       args[1] && unwrap(args[1]).kind === ts.SyntaxKind.Identifier
@@ -755,9 +1039,40 @@ function parseStatesObject(obj, registryName, src, decls) {
 
   const states = [];
   for (const p of obj.properties) {
-    if (!ts.isPropertyAssignment(p)) continue;
-    const name = propName(p);
-    const entryObj = unwrap(p.initializer);
+    // Decider-native registries commonly use shorthand entries (`{ active, checkout }`)
+    // because `m.state()` already carries timeout/transitional — resolve the binding.
+    if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) continue;
+    const name = ts.isShorthandPropertyAssignment(p) ? p.name.text : propName(p);
+    let entryObj = ts.isShorthandPropertyAssignment(p) ? p.name : unwrap(p.initializer);
+    // A registry entry may be a binding to an authoring call: resolve it.
+    if (entryObj && ts.isIdentifier(entryObj)) {
+      const init = unwrap(decls.get(entryObj.text)?.init);
+      if (init && ts.isCallExpression(init) && isMachineStateCall(init)) entryObj = init;
+    }
+    // Decider-native entry: `name: m.state('name', { commands, route, … })` —
+    // timeout/transitional live in the def, edges come from the route table.
+    if (entryObj && ts.isCallExpression(entryObj) && isMachineStateCall(entryObj)) {
+      const selfState = entryObj.arguments[0] ? evalTarget(entryObj.arguments[0], decls) : name;
+      const m = machineStateFromDef(unwrap(entryObj.arguments[1]), decls, src);
+      for (const e of m.edges) if (e.to === '__self') e.to = selfState ?? name;
+      const seenKeys = new Set();
+      const dedupedEdges = m.edges.filter((e) => {
+        const key = `${e.on}->${e.to}`;
+        if (seenKeys.has(key)) return false;
+        seenKeys.add(key);
+        return true;
+      });
+      const doc = jsdocBefore(src, `${name}:`) || null;
+      states.push({
+        name,
+        timeout: m.timeout,
+        transitional: m.transitional,
+        edges: dedupedEdges,
+        doc,
+        commands: m.commands,
+      });
+      continue;
+    }
     let timeout = null;
     let transitional = false;
     if (entryObj && ts.isObjectLiteralExpression(entryObj)) {
@@ -925,8 +1240,11 @@ function formatNotes(edge) {
 function triggerLabel(edge) {
   const { on, kind } = edge;
   if (on === '(auto)' || on === '') return '*(auto)*';
-  if (kind === 'timeout') return '`timeout`';
+  if (kind === 'timeout') return on === 'timeout' ? '`timeout`' : `\`timeout → ${on}\``;
   if (kind === 'signal') return '`signal`';
+  // 'event' (ADR-0024): the machine routed on an emitted event, whatever transport
+  // carried the command that produced it.
+  if (kind === 'event') return `\`event: ${on}\``;
   return `\`update: ${on}\``;
 }
 
@@ -935,6 +1253,34 @@ function stateSection(s) {
   if (s.doc) {
     lines.push('');
     lines.push(s.doc);
+  }
+  if (s.commands && s.commands.length > 0) {
+    lines.push('');
+    lines.push('**Accepts** (each command → the events it can emit ⇒ where each leads):');
+    lines.push('');
+    for (const c of s.commands) {
+      const marks = [
+        c.guarded ? 'guarded' : null,
+        c.prepareActivities?.length ? `prepare: ${c.prepareActivities.join(', ')}` : null,
+      ].filter(Boolean);
+      const head = `\`${c.name}\`${marks.length ? ` *(${marks.join('; ')})*` : ''}`;
+      const journey = (c.emits ?? [])
+        .map((em) => {
+          // `__self` is this graph's stay sentinel (the demo does not substitute SELF with
+          // the state name the way the mono's parser does — the raw sentinel IS the demo's
+          // graph convention, and changing it would break the port's edge-triple invariant).
+          const dest = em.to.startsWith('__terminal:')
+            ? `**${em.to.replace('__terminal:', '')}** (terminal)`
+            : em.to === s.name || em.to === '__self'
+              ? '*stays*'
+              : `\`${em.to}\``;
+          return `\`${em.event}\` ⇒ ${dest}`;
+        })
+        .join(' · ');
+      lines.push(`- ${head}${journey ? ` → ${journey}` : ' → *(no events — idempotent no-op)*'}`);
+    }
+    lines.push('');
+    lines.push('Any other command is rejected.');
   }
   if (s.edges.length > 0) {
     lines.push('');
@@ -950,7 +1296,22 @@ function stateSection(s) {
         ? `⇒ ${to.replace('__terminal:', '')}`
         : `\`${to}\``;
       const trigger = triggerLabel(edge);
-      const notes = formatNotes(edge);
+      let notes = formatNotes(edge);
+      if (edge.on === '*' && s.commands?.length) {
+        // Make the wildcard's cargo visible: the emitted events that actually fall
+        // through it in this state (they have no explicit route entry).
+        const fallers = [
+          ...new Set(
+            s.commands.flatMap((c) =>
+              (c.emits ?? []).filter((em) => em.via === 'wildcard').map((em) => em.event),
+            ),
+          ),
+        ];
+        if (fallers.length) {
+          const label = `falls through: ${fallers.map((f) => `\`${f}\``).join(', ')}`;
+          notes = notes ? `${notes}; ${label}` : label;
+        }
+      }
       lines.push(`| ${trigger} | ${dest} | ${notes} |`);
     }
   }
@@ -1367,8 +1728,8 @@ function buildDocument() {
     `Reference for every domain state machine in \`temporal-commerce-demo\`. ` +
     `Regenerated from source by \`npm run docs:diagrams\`.\n\n` +
     `> **Trigger kinds** — \`update:\` (Temporal Update, synchronous), \`signal\` (fire-and-forget Signal), \`timeout\` (wall-clock deadline), *(auto)* (transitional state, no input). ` +
-    `The auto-vs-timeout distinction is recorded, not just displayed: transitional advancement is persisted to \`workflow_state_transitions\` as trigger kind \`automatic\` (PR #45). ` +
     `Self-loops (event processed but state stays the same) are shown as looping arcs on the state. ` +
+    `The auto-vs-timeout distinction is recorded, not just displayed: transitional advancement is persisted to \`workflow_state_transitions\` as trigger kind \`automatic\` (PR #45). ` +
     `Notes show \`prepare:\` activities (I/O), \`if:\` conditions tested in \`decide\`, and \`finalize:\` activities (side-effects).\n\n`;
   const { edges: crossEdges, unresolved: crossUnresolved } = collectCrossDomainEdges();
   const crossDomain = crossDomainSection(crossEdges);
@@ -1390,7 +1751,11 @@ function buildDocument() {
  */
 function buildGraph(machines, crossEdges) {
   return {
-    schemaVersion: 1,
+    // v2 (ADR-0024): machines gain a unique `id` (the registry name — `domain` names the
+    // owning package and is NOT unique when a package owns two machines), states may carry
+    // `commands` (the decider-native surface's accepted inputs, with guard/prepare info),
+    // and transition `kind` may be 'event' (routed on an emitted event, not a transport).
+    schemaVersion: 3,
     generator: 'scripts/generate-state-diagrams.mjs',
     machines: machines.map(({ machine, rel, initialState }) => {
       const terminals = new Set();
@@ -1420,6 +1785,7 @@ function buildGraph(machines, crossEdges) {
           name: s.name,
           ...(s.doc ? { doc: s.doc } : {}),
           ...(s.timeout ? { timeout: s.timeout } : {}),
+          ...(s.commands && s.commands.length ? { commands: s.commands } : {}),
           transitional: !!s.transitional,
           hasPrepare: s.edges.some((e) => e.prepareActivities && e.prepareActivities.length > 0),
           hasFinalize: s.edges.some((e) => e.finalizeActivities && e.finalizeActivities.length > 0),
@@ -1427,6 +1793,7 @@ function buildGraph(machines, crossEdges) {
         };
       });
       return {
+        id: machine.registry,
         domain: domainOfRel(rel),
         registry: machine.registry,
         source: rel,

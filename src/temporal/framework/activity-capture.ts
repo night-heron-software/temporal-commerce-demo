@@ -3,15 +3,15 @@
  * ambient-correlation header injection.
  *
  * A workflow outbound interceptor records every activity scheduled while a capture bucket is
- * active — its name, arguments, and result (or error). `definePureState` opens a bucket around the
- * `prepare` phase and another around `finalize`, so each transition knows exactly which activities
- * ran at the beginning vs the end, and what they returned.
+ * active — its name, arguments, and result (or error). The machine compiler (`defineMachine`)
+ * opens a bucket around the `prepare` phase and another around the effects, so each transition
+ * knows exactly which activities ran at the beginning vs the end, and what they returned.
  *
  * The same interceptor also stamps every scheduled activity (local included) with a
  * `correlationId` header read from the workflow's `CorrelationId` Search Attribute
- * (ADR-0011), so the worker's activity-inbound interceptor (`src/lib/worker-otel.ts`) can
- * establish ambient correlation for activity logs. Workflows without the attribute (the
- * inventory singleton, service workflows) are skipped.
+ * (ADR-0011), so the host worker's activity-inbound interceptor can establish ambient
+ * correlation for activity logs. Workflows without the attribute (singleton service
+ * workflows) are skipped.
  *
  * Workflow-safe (only `@temporalio/workflow`). The module-level bucket is per-workflow-execution
  * (Temporal isolates workflow module state), and is only mutated around the awaited prepare/finalize
@@ -81,12 +81,19 @@ function capture<T>(activityType: string, args: unknown, run: () => Promise<T>):
     return run();
   const call: ActivityCall = { name: activityType, args: capValue(args) };
   activeBucket.push(call);
+  // Workflow time, not host time: Date.now() is SDK-patched inside the sandbox and is
+  // reconstructed from history timestamps on replay, so this stays deterministic. It measures
+  // what the WORKFLOW waited — dispatch + queue + execution — which is the number that
+  // explains a slow transition (see the per-hop findings in mono's 2026-07-30 perf analysis).
+  const startedAt = Date.now();
   return run().then(
     (result) => {
+      call.durationMs = Date.now() - startedAt;
       call.result = capValue(result);
       return result;
     },
     (err: unknown) => {
+      call.durationMs = Date.now() - startedAt;
       call.error = err instanceof Error ? err.message : String(err);
       throw err;
     },
@@ -108,13 +115,15 @@ const outbound: WorkflowOutboundCallsInterceptor = {
     input: ActivityInput,
     next: Next<WorkflowOutboundCallsInterceptor, 'scheduleActivity'>,
   ) {
-    return capture(input.activityType, input.args, () => next(withCorrelationHeader(input)));
+    const tagged = withCorrelationHeader(input);
+    return capture(tagged.activityType, tagged.args, () => next(tagged));
   },
   scheduleLocalActivity(
     input: LocalActivityInput,
     next: Next<WorkflowOutboundCallsInterceptor, 'scheduleLocalActivity'>,
   ) {
-    return capture(input.activityType, input.args, () => next(withCorrelationHeader(input)));
+    const tagged = withCorrelationHeader(input);
+    return capture(tagged.activityType, tagged.args, () => next(tagged));
   },
 };
 

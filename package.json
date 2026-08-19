@@ -38,7 +38,7 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "docs:diagrams": "node scripts/generate-state-diagrams.mjs",
-    "docs:diagrams:check": "node scripts/generate-state-diagrams.mjs --strict && node scripts/generate-state-diagrams.mjs --check",
+    "docs:diagrams:check": "node scripts/generate-state-diagrams.mjs --strict --check",
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"scripts/**/*.{ts,mjs}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"scripts/**/*.{ts,mjs}\"",
     "dev:up": "concurrently --names \"storefront,workers\" --prefix-colors \"cyan,magenta\" --kill-others-on-fail \"npm run dev:storefront\" \"npm run dev:worker\"",

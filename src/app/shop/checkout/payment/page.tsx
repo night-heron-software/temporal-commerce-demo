@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { setPaymentMethod } from '@/app/shop/cart-actions';
+import { CartChangedBanner } from '@/components/CartChangedBanner';
 
 /**
  * Mock Payment Page — Demo version
@@ -11,14 +12,16 @@ import { setPaymentMethod } from '@/app/shop/cart-actions';
  */
 export default function PaymentPage() {
   const router = useRouter();
-  const { cartId } = useCart();
+  const { cartId, resolved } = useCart();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Redirect if no cart
+  // Redirect if no cart — only once the lookup has FINISHED. `cartId` is null on the first
+  // render of every visit, so the unguarded version bounced shoppers who had a perfectly good
+  // cart, and could not distinguish that from genuinely having none (#12).
   useEffect(() => {
-    if (!cartId) router.push('/shop');
-  }, [cartId, router]);
+    if (resolved && !cartId) router.push('/shop');
+  }, [resolved, cartId, router]);
 
   const handleMockPayment = async () => {
     if (!cartId) return;
@@ -49,6 +52,9 @@ export default function PaymentPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
+      {/* R3 (F6): the bounce back from review lands HERE — this page must explain it.
+          The banner names what changed and the old vs new total. */}
+      <CartChangedBanner />
       <div className="mt-8 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
         <h2 className="text-xl font-semibold mb-6">Payment</h2>
 

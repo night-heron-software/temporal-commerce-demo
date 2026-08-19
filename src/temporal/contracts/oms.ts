@@ -30,20 +30,41 @@ export interface OrderLineItem {
   thumbnailS3Key?: string; // Persisted copy: order-snapshots/{orderId}/{lineItemId}.jpg
 }
 
-// Order lifecycle status
+// Order lifecycle status (superset of the machine states — includes terminals).
+// NOTE: every OrderStateName in the OMS state machine is also a valid OrderStatus
+// (the driver derives `status` from the current state name via deriveDisplayStatus),
+// so the transitional intake states surface as statuses of the same name.
 export type OrderStatus =
   | 'pending_assignment'
+  | 'assigning_fulfillers'
+  | 'requesting_fulfillment'
   | 'ready_to_fulfill'
   | 'processing'
+  | 'partially_shipped'
   | 'shipped'
   | 'delivered'
+  | 'return_requested'
   | 'cancelled'
   | 'refunded'
-  | 'complete';
+  | 'returned'
+  | 'complete'
+  /**
+   * Every fulfillment was REJECTED by its fulfiller — nothing was made, nothing shipped, and
+   * the shopper's money needs an operator's decision (refund, or manual re-fulfillment).
+   *
+   * Exists because `aggregateShippingState` used to count `rejected` as delivered, so an
+   * all-rejected order stamped `deliveredAt` and told the shopper it had arrived (mono
+   * [#284](https://github.com/night-heron-software/nightheron-mono/issues/284), found by the
+   * mono's first live failed fulfillment ever to reach an order workflow). Terminal, like
+   * `cancelled`: refunds post against closed orders, so closing here does not strand the
+   * remediation.
+   */
+  | 'failed';
 
 export interface OrderWorkflowInput {
   order: Order;
   customerEmail: string;
+  /** Continue-as-new carryover: the full order state to resume from. */
   restoredState?: OrderState;
   signalCount?: number;
 }
@@ -51,12 +72,21 @@ export interface OrderWorkflowInput {
 export interface OrderState {
   order: Order;
   status: OrderStatus;
+  /** Set on rejected updates via formatError (never persisted as part of the lifecycle). */
+  error?: string;
   updatedAt?: string;
   deliveredAt?: string;
   customerFeedback?: CustomerFeedback;
   statusHistory: StatusHistoryEntry[];
   assignments: OrderAssignment[];
   fulfillerOrders: FulfillerOrder[];
+  /** Ledger of refunds applied to this order (supports partial / per-line refunds). */
+  refunds?: RefundRecord[];
+  /**
+   * In-flight return request while the order sits in `return_requested`.
+   * Transient workflow state — cleared on confirm (→ `returned`) or deny (→ `delivered`).
+   */
+  returnRequest?: ReturnRequestRecord;
 }
 
 // Assignment of a line item quantity to a fulfiller
@@ -68,6 +98,9 @@ export interface OrderAssignment {
   fulfillerName?: string;
   quantity: number;
   status: 'pending' | 'assigned' | 'fulfilled' | 'shipped' | 'delivered' | 'rejected';
+  sku?: string;
+  /** Resolved fulfiller type (plugin id / 'simulated'), threaded to the fulfillment request. */
+  fulfillerType?: string;
   fulfillerOrderId?: string; // Set when order is fulfilled
   carrier?: string; // Shipping carrier (e.g., 'USPS', 'FedEx')
 }
@@ -82,8 +115,8 @@ export type FulfillerOrderStatus =
   | 'rejected';
 
 /**
- * Fulfillment status update received from child fulfillment workflows.
- * Used to propagate status changes back to the parent OMS workflow.
+ * Fulfillment status update received from fulfillment workflows.
+ * Used to propagate status changes back to the OMS workflow.
  */
 export interface FulfillmentStatusUpdate {
   fulfillerOrderId: string;
@@ -137,7 +170,45 @@ export interface StatusHistoryEntry {
   updatedBy: 'system' | 'admin' | 'customer';
 }
 
-// Update signals
+// ==================
+// Refunds & Returns
+// ==================
+
+/** One line-item selection in a refund / return request. */
+export interface RefundLineInput {
+  lineItemId: string;
+  quantity: number;
+}
+
+/**
+ * A single refund applied to an order — recorded on OrderState for audit and
+ * over-refund guarding. Simplified from the mono version: the demo has no per-item
+ * economics (markup/commission/fulfiller cost), so only the retail refund and the
+ * pro-rated tax are tracked.
+ */
+export interface RefundRecord {
+  refundId: string;
+  timestamp: string;
+  reason?: string;
+  lines: Array<{ lineItemId: string; quantity: number }>;
+  /** Aggregate amounts (same currency units as the order totals). */
+  refundAmount: number;
+  taxAmount: number;
+}
+
+/** A pending return recorded on OrderState while the order is in `return_requested`. */
+export interface ReturnRequestRecord {
+  /** Lines + quantities to return; omit for a full return of all remaining quantity. */
+  lines?: RefundLineInput[];
+  reason?: string;
+  requestedAt: string;
+  requestedBy?: 'system' | 'admin' | 'customer';
+}
+
+// ==================
+// Update payloads
+// ==================
+
 export interface UpdateStatusSignal {
   status: OrderStatus;
   note?: string;
@@ -153,6 +224,28 @@ export interface CancelOrderSignal {
   reason?: string;
 }
 
+/** `lines` selects what to refund; omit / empty = full refund of all remaining quantity. */
+export interface RefundOrderSignal {
+  lines?: RefundLineInput[];
+  reason?: string;
+  updatedBy?: 'system' | 'admin' | 'customer';
+}
+
+/** `lines` selects what to return; omit / empty = full return of all remaining quantity. */
+export interface RequestReturnSignal {
+  lines?: RefundLineInput[];
+  reason?: string;
+  updatedBy?: 'system' | 'admin' | 'customer';
+}
+
+export interface ConfirmReturnSignal {
+  reason?: string;
+}
+
+export interface DenyReturnSignal {
+  reason?: string;
+}
+
 // Re-export types needed by OMS
 export type { Order } from './cart';
 
@@ -165,12 +258,64 @@ export interface StatusHistoryRow {
   updatedBy: string;
 }
 
+// ==================
+// State-machine command union (ADR-0024)
+// ==================
+
+/** The machine's waiting + transitional states (terminals are `__terminal:` targets). */
+export type OrderStateName =
+  | 'pending_assignment'
+  | 'assigning_fulfillers'
+  | 'requesting_fulfillment'
+  | 'ready_to_fulfill'
+  | 'processing'
+  | 'partially_shipped'
+  | 'shipped'
+  | 'delivered'
+  | 'return_requested';
+
+/**
+ * Commands — intent arriving from outside (ADR-0024). Wire commands come from Temporal
+ * updates; `fulfillmentStatus` is the child-workflow signal mapped at registration; the
+ * intake steps are timer-synthesized by the transitional states. The decider sees these
+ * enriched with `at` + prepared data (`EnrichedOrderCommand` in oms/states.ts).
+ */
+export type OrderCommand =
+  // ── wire (updates) ──
+  | {
+      type: 'updateStatus';
+      status: OrderStatus;
+      note?: string;
+      updatedBy: 'system' | 'admin' | 'customer';
+    }
+  | { type: 'cancelOrder'; reason?: string }
+  | { type: 'submitFeedback'; rating: 1 | 2 | 3 | 4 | 5; comment?: string }
+  | {
+      type: 'refundOrder';
+      lines?: RefundLineInput[];
+      reason?: string;
+      updatedBy?: 'system' | 'admin' | 'customer';
+    }
+  | {
+      type: 'requestReturn';
+      lines?: RefundLineInput[];
+      reason?: string;
+      updatedBy?: 'system' | 'admin' | 'customer';
+    }
+  | { type: 'confirmReturn'; reason?: string }
+  | { type: 'denyReturn'; reason?: string }
+  // ── signal (child fulfillment workflows) ──
+  | { type: 'fulfillmentStatus'; update: FulfillmentStatusUpdate }
+  // ── timer-synthesized (intake saga) ──
+  | { type: 'capturePayment' }
+  | { type: 'assignFulfillers' }
+  | { type: 'requestFulfillment' };
+
 /**
  * OMS Workflow Definitions
  *
- * This file contains ONLY query, signal, and update definitions.
- * These can be safely imported by Next.js server actions without pulling in
- * workflow implementations or activities.
+ * ONLY query, signal, and update definitions below — safe to import from Next.js
+ * server actions without pulling in workflow implementations or activities.
  *
  * IMPORTANT: Do NOT import workflow implementations or activities in this file.
  */
@@ -186,6 +331,10 @@ export const cancelOrderUpdate = defineUpdate<OrderState, [CancelOrderSignal]>('
 export const submitFeedbackUpdate = defineUpdate<OrderState, [SubmitFeedbackSignal]>(
   'submitFeedback',
 );
+export const refundOrderUpdate = defineUpdate<OrderState, [RefundOrderSignal]>('refundOrder');
+export const requestReturnUpdate = defineUpdate<OrderState, [RequestReturnSignal]>('requestReturn');
+export const confirmReturnUpdate = defineUpdate<OrderState, [ConfirmReturnSignal]>('confirmReturn');
+export const denyReturnUpdate = defineUpdate<OrderState, [DenyReturnSignal]>('denyReturn');
 export const getOrderStateQuery = defineQuery<OrderState>('getOrderState');
 
 // Signal for receiving fulfillment status updates from child workflows

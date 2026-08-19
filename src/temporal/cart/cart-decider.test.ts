@@ -1,7 +1,29 @@
 import { describe, it, expect } from 'vitest';
-import { decide, evolve, cartDecider } from './cart-decider';
-import type { CartCommand, CartFact } from './cart-decider';
+
+// Pure Functional Core: no Temporal sandbox, no activity mocks, no uuid4 — the whole point of
+// the Chassaing rollout. `decide` is asserted on the events it emits; `evolve` on the fold.
+// The per-command blocks are exported structures, so each command's guard / decide / evolve
+// entries are exercised directly in addition to the assembled dispatchers.
+import {
+  decide,
+  deriveRoutes,
+  evolve,
+  cartDecider,
+  addItemBlock,
+  updateQuantityBlock,
+  removeItemBlock,
+  applyCouponBlock,
+  linkUserBlock,
+  beginCheckoutBlock,
+  expireCartBlock,
+  checkoutTimedOutBlock,
+  submitStartedBlock,
+  submitAbortedBlock,
+  checkoutCompletedBlock,
+} from './states';
+import type { CartEvent, EnrichedCartCommand } from './states';
 import type { CartDetails, CartWorkflowContext, CheckoutWorkflowResult } from './types';
+import { terminal } from '../framework';
 
 // ── Builders ────────────────────────────────────────────────────────────────
 function makeCart(overrides: Partial<CartDetails> = {}): CartDetails {
@@ -27,7 +49,9 @@ function makeCtx(overrides: Partial<CartWorkflowContext> = {}): CartWorkflowCont
   return { cart: makeCart(), checkoutWorkflowId: null, checkoutVersion: 0, ...overrides };
 }
 
-const apply = (ctx: CartWorkflowContext, cmd: CartCommand): CartWorkflowContext =>
+const at = '2026-08-09T00:00:00.000Z';
+
+const apply = (ctx: CartWorkflowContext, cmd: EnrichedCartCommand): CartWorkflowContext =>
   decide(cmd, ctx).reduce(evolve, ctx);
 
 const okResult = (over: Partial<CheckoutWorkflowResult> = {}): CheckoutWorkflowResult => ({
@@ -41,11 +65,11 @@ const okResult = (over: Partial<CheckoutWorkflowResult> = {}): CheckoutWorkflowR
 // ── decide ──────────────────────────────────────────────────────────────────
 describe('decide', () => {
   it('addItem emits ItemAdded with the injected lineItemId', () => {
-    const facts = decide(
-      { type: 'addItem', variantId: 'v2', quantity: 2, price: 5, lineItemId: 'li-new' },
+    const events = decide(
+      { type: 'addItem', variantId: 'v2', quantity: 2, price: 5, lineItemId: 'li-new', at },
       makeCtx(),
     );
-    expect(facts).toEqual([
+    expect(events).toEqual([
       {
         type: 'ItemAdded',
         variantId: 'v2',
@@ -53,19 +77,23 @@ describe('decide', () => {
         price: 5,
         properties: undefined,
         lineItemId: 'li-new',
+        at,
       },
     ]);
   });
 
   it('updateQuantity of an unknown line emits nothing', () => {
-    expect(decide({ type: 'updateQuantity', lineItemId: 'nope', quantity: 2 }, makeCtx())).toEqual(
-      [],
-    );
+    expect(
+      decide({ type: 'updateQuantity', lineItemId: 'nope', quantity: 2, at }, makeCtx()),
+    ).toEqual([]);
   });
 
   it('updateQuantity to 0 on the last line also abandons the cart', () => {
-    const facts = decide({ type: 'updateQuantity', lineItemId: 'li-1', quantity: 0 }, makeCtx());
-    expect(facts.map((f: CartFact) => f.type)).toEqual(['ItemRemoved', 'CartAbandoned']);
+    const events = decide(
+      { type: 'updateQuantity', lineItemId: 'li-1', quantity: 0, at },
+      makeCtx(),
+    );
+    expect(events.map((f: CartEvent) => f.type)).toEqual(['ItemRemoved', 'CartAbandoned']);
   });
 
   it('removeItem of one of several lines emits only ItemRemoved', () => {
@@ -77,51 +105,79 @@ describe('decide', () => {
         ],
       }),
     });
-    const facts = decide({ type: 'removeItem', lineItemId: 'li-1' }, ctx);
-    expect(facts.map((f) => f.type)).toEqual(['ItemRemoved']);
+    const events = decide({ type: 'removeItem', lineItemId: 'li-1', at }, ctx);
+    expect(events.map((f) => f.type)).toEqual(['ItemRemoved']);
   });
 
   it('applyCoupon deduplicates', () => {
     const ctx = makeCtx({ cart: makeCart({ appliedCoupons: ['SAVE20'] }) });
-    expect(decide({ type: 'applyCoupon', code: 'SAVE20' }, ctx)).toEqual([]);
+    expect(decide({ type: 'applyCoupon', code: 'SAVE20', at }, ctx)).toEqual([]);
   });
 
   it('beginCheckout bumps the checkout version', () => {
-    const facts = decide(
-      { type: 'beginCheckout', checkoutWorkflowId: 'demo.checkout.x' },
+    const events = decide(
+      { type: 'beginCheckout', checkoutWorkflowId: 'demo.checkout.x', at },
       makeCtx({ checkoutVersion: 2 }),
     );
-    expect(facts).toEqual([
-      { type: 'CheckoutEntered', checkoutWorkflowId: 'demo.checkout.x', checkoutVersion: 3 },
+    expect(events).toEqual([
+      { type: 'CheckoutEntered', checkoutWorkflowId: 'demo.checkout.x', checkoutVersion: 3, at },
     ]);
   });
 
+  it('beginCheckout without a child id (mid-checkout no-op) emits nothing', () => {
+    expect(decide({ type: 'beginCheckout', at }, makeCtx())).toEqual([]);
+  });
+
+  it('checkoutTimedOut disowns only while in checkout', () => {
+    const inCheckout = makeCtx({ cart: makeCart({ status: 'checkout' }) });
+    expect(decide({ type: 'checkoutTimedOut', at }, inCheckout).map((f) => f.type)).toEqual([
+      'CheckoutDisowned',
+    ]);
+    expect(decide({ type: 'checkoutTimedOut', at }, makeCtx())).toEqual([]);
+  });
+
+  it('expireCart abandons the cart', () => {
+    expect(decide({ type: 'expireCart', at }, makeCtx())).toEqual([{ type: 'CartAbandoned', at }]);
+  });
+
   it('checkoutCompleted with a stale version emits nothing', () => {
-    const facts = decide(
-      { type: 'checkoutCompleted', result: okResult({ checkoutVersion: 1 }) },
+    const events = decide(
+      { type: 'checkoutCompleted', result: okResult({ checkoutVersion: 1 }), at },
       makeCtx({ checkoutVersion: 5 }),
     );
-    expect(facts).toEqual([]);
+    expect(events).toEqual([]);
   });
 
   it('checkoutCompleted success emits CartCompleted; failure emits CheckoutFailed with the error', () => {
     expect(
-      decide({ type: 'checkoutCompleted', result: okResult() }, makeCtx()).map((f) => f.type),
+      decide({ type: 'checkoutCompleted', result: okResult(), at }, makeCtx()).map((f) => f.type),
     ).toEqual(['CartCompleted']);
     expect(
       decide(
         {
           type: 'checkoutCompleted',
           result: okResult({ success: false, order: undefined, error: 'declined' }),
+          at,
         },
         makeCtx(),
       ),
-    ).toEqual([{ type: 'CheckoutFailed', error: 'declined' }]);
+    ).toEqual([{ type: 'CheckoutFailed', error: 'declined', at }]);
   });
 
-  it('submitStarted / submitAborted drive the freeze facts', () => {
-    expect(decide({ type: 'submitStarted' }, makeCtx())).toEqual([{ type: 'SubmitFreezeStarted' }]);
-    expect(decide({ type: 'submitAborted' }, makeCtx())).toEqual([{ type: 'SubmitFreezeCleared' }]);
+  it('submitStarted / submitAborted drive the freeze events', () => {
+    expect(decide({ type: 'submitStarted', at }, makeCtx())).toEqual([
+      { type: 'SubmitFreezeStarted', at },
+    ]);
+    expect(decide({ type: 'submitAborted', at }, makeCtx())).toEqual([
+      { type: 'SubmitFreezeCleared', at },
+    ]);
+  });
+
+  it('decide never mutates the input state', () => {
+    const s = makeCtx();
+    const snapshot = structuredClone(s);
+    decide({ type: 'removeItem', lineItemId: 'li-1', at }, s);
+    expect(s).toEqual(snapshot);
   });
 });
 
@@ -134,6 +190,7 @@ describe('evolve', () => {
       quantity: 2,
       price: 10,
       lineItemId: 'li-x',
+      at,
     });
     expect(ctx.cart.items).toHaveLength(1);
     expect(ctx.cart.items[0].quantity).toBe(3);
@@ -147,35 +204,104 @@ describe('evolve', () => {
       quantity: 1,
       price: 5,
       lineItemId: 'li-2',
+      at,
     });
     expect(ctx.cart.items.map((i) => i.variantId)).toEqual(['v1', 'v2']);
     expect(ctx.cart.subtotalPrice).toBe(15);
   });
 
+  // ── display snapshot (backlog #1 / R1) ────────────────────────────────────
+  const snapshot = {
+    productId: 'p1',
+    productTitle: 'California Surf — Tee [Simulated]',
+    variantTitle: 'Baby Blue / 4XL',
+    optionLabels: ['Baby Blue', '4XL'],
+    thumbnailUrl: 'https://img/front.webp',
+  };
+
+  it('ItemAdded stores the display snapshot on the new line', () => {
+    const ctx = apply(makeCtx(), {
+      type: 'addItem',
+      variantId: 'v2',
+      quantity: 1,
+      price: 5,
+      lineItemId: 'li-2',
+      at,
+      ...snapshot,
+    });
+    const line = ctx.cart.items.find((i) => i.lineItemId === 'li-2')!;
+    expect(line).toMatchObject(snapshot);
+  });
+
+  it('ItemAdded without a snapshot stores NO snapshot keys (not explicit undefined)', () => {
+    const ctx = apply(makeCtx(), {
+      type: 'addItem',
+      variantId: 'v2',
+      quantity: 1,
+      price: 5,
+      lineItemId: 'li-2',
+      at,
+    });
+    const line = ctx.cart.items.find((i) => i.lineItemId === 'li-2')!;
+    // Explicit `undefined` keys would defeat the backfill merge below.
+    expect('productTitle' in line).toBe(false);
+    expect('thumbnailUrl' in line).toBe(false);
+  });
+
+  it('ItemAdded merge backfills a pre-snapshot line without disturbing its identity', () => {
+    // makeCtx()'s existing li-1/v1 line predates the snapshot fields.
+    const ctx = apply(makeCtx(), {
+      type: 'addItem',
+      variantId: 'v1',
+      quantity: 2,
+      price: 10,
+      lineItemId: 'li-ignored',
+      at,
+      ...snapshot,
+    });
+    expect(ctx.cart.items).toHaveLength(1);
+    const line = ctx.cart.items[0];
+    expect(line.lineItemId).toBe('li-1'); // existing identity wins
+    expect(line.quantity).toBe(3);
+    expect(line.productTitle).toBe(snapshot.productTitle); // backfilled
+    expect(line.variantTitle).toBe(snapshot.variantTitle);
+  });
+
   it('does not mutate the input state', () => {
     const ctx = makeCtx();
-    apply(ctx, { type: 'removeItem', lineItemId: 'li-1' });
+    apply(ctx, { type: 'removeItem', lineItemId: 'li-1', at });
     expect(ctx.cart.items).toHaveLength(1);
     expect(ctx.cart.status).toBe('active');
   });
 
   it('CouponApplied recalculates SAVE20 discount and tax', () => {
-    const ctx = apply(makeCtx(), { type: 'applyCoupon', code: 'SAVE20' });
+    const ctx = apply(makeCtx(), { type: 'applyCoupon', code: 'SAVE20', at });
     expect(ctx.cart.appliedCoupons).toEqual(['SAVE20']);
     expect(ctx.cart.totalDiscounts).toBe(2); // 20% of 10
     expect(ctx.cart.totalTax).toBeCloseTo(0.64); // 8% of 8
   });
 
   it('UserLinked sets email and userId', () => {
-    const ctx = apply(makeCtx(), { type: 'linkUser', email: 'a@b.c', userId: 'u-1' });
+    const ctx = apply(makeCtx(), { type: 'linkUser', email: 'a@b.c', userId: 'u-1', at });
     expect(ctx.cart.email).toBe('a@b.c');
     expect(ctx.cart.userId).toBe('u-1');
+  });
+
+  it('UserLinked leaves cartVersion unchanged — identity is not content (run -008 F-3)', () => {
+    // Through the CENTRAL evolve, so the dispatcher's generic freshness bump is in play:
+    // the fold must compensate it, exactly as CheckoutEntered does. Uncompensated, the
+    // guest email attach at the address step bumps the version with no content change and
+    // the cart-changed banner false-positives at review on every guest checkout.
+    const before = makeCtx();
+    const ctx = apply(before, { type: 'linkUser', email: 'a@b.c', userId: 'u-1', at });
+    expect(ctx.cart.cartVersion).toBe(before.cart.cartVersion);
   });
 
   it('CheckoutEntered sets checkout fields and the link', () => {
     const ctx = apply(makeCtx({ checkoutVersion: 1 }), {
       type: 'beginCheckout',
       checkoutWorkflowId: 'demo.checkout.y',
+      at,
     });
     expect(ctx.cart.status).toBe('checkout');
     expect(ctx.cart.checkout?.step).toBe('validating');
@@ -184,11 +310,12 @@ describe('evolve', () => {
   });
 
   it('CheckoutFailed returns the cart to active, keeps the failure visible, drops the link', () => {
-    const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x' });
+    const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x', at });
     const ctx = apply(inCheckout, {
       type: 'checkoutCompleted',
       // checkoutVersion 1 matches the version beginCheckout just bumped to (0 → 1).
       result: okResult({ success: false, order: undefined, error: 'declined', checkoutVersion: 1 }),
+      at,
     });
     expect(ctx.cart.status).toBe('active');
     expect(ctx.cart.checkout?.step).toBe('failed');
@@ -196,35 +323,476 @@ describe('evolve', () => {
     expect(ctx.checkoutWorkflowId).toBeNull();
   });
 
-  it('CheckoutDisowned (disownCheckout) clears the checkout fields entirely', () => {
-    const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x' });
-    const ctx = apply(inCheckout, { type: 'disownCheckout' });
+  it('CheckoutDisowned (checkoutTimedOut) clears the checkout fields entirely', () => {
+    const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x', at });
+    const ctx = apply(inCheckout, { type: 'checkoutTimedOut', at });
     expect(ctx.cart.status).toBe('active');
     expect(ctx.cart.checkout).toBeUndefined();
     expect(ctx.checkoutWorkflowId).toBeNull();
   });
 
   it('CartCompleted folds the final checkout state into totals and drops the link', () => {
-    const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x' });
+    const inCheckout = apply(makeCtx(), { type: 'beginCheckout', checkoutWorkflowId: 'x', at });
     const ctx = apply(inCheckout, {
       type: 'checkoutCompleted',
       result: okResult({ checkoutVersion: 1 }),
+      at,
     });
     expect(ctx.cart.status).toBe('completed');
     expect(ctx.cart.shippingCost).toBe(5);
     expect(ctx.cart.totalTax).toBe(0.8);
     expect(ctx.cart.totalPrice).toBeCloseTo(10 - 0 + 5 + 0.8);
     // The checkout child already closed — the link is dropped so terminal cleanup
-    // doesn't request-cancel a finished workflow.
+    // doesn't request-cancel a finished workflow (demo divergence: mono keeps the link).
     expect(ctx.checkoutWorkflowId).toBeNull();
   });
 });
 
+// ── replaying is a fold ─────────────────────────────────────────────────────
+describe('rebuilding state is a fold (decide → evolve)', () => {
+  it('remove-last folds active → abandoned', () => {
+    const s0 = makeCtx();
+    const events = decide({ type: 'removeItem', lineItemId: 'li-1', at }, s0);
+    const s1 = events.reduce(evolve, s0);
+    expect(s1.cart.items).toHaveLength(0);
+    expect(s1.cart.status).toBe('abandoned');
+  });
+
+  it('a whole lifecycle replays active → completed', () => {
+    const history: CartEvent[] = [
+      { type: 'ItemAdded', variantId: 'v2', quantity: 1, price: 5, lineItemId: 'li-2', at },
+      { type: 'CheckoutEntered', checkoutWorkflowId: 'c-1', checkoutVersion: 1, at },
+      {
+        type: 'CartCompleted',
+        finalState: { step: 'complete', isGuest: true, shippingCost: 0, tax: 0 },
+        at,
+      },
+    ];
+    const final = history.reduce(evolve, makeCtx());
+    expect(final.cart.status).toBe('completed');
+    expect(final.cart.items).toHaveLength(2);
+  });
+});
+
 // ── decider shape ───────────────────────────────────────────────────────────
-describe('cartDecider', () => {
-  it('isTerminal is true only for completed/abandoned', () => {
-    expect(cartDecider.isTerminal(makeCtx())).toBe(false);
-    expect(cartDecider.isTerminal(makeCtx({ cart: makeCart({ status: 'completed' }) }))).toBe(true);
-    expect(cartDecider.isTerminal(makeCtx({ cart: makeCart({ status: 'abandoned' }) }))).toBe(true);
+describe('cartDecider — the assembled decider', () => {
+  it("has no isTerminal — terminality is the route tables' job (ADR-0024)", () => {
+    // The machine terminates by routing CartAbandoned/CartCompleted to terminal states,
+    // never by asking the decider. Pin the removal so it does not quietly return.
+    expect('isTerminal' in cartDecider).toBe(false);
+  });
+
+  it('exposes decide, evolve, and an initialState in the active status', () => {
+    expect(cartDecider.decide).toBe(decide);
+    expect(cartDecider.evolve).toBe(evolve);
+    expect(cartDecider.initialState!.cart.status).toBe('active');
+  });
+});
+
+// ── version/timestamp stamping (was the workflow's flushCart bump) ──────────
+describe('evolve — version/timestamp stamping', () => {
+  it('CheckoutEntered is version-NEUTRAL (entering checkout is not a content change)', () => {
+    // The checkout child snapshots the pre-command version and its validating re-pull
+    // can race this evolve — a bump here would baseline the child one behind and
+    // false-positive the cart-changed banner on every fresh checkout (R6 finding).
+    const s = makeCtx();
+    const before = s.cart.cartVersion;
+    const next = evolve(s, {
+      type: 'CheckoutEntered',
+      checkoutWorkflowId: 'demo.checkout.co-1',
+      checkoutVersion: 1,
+      at,
+    });
+    expect(next.cart.cartVersion).toBe(before);
+  });
+
+  it('stamps updatedAt from the event at and bumps cartVersion on every fold', () => {
+    // Specimen changed from UserLinked (run -008 F-3: that fold now compensates the
+    // bump, like CheckoutEntered — identity is not content). CartAbandoned is a real
+    // content-lifecycle fold and keeps this pin about the DISPATCHER's generic stamping.
+    const next = evolve(makeCtx(), {
+      type: 'CartAbandoned',
+      at: '2026-08-04T12:00:00.000Z',
+    });
+    expect(next.cart.updatedAt).toBe('2026-08-04T12:00:00.000Z');
+    expect(next.cart.cartVersion).toBe(2); // makeCart starts at 1
+    expect(next.cart.createdAt).toBe('2026-01-01T00:00:00Z');
+  });
+
+  it('never reads the clock — a far-past at lands verbatim', () => {
+    const past = '1999-12-31T23:59:59.000Z';
+    expect(evolve(makeCtx(), { type: 'CartAbandoned', at: past }).cart.updatedAt).toBe(past);
+  });
+
+  it('treats a missing version as 0', () => {
+    const s0 = makeCtx({ cart: makeCart({ cartVersion: undefined as unknown as number }) });
+    expect(evolve(s0, { type: 'CartAbandoned', at: 'T' }).cart.cartVersion).toBe(1);
+  });
+});
+
+// ── The regression net the purity refactor buys: apply EVERY CartEvent type and prove the
+// input context is untouched. The mapped-type table makes a missing event a compile-time
+// hole; the length pin keeps the net growing with the union.
+const eventSamples: { [E in CartEvent['type']]: Extract<CartEvent, { type: E }> } = {
+  ItemAdded: {
+    type: 'ItemAdded',
+    variantId: 'v2',
+    quantity: 2,
+    price: 5,
+    lineItemId: 'li-new',
+    at: 'T',
+  },
+  ItemQuantityChanged: { type: 'ItemQuantityChanged', lineItemId: 'li-1', quantity: 3, at: 'T' },
+  ItemRemoved: { type: 'ItemRemoved', lineItemId: 'li-1', at: 'T' },
+  CouponApplied: { type: 'CouponApplied', code: 'SAVE20', at: 'T' },
+  UserLinked: { type: 'UserLinked', email: 'a@b.c', userId: 'u-1', at: 'T' },
+  CheckoutEntered: {
+    type: 'CheckoutEntered',
+    checkoutWorkflowId: 'c-1',
+    checkoutVersion: 1,
+    at: 'T',
+  },
+  CheckoutDisowned: { type: 'CheckoutDisowned', at: 'T' },
+  CartAbandoned: { type: 'CartAbandoned', at: 'T' },
+  CartCompleted: {
+    type: 'CartCompleted',
+    finalState: { step: 'complete', isGuest: true, shippingCost: 5, tax: 0.8 },
+    at: 'T',
+  },
+  CheckoutFailed: { type: 'CheckoutFailed', error: 'declined', at: 'T' },
+  SubmitFreezeStarted: { type: 'SubmitFreezeStarted', at: 'T' },
+  SubmitFreezeCleared: { type: 'SubmitFreezeCleared', at: 'T' },
+};
+
+describe('evolve never mutates its input — every CartEvent type', () => {
+  it('the table covers the whole event union', () => {
+    expect(Object.keys(eventSamples)).toHaveLength(12);
+  });
+
+  it.each(Object.entries(eventSamples))('%s leaves the input context untouched', (_type, event) => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const snapshot = structuredClone(s);
+    const next = evolve(s, event as CartEvent);
+    expect(s).toEqual(snapshot);
+    expect(next).not.toBe(s); // a NEW context every time — stamping alone rebuilds it
+  });
+});
+
+// ── cartVersion moves for CONTENT changes and NOTHING else. The banner fires on
+// `live > acknowledged`, so a version that moves without an edit tells the shopper their cart
+// changed when it did not. This defect class recurred three times under the old
+// "bump everything, subtract in the fold" policy: R6 (CheckoutEntered), run -008 F-3
+// (UserLinked), run -008 F-4 (the submit-freeze pair). Driving the SAME exhaustive
+// eventSamples table means a new event cannot be added without landing on one side here.
+describe('cartVersion bumps for content events only', () => {
+  const CONTENT: CartEvent['type'][] = [
+    'ItemAdded',
+    'ItemQuantityChanged',
+    'ItemRemoved',
+    'CouponApplied',
+    'CartAbandoned',
+    'CartCompleted',
+  ];
+  const BOOKKEEPING: CartEvent['type'][] = [
+    'UserLinked',
+    'CheckoutEntered',
+    'CheckoutDisowned',
+    'CheckoutFailed',
+    'SubmitFreezeStarted',
+    'SubmitFreezeCleared',
+  ];
+
+  it('every event in the union is classified exactly once', () => {
+    expect([...CONTENT, ...BOOKKEEPING].sort()).toEqual(Object.keys(eventSamples).sort());
+  });
+
+  it.each(CONTENT)('%s bumps the version', (type) => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const next = evolve(s, eventSamples[type]);
+    expect(next.cart.cartVersion).toBe(s.cart.cartVersion + 1);
+  });
+
+  it.each(BOOKKEEPING)('%s leaves the version alone', (type) => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const next = evolve(s, eventSamples[type]);
+    expect(next.cart.cartVersion).toBe(s.cart.cartVersion);
+  });
+
+  it('stamps updatedAt on bookkeeping events even though the version holds', () => {
+    // "When did this workflow last act" is a different question from "what version of the
+    // contents is this" — the freeze pair must still move the timestamp.
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const next = evolve(s, { type: 'SubmitFreezeStarted', at: '2026-08-18T12:00:00.000Z' });
+    expect(next.cart.updatedAt).toBe('2026-08-18T12:00:00.000Z');
+    expect(next.cart.cartVersion).toBe(s.cart.cartVersion);
+  });
+
+  it('a failed-checkout mirror is cleared by the next event (F-9)', () => {
+    // The live sequence from run -008: the checkout child failed, then the shopper emptied
+    // the cart. That removeItem SUCCEEDED, but the stale mirror made the web tier log
+    // `ok: false, domainError: "Checkout failed"` — a false failure on a working action.
+    const failed = evolve(makeCtx({ checkoutWorkflowId: 'c-0' }), {
+      type: 'CheckoutFailed',
+      error: 'Checkout failed',
+      at,
+    });
+    expect(failed.cart.checkout).toMatchObject({ step: 'failed', error: 'Checkout failed' });
+
+    const afterEdit = evolve(failed, { type: 'ItemRemoved', lineItemId: 'li-1', at });
+    expect(afterEdit.cart.checkout).toBeUndefined();
+  });
+
+  it('CheckoutFailed itself still records the failure — it is the one exemption', () => {
+    // Clearing must not eat the event that sets it, or the shopper is never told.
+    const failed = evolve(makeCtx({ checkoutWorkflowId: 'c-0' }), {
+      type: 'CheckoutFailed',
+      error: 'Payment failed. Please try again.',
+      at,
+    });
+    expect(failed.cart.checkout?.error).toBe('Payment failed. Please try again.');
+  });
+
+  it('a fresh checkout is not treated as a stale failure', () => {
+    const failed = evolve(makeCtx({ checkoutWorkflowId: 'c-0' }), {
+      type: 'CheckoutFailed',
+      error: 'Checkout failed',
+      at,
+    });
+    const reentered = evolve(failed, {
+      type: 'CheckoutEntered',
+      checkoutWorkflowId: 'demo.checkout.c-2',
+      checkoutVersion: 2,
+      at,
+    });
+    expect(reentered.cart.checkout?.step).not.toBe('failed');
+    expect(reentered.checkoutWorkflowId).toBe('demo.checkout.c-2');
+  });
+
+  it('a full submit-freeze cycle is version-neutral (F-4)', () => {
+    // The exact live sequence that produced the false banner: a CART_CHANGED bounce signals
+    // submitStarted then submitAborted. Content never changed, so neither must the version.
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const after = [eventSamples.SubmitFreezeStarted, eventSamples.SubmitFreezeCleared].reduce(
+      evolve,
+      s,
+    );
+    expect(after.cart.cartVersion).toBe(s.cart.cartVersion);
+  });
+});
+
+// ── Per-command blocks: each command is packaged as ONE exported structure (guard /
+// prepare / decide / evolve), so its pure fields are exercised directly here (prepare is
+// I/O and is covered through the machine in states.test.ts with mocked activities).
+describe('command blocks — one structure per command', () => {
+  const editCommand = { type: 'addItem', variantId: 'v2', quantity: 1, price: 5 } as const;
+
+  it('addItemBlock.guard refuses edits while submitting, passes otherwise', () => {
+    expect(addItemBlock.guard!(makeCtx({ submitting: true }), editCommand)).toMatchObject({
+      rejected: true,
+      reason: expect.stringMatching(/being placed/i),
+    });
+    expect(addItemBlock.guard!(makeCtx(), editCommand)).toBeUndefined();
+  });
+
+  it('the edit blocks share ONE guard reference (notWhileSubmitting)', () => {
+    expect(updateQuantityBlock.guard).toBe(addItemBlock.guard);
+    expect(removeItemBlock.guard).toBe(addItemBlock.guard);
+    expect(applyCouponBlock.guard).toBe(addItemBlock.guard);
+  });
+
+  it('beginCheckoutBlock.guard refuses an empty cart', () => {
+    const empty = makeCtx({ cart: makeCart({ items: [] }) });
+    expect(beginCheckoutBlock.guard!(empty, { type: 'beginCheckout' })).toMatchObject({
+      rejected: true,
+      reason: expect.stringMatching(/empty cart/i),
+    });
+    expect(beginCheckoutBlock.guard!(makeCtx(), { type: 'beginCheckout' })).toBeUndefined();
+  });
+
+  it('addItemBlock.decide emits ItemAdded from the enriched command', () => {
+    expect(
+      addItemBlock.decide(
+        { type: 'addItem', variantId: 'v2', quantity: 2, price: 5, lineItemId: 'li-new', at },
+        makeCtx(),
+      ),
+    ).toEqual([
+      {
+        type: 'ItemAdded',
+        variantId: 'v2',
+        quantity: 2,
+        price: 5,
+        properties: undefined,
+        lineItemId: 'li-new',
+        at,
+      },
+    ]);
+  });
+
+  it('addItemBlock.evolve.ItemAdded returns a NEW context with the line appended', () => {
+    const s = makeCtx();
+    const next = addItemBlock.evolve!.ItemAdded!(s, eventSamples.ItemAdded);
+    expect(next).not.toBe(s);
+    expect(next.cart.items.map((i) => i.lineItemId)).toEqual(['li-1', 'li-new']);
+    expect(s.cart.items).toHaveLength(1); // input untouched
+  });
+
+  it('updateQuantityBlock.evolve.ItemQuantityChanged substitutes the one line and re-totals', () => {
+    const s = makeCtx();
+    const next = updateQuantityBlock.evolve!.ItemQuantityChanged!(s, {
+      type: 'ItemQuantityChanged',
+      lineItemId: 'li-1',
+      quantity: 3,
+      at,
+    });
+    expect(next.cart.items[0].quantity).toBe(3);
+    expect(next.cart.subtotalPrice).toBe(30);
+    expect(s.cart.items[0].quantity).toBe(1); // input untouched
+  });
+
+  it('updateQuantityBlock.evolve.ItemQuantityChanged on a missing line leaves the context as-is', () => {
+    const s = makeCtx();
+    const next = updateQuantityBlock.evolve!.ItemQuantityChanged!(s, {
+      type: 'ItemQuantityChanged',
+      lineItemId: 'nope',
+      quantity: 3,
+      at,
+    });
+    expect(next).toBe(s);
+  });
+
+  it('events shared by several commands reference ONE evolve function (assembly invariant)', () => {
+    expect(removeItemBlock.evolve!.ItemRemoved).toBe(updateQuantityBlock.evolve!.ItemRemoved);
+    expect(removeItemBlock.evolve!.CartAbandoned).toBe(updateQuantityBlock.evolve!.CartAbandoned);
+    expect(expireCartBlock.evolve!.CartAbandoned).toBe(removeItemBlock.evolve!.CartAbandoned);
+  });
+
+  it('applyCouponBlock.evolve.CouponApplied appends the coupon immutably', () => {
+    const s = makeCtx();
+    const next = applyCouponBlock.evolve!.CouponApplied!(s, eventSamples.CouponApplied);
+    expect(next.cart.appliedCoupons).toEqual(['SAVE20']);
+    expect(s.cart.appliedCoupons).toEqual([]); // input untouched
+  });
+
+  it('linkUser / submit-freeze blocks write only their own fields, immutably', () => {
+    const linked = linkUserBlock.evolve!.UserLinked!(makeCtx(), eventSamples.UserLinked).cart;
+    expect(linked.email).toBe('a@b.c');
+    expect(linked.userId).toBe('u-1');
+    expect(
+      submitStartedBlock.evolve!.SubmitFreezeStarted!(makeCtx(), eventSamples.SubmitFreezeStarted)
+        .submitting,
+    ).toBe(true);
+    expect(
+      submitAbortedBlock.evolve!.SubmitFreezeCleared!(
+        makeCtx({ submitting: true }),
+        eventSamples.SubmitFreezeCleared,
+      ).submitting,
+    ).toBe(false);
+  });
+
+  it('checkoutTimedOutBlock.evolve.CheckoutDisowned drops the checkout fields and the link', () => {
+    const s = makeCtx({
+      cart: makeCart({ status: 'checkout' }),
+      checkoutWorkflowId: 'c-1',
+    });
+    const next = checkoutTimedOutBlock.evolve!.CheckoutDisowned!(s, eventSamples.CheckoutDisowned);
+    expect(next.cart.status).toBe('active');
+    expect(next.cart.checkout).toBeUndefined();
+    expect(next.checkoutWorkflowId).toBeNull();
+    expect(s.checkoutWorkflowId).toBe('c-1'); // input untouched
+  });
+
+  it('checkoutCompletedBlock.evolve.CheckoutFailed returns to active, drops the link, keeps the error', () => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-1' });
+    const next = checkoutCompletedBlock.evolve!.CheckoutFailed!(s, eventSamples.CheckoutFailed);
+    expect(next.cart.status).toBe('active');
+    expect(next.cart.checkout?.error).toBe('declined');
+    expect(next.checkoutWorkflowId).toBeNull();
+    expect(s.checkoutWorkflowId).toBe('c-1'); // input untouched
+  });
+});
+
+// ==================
+// deriveRoutes (ADR-0026, ported from mono #253) — per-state route tables derived from
+// block declarations. The laws are load-time: a violation cannot reach a worker.
+// ==================
+
+describe('deriveRoutes — the three laws', () => {
+  it('shared routed events merge when every emitter declares the same destination', () => {
+    // CartAbandoned is declared by three blocks; CheckoutEntered by one. Value-equal
+    // duplicates are the premise: an event's destination is a machine-global fact.
+    expect(
+      deriveRoutes({
+        updateQuantity: updateQuantityBlock,
+        removeItem: removeItemBlock,
+        expireCart: expireCartBlock,
+        beginCheckout: beginCheckoutBlock,
+      }),
+    ).toEqual({ CartAbandoned: terminal('abandoned'), CheckoutEntered: 'checkout' });
+  });
+
+  it('derives the ACTUAL state tables equal to the old hand-written literals (port no-op proof)', () => {
+    // The port's equivalence pin: what deriveRoutes produces for each state's real commands is
+    // exactly what the deleted literal said. Kept permanently here (the mono deleted its
+    // transitional equivalents at the flip; this one doubles as the port record).
+    expect(
+      deriveRoutes(
+        {
+          addItem: addItemBlock,
+          updateQuantity: updateQuantityBlock,
+          removeItem: removeItemBlock,
+          applyCoupon: applyCouponBlock,
+          linkUser: linkUserBlock,
+          expireCart: expireCartBlock,
+          beginCheckout: beginCheckoutBlock,
+        },
+        { '*': '__self' as never },
+      ),
+    ).toEqual({
+      CheckoutEntered: 'checkout',
+      CartAbandoned: terminal('abandoned'),
+      '*': '__self',
+    });
+    expect(
+      deriveRoutes(
+        {
+          addItem: addItemBlock,
+          updateQuantity: updateQuantityBlock,
+          removeItem: removeItemBlock,
+          applyCoupon: applyCouponBlock,
+          linkUser: linkUserBlock,
+          beginCheckout: {},
+          submitStarted: submitStartedBlock,
+          submitAborted: submitAbortedBlock,
+          checkoutCompleted: checkoutCompletedBlock,
+          checkoutTimedOut: checkoutTimedOutBlock,
+        },
+        { '*': '__self' as never },
+      ),
+    ).toEqual({
+      CheckoutDisowned: 'active',
+      CheckoutFailed: 'active',
+      CartCompleted: terminal('completed'),
+      CartAbandoned: terminal('abandoned'),
+      '*': '__self',
+    });
+  });
+
+  it('throws when two blocks give one event different destinations', () => {
+    expect(() =>
+      deriveRoutes({
+        a: { routes: { CheckoutEntered: 'checkout' } },
+        b: { routes: { CheckoutEntered: 'active' } },
+      }),
+    ).toThrow(/two destinations in one state/);
+  });
+
+  it('throws when extras try to REDIRECT rather than weaken to SELF', () => {
+    expect(() =>
+      deriveRoutes({ beginCheckout: beginCheckoutBlock }, { CheckoutEntered: 'active' }),
+    ).toThrow(/may only weaken to SELF/);
+  });
+
+  it('throws when a state with commands derives an empty table', () => {
+    expect(() => deriveRoutes({ beginCheckout: {} })).toThrow(/empty route table/);
   });
 });

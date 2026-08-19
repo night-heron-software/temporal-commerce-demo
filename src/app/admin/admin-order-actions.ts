@@ -9,7 +9,7 @@
 
 import { getTemporalClient } from '@/lib';
 import { executeCqlAll } from '@/lib';
-import { TEMPORAL_NAMESPACE } from '@/lib/temporal-client';
+import { temporalWorkflowsByCorrelationUrl } from '@/lib/temporal-links';
 import { createLogger } from '@/lib/logger';
 import {
   getOrderStateQuery,
@@ -43,13 +43,6 @@ export interface OrderSummary {
    * Built server-side because TEMPORAL_UI_URL is a server-only env var.
    */
   temporalUrl: string | null;
-}
-
-/** Temporal UI workflows list filtered by the journey correlationId. */
-function temporalWorkflowsByCorrelationUrl(correlationId: string): string {
-  const base = process.env.TEMPORAL_UI_URL || 'http://localhost:8233';
-  const query = encodeURIComponent(`CorrelationId="${correlationId}"`);
-  return `${base}/namespaces/${TEMPORAL_NAMESPACE}/workflows?query=${query}`;
 }
 
 /**
@@ -132,6 +125,8 @@ export async function updateOrderStatus(
   status: OrderStatus,
   note?: string,
 ): Promise<ActionResult<OrderState>> {
+  // R6: admin mutations narrate too — entry + exit, correlation-tagged via the order.
+  log.info({ orderId, action: 'updateOrderStatus', status }, 'admin action start');
   try {
     const client = await getTemporalClient();
     const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
@@ -139,6 +134,16 @@ export async function updateOrderStatus(
     const state = await handle.executeUpdate(updateStatusUpdate, {
       args: [{ status, note, updatedBy: 'admin' as const } as UpdateStatusSignal],
     });
+    log.info(
+      {
+        orderId,
+        correlationId: state.order?.correlationId,
+        action: 'updateOrderStatus',
+        status,
+        ok: true,
+      },
+      'admin action done',
+    );
     return { success: true, data: state };
   } catch (e) {
     log.error({ orderId, status, err: e }, 'Failed to update order status');
@@ -154,6 +159,7 @@ export async function cancelOrder(
   orderId: string,
   reason?: string,
 ): Promise<ActionResult<OrderState>> {
+  log.info({ orderId, action: 'cancelOrder' }, 'admin action start');
   try {
     const client = await getTemporalClient();
     const workflowId = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
@@ -161,6 +167,10 @@ export async function cancelOrder(
     const state = await handle.executeUpdate(cancelOrderUpdate, {
       args: [{ reason }],
     });
+    log.info(
+      { orderId, correlationId: state.order?.correlationId, action: 'cancelOrder', ok: true },
+      'admin action done',
+    );
     return { success: true, data: state };
   } catch (e) {
     log.error({ orderId, err: e }, 'Failed to cancel order');

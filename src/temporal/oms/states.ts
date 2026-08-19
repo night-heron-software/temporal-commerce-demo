@@ -1,13 +1,41 @@
 /**
- * OMS states — the shell around the pure OMS Decider (aligned with nightheron-mono).
+ * The order machine, co-located in one file (ADR-0024 decider-native surface,
+ * aligned with nightheron-mono's CommandBlock convention).
  *
- * The full order lifecycle runs through the machine: three transitional intake states
- * (pending_assignment → assigning_fulfillers → requesting_fulfillment), the shipment-
- * tracking states (processing / partially_shipped / shipped) driven by the aggregated
- * fulfillment signal, the manual ready_to_fulfill fallback, and the post-delivery
- * lifecycle (delivered → return_requested, feedback, refunds). Side effects run through
- * the `OmsFinalize` discriminated union in `omsFinalize` — the accounting (Twisp) actions
- * from the mono are intentionally absent in this demo.
+ * Everything about the machine lives here, in reading order: the enriched command union
+ * and the past-tense event union; the pure order helpers (refund math, intake math,
+ * status aggregation); the shared guard and the evolve entries shared by several
+ * commands; then ONE `CommandBlock` PER COMMAND — a single exported structure holding
+ * the command's whole story, code inlined: its `guard` (pure rejection), its `prepare`
+ * (the only I/O), its `decide` case, and the `evolve` entries for the events it emits;
+ * then the central `decide`/`evolve`, ASSEMBLED from the blocks; and finally the machine
+ * assembly: effects, the `m.state` declarations (whose commands tables reference the
+ * SAME blocks), and the registry.
+ *
+ *   decide: (command, context) => Event[]     // what happened, as past-tense events
+ *   evolve: (context, event)   => Context     // apply one event — returns a NEW context
+ *
+ * Scope: the FULL order lifecycle, intake included. The three intake states are
+ * transitional: each timer tick synthesizes its command (`capturePayment`,
+ * `assignFulfillers`, `requestFulfillment`), impure preparation (fulfiller resolution,
+ * id minting) runs in the blocks' `prepare`, and the decided events route forward.
+ * Every email, child start, and fulfillment cancel is an event-keyed effect — keyed by
+ * the event that causes it, not by which state happened to be current. (Demo divergence:
+ * the mono's accounting/ledger effects and Stripe refund saga are intentionally absent;
+ * `capturePayment` decides a bare `PaymentCaptured` — the mono computes the
+ * ORDER_CAPTURE ledger numbers here; the demo took mock payment at checkout.)
+ *
+ * Purity is structural, not conventional: every state-writing function takes a
+ * `Readonly<...>` parameter and returns a NEW value built by structural sharing. Nothing
+ * mutates a live context, so the old blanket deep-copy barrier (`copyOrderState`) is
+ * gone entirely.
+ *
+ * Status routing: an admin `updateStatus` decides a per-target event (`OrderShipped`,
+ * `OrderRefunded`, …) rather than a payload-routed `StatusChanged` — route tables key on
+ * event TYPE, so every admin jump is a visible edge in the state diagram; unknown
+ * statuses are guard-rejected, never a decide-throw. Fulfilment aggregation likewise
+ * decides its OUTCOME (`FulfillmentShipped` / `FulfillmentDelivered` /
+ * `FulfillmentPartiallyShipped`) instead of the shell re-inspecting the applied status.
  */
 import {
   log,
@@ -22,7 +50,7 @@ import {
   DEMO_STORE_ID,
   FULFILLMENT_TASK_QUEUE,
 } from '../contracts/constants';
-import type { Cart, Fulfillment } from '../contracts';
+import type { Fulfillment } from '../contracts';
 import {
   sendOrderStatusEmail,
   sendFeedbackThankYouEmail,
@@ -30,397 +58,270 @@ import {
   indexFulfillerOrder,
 } from './activities';
 import type {
-  Order,
   OrderState,
-  OrderEvent,
   OrderStatus,
+  OrderCommand,
   OrderAssignment,
   OrderLineItem,
-  FulfillerOrder,
-  FulfillmentStatusUpdate,
   OrderStateName,
+  FulfillmentStatusUpdate,
+  FulfillerOrder,
+  RefundLineInput,
+  RefundRecord,
+  ReturnRequestRecord,
 } from './types';
 import { buildFulfillerOrderDocument } from './document-builder';
-import { decide as omsDecide, evolve, copyOrderState, aggregateShippingState } from './oms-decider';
-import type { OrderCommand } from './oms-decider';
-import { defineDomain, terminal, SELF, workflowCorrelationId } from '../framework';
-import type { StateRegistry, StateInput, DecisionResult, InputMeta } from '../framework';
-
-/** Order line item shape with the optional display fields the intake logic reads. */
-interface OrderCartItem extends Cart.CartItem {
-  productId?: string;
-  title?: string;
-  variantTitle?: string;
-}
-
-const fulfillmentCancelSignal = defineSignal('cancel');
+import { defineMachine, terminal, SELF, reject, workflowCorrelationId } from '../framework';
+import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
 
 // ==================
-// Domain factory — binds shared type params once
+// Commands and events — the machine's whole vocabulary
 // ==================
 
-const oms = defineDomain<
-  OrderStateName,
-  OrderEvent,
-  OrderState,
-  OrderState,
-  FulfillmentStatusUpdate
->();
+// (The former `OrderCartItem` shim is gone — `Cart.CartItem` itself now carries the
+// optional display snapshot, populated at add-to-cart. Backlog #1 / remediation R1.)
 
-// ==================
-// Helpers
-// ==================
+/** A fulfiller resolution for one order line (positional), with its prepared assignment id. */
+export type ResolvedAssignment = {
+  assignmentId: string;
+  fulfillerId: string;
+  fulfillerName?: string;
+  fulfillerType?: string;
+  sku?: string;
+} | null;
 
-async function triggerFulfillmentCancel(orderId: string): Promise<void> {
-  try {
-    const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
-    const handle = getExternalWorkflowHandle(fulfillmentWorkflowId);
-    await handle.signal(fulfillmentCancelSignal);
-    log.info('[OMS] Sent cancel signal to fulfillment workflow');
-  } catch (e) {
-    log.warn('[OMS] Failed to signal fulfillment cancel (may have already completed)', {
-      error: String(e),
-    });
-  }
-}
+/**
+ * The command as the decider sees it: the wire/timer command + the framework-injected
+ * timestamp, plus the prepared data two intake commands need (id minting and fulfiller
+ * resolution are impure — they run in `prepare` and ride in on the enriched command).
+ */
+export type EnrichedOrderCommand = (
+  | Exclude<OrderCommand, { type: 'assignFulfillers' } | { type: 'requestFulfillment' }>
+  | (Extract<OrderCommand, { type: 'assignFulfillers' }> & { resolved: ResolvedAssignment[] })
+  | (Extract<OrderCommand, { type: 'requestFulfillment' }> & {
+      fulfillerOrderIds: Record<string, string>;
+    })
+) & { at: string };
 
-// ==================
-// Finalize Types & Function
-// ==================
-
-type OmsFinalize =
-  | { action: 'sendStatusEmail'; orderId: string; status: OrderStatus; email: string }
-  | { action: 'cancelFulfillment'; orderId: string }
-  | { action: 'cancelAndNotify'; orderId: string; email: string }
-  | { action: 'sendFeedback'; orderId: string; email: string }
+/** Past-tense domain events. */
+export type OrderEvent =
+  // ── intake ──
+  // Demo divergence: no capture payload — the mono decides the ORDER_CAPTURE ledger
+  // numbers here; the demo took mock payment at checkout and has no accounting domain.
+  | { type: 'PaymentCaptured'; at: string }
+  | { type: 'FulfillersAssigned'; assignments: OrderAssignment[]; at: string }
+  | { type: 'NoFulfillersResolved'; at: string }
   | {
-      action: 'startFulfillment';
-      order: Order;
-      customerEmail: string;
-      fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[];
+      type: 'FulfillmentRequested';
       fulfillerOrders: FulfillerOrder[];
+      fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[];
+      at: string;
     }
-  | { action: 'none' };
+  // ── lifecycle ──
+  | { type: 'OrderCancelled'; at: string }
+  | { type: 'FeedbackSubmitted'; rating: 1 | 2 | 3 | 4 | 5; comment?: string; at: string }
+  | { type: 'Refunded'; record: RefundRecord; fullyRefunded: boolean; at: string }
+  | { type: 'ReturnRequested'; record: ReturnRequestRecord; at: string }
+  | { type: 'ReturnConfirmed'; record: RefundRecord; at: string }
+  | { type: 'ReturnDenied'; at: string }
+  | { type: 'FulfillmentApplied'; update: FulfillmentStatusUpdate; at: string }
+  // ── fulfilment-aggregate outcomes (decided, so routing never re-reads applied status) ──
+  | { type: 'FulfillmentPartiallyShipped'; at: string }
+  | { type: 'FulfillmentShipped'; at: string }
+  | { type: 'FulfillmentDelivered'; at: string }
+  | { type: 'FulfillmentRejected'; at: string }
+  // ── forced status moves (admin `updateStatus`) — one event per target, so every
+  //    admin jump is a route-table edge ──
+  | { type: 'OrderProcessing'; at: string }
+  | { type: 'OrderPartiallyShipped'; at: string }
+  | { type: 'OrderShipped'; at: string }
+  | { type: 'OrderDelivered'; at: string }
+  | { type: 'OrderReturnRequested'; at: string }
+  | { type: 'OrderRefunded'; at: string }
+  | { type: 'OrderReturned'; at: string }
+  | { type: 'OrderCompleted'; at: string };
 
-type OmsDecision = DecisionResult<OrderStateName, OrderState, OrderState, OmsFinalize>;
+/** One member of the WIRE command union (pre-enrichment), by its `type` tag. */
+type Wire<K extends OrderCommand['type']> = Extract<OrderCommand, { type: K }>;
 
-async function omsFinalize(_ctx: Readonly<OrderState>, decision: OmsDecision): Promise<void> {
-  const fin = decision.finalize;
-  if (!fin || fin.action === 'none') return;
+/** One member of the ENRICHED command union (wire + prepared data + `at`), by its `type` tag. */
+type Enriched<K extends EnrichedOrderCommand['type']> = Extract<EnrichedOrderCommand, { type: K }>;
 
-  switch (fin.action) {
-    case 'sendStatusEmail':
-      await sendOrderStatusEmail(fin.email, fin.orderId, fin.status, {});
-      break;
-    case 'cancelFulfillment':
-      await triggerFulfillmentCancel(fin.orderId);
-      break;
-    case 'cancelAndNotify':
-      await sendOrderStatusEmail(fin.email, fin.orderId, 'cancelled', {});
-      await triggerFulfillmentCancel(fin.orderId);
-      break;
-    case 'sendFeedback':
-      await sendFeedbackThankYouEmail(fin.email, fin.orderId);
-      break;
-    case 'startFulfillment': {
-      const order = fin.order;
-      // Index the newly-created fulfiller orders so the admin sees them immediately.
-      for (const so of fin.fulfillerOrders) {
-        await indexFulfillerOrder(buildFulfillerOrderDocument(so, order.correlationId));
-      }
-      // Price validation — warn on $0 items to catch cart manipulation.
-      const zeroItems = fin.fulfillmentInputs
-        .flatMap((fo) => fo.items)
-        .filter((i) => i.unitPrice <= 0);
-      if (zeroItems.length > 0) {
-        log.warn('[OMS] Order contains items with zero or negative price', {
-          orderId: order.orderId,
-          zeroSkus: zeroItems.map((i) => i.sku),
-        });
-      }
-      // Pass the journey's correlationId along: this workflow's own CorrelationId
-      // Search Attribute first, the order record's copy as the fallback (ADR-0011).
-      const fulfillmentStart = buildWorkflowStartOptions({
-        storeId: DEMO_STORE_ID,
-        domain: 'fulfillment',
-        entityId: order.orderId,
-        correlationId: workflowCorrelationId() ?? order.correlationId,
-        orderId: order.orderId,
-        cartId: order.cartId,
-      });
-      await startChild('fulfillmentWorkflow', {
-        ...fulfillmentStart,
-        // Without an explicit policy, Temporal defaults to TERMINATE — if OMS closes (complete,
-        // fail, cancel, or workflowExecutionTimeout expiry) before fulfillment naturally
-        // finishes, it would be killed mid-flight. ABANDON lets it keep running independently;
-        // it tracks its own cancellation via the fulfillment cancel signal and completes on its
-        // own once its (now-fixed) fulfiller-order children do.
-        parentClosePolicy: 'ABANDON',
-        args: [
-          {
-            orderId: order.orderId,
-            cartId: order.cartId,
-            customerId: fin.customerEmail,
-            customerEmail: fin.customerEmail,
-            confirmationNumber: order.confirmationNumber,
-            shippingAddress: {
-              firstName: order.shippingAddress.firstName,
-              lastName: order.shippingAddress.lastName,
-              email: fin.customerEmail,
-              phone: order.shippingAddress.phone,
-              address1: order.shippingAddress.address1,
-              address2: order.shippingAddress.address2,
-              city: order.shippingAddress.city,
-              region: order.shippingAddress.state,
-              zip: order.shippingAddress.postalCode,
-              country: order.shippingAddress.country,
-            },
-            shippingMethod: 'standard',
-            fulfillerOrders: fin.fulfillmentInputs,
-          } satisfies Fulfillment.FulfillmentOrderRequest,
-        ],
-        taskQueue: FULFILLMENT_TASK_QUEUE,
-        workflowExecutionTimeout: '90 days',
-      });
-      break;
+/** One member of the event union, by its `type` tag. */
+type Ev<K extends OrderEvent['type']> = Extract<OrderEvent, { type: K }>;
+
+// ==================
+// Refund math (pure)
+// ==================
+
+/**
+ * **Money in this system is integer CENTS** — `total: 7372` is $73.72. Every amount on an
+ * order (`price`, `subtotal`, `tax`, `shippingCost`, `total`) and every refund amount is a
+ * whole number of cents; the UI divides by 100 at the render boundary
+ * (`src/app/admin/orders/page.tsx`). Nothing may produce a fractional cent: it cannot be
+ * charged or refunded by any real PSP.
+ *
+ * This helper replaced a `round2` that computed `Math.round(n * 100) / 100` — two decimal
+ * places, which is right for DOLLARS and wrong for cents (it rounds to a hundredth of a cent
+ * and leaves 187.5 untouched). Validation run `-008` caught a live refund carrying
+ * `taxAmount: 187.5`, half a cent (backlog #13).
+ */
+function roundCents(n: number): number {
+  return Math.round(n);
+}
+
+/** Per-line quantities already refunded on this order. */
+function refundedQuantities(state: Readonly<OrderState>): Record<string, number> {
+  const alreadyRefunded: Record<string, number> = {};
+  for (const r of state.refunds ?? []) {
+    for (const l of r.lines) {
+      alreadyRefunded[l.lineItemId] = (alreadyRefunded[l.lineItemId] ?? 0) + l.quantity;
     }
   }
+  return alreadyRefunded;
 }
 
-// ==================
-// Pure Mappers
-// ==================
-
 /**
- * Maps an OrderStatus to the next machine state or terminal.
+ * Pure refund-selection validation, for `guard`s: the reason a selection is invalid
+ * (unknown line / non-positive qty / exceeds remaining / nothing left), or undefined when
+ * acceptable. With this in the guard, `decide`'s refund math never throws for a caller
+ * mistake.
  */
-function nextForStatus(status: OrderStatus): OrderStateName | `__terminal:${string}` {
-  switch (status) {
-    case 'processing':
-      return 'processing';
-    case 'partially_shipped':
-      return 'partially_shipped';
-    case 'shipped':
-      return 'shipped';
-    case 'delivered':
-      return 'delivered';
-    case 'return_requested':
-      return 'return_requested';
-    case 'cancelled':
-      return terminal('cancelled');
-    case 'refunded':
-      return terminal('refunded');
-    case 'returned':
-      return terminal('returned');
-    case 'complete':
-      return terminal('complete');
-    default:
-      throw new Error(`Unexpected status in nextForStatus: ${status}`);
+export function refundSelectionProblem(
+  state: Readonly<OrderState>,
+  lines: RefundLineInput[] | undefined,
+): string | undefined {
+  const alreadyRefunded = refundedQuantities(state);
+  if (!lines || lines.length === 0) {
+    // Full refund of the remainder — invalid only when nothing remains.
+    const anyRemaining = state.order.items.some(
+      (item) => item.quantity - (alreadyRefunded[item.lineItemId] ?? 0) > 0,
+    );
+    return anyRemaining ? undefined : 'Nothing left to refund';
   }
-}
-
-/**
- * Determines the OmsFinalize action for an updateStatus event.
- * Preserves the "send status email unless already handled by cancelAndNotify" rule.
- */
-function finalizeForUpdateStatus(ctx: Readonly<OrderState>, status: OrderStatus): OmsFinalize {
-  if (status === 'cancelled') {
-    return {
-      action: 'cancelAndNotify',
-      orderId: ctx.order.orderId,
-      email: ctx.order.customerEmail,
-    };
-  }
-  if (['shipped', 'delivered', 'refunded'].includes(status)) {
-    return {
-      action: 'sendStatusEmail',
-      orderId: ctx.order.orderId,
-      status,
-      email: ctx.order.customerEmail,
-    };
-  }
-  return { action: 'none' };
-}
-
-/**
- * Shell adapter — run the pure Decider (decide → evolve) to compute the next order state.
- */
-function apply(ctx: Readonly<OrderState>, command: OrderCommand): OrderState {
-  const state = ctx as OrderState;
-  return omsDecide(command, state).reduce(evolve, state);
-}
-
-/**
- * Refund finalize: the mono posts the refund to the Twisp ledger here; the demo has no
- * accounting, so a full refund just notifies the customer.
- */
-function refundFinalize(ctx: Readonly<OrderState>): OmsFinalize {
-  if (ctx.status === 'refunded') {
-    return {
-      action: 'sendStatusEmail',
-      orderId: ctx.order.orderId,
-      status: 'refunded',
-      email: ctx.order.customerEmail,
-    };
-  }
-  return { action: 'none' };
-}
-
-// ==================
-// Shared transition entries (reused across state maps)
-// ==================
-
-/**
- * cancelOrder transition — shared by ready_to_fulfill, processing, partially_shipped, shipped.
- */
-const cancelOrderEntry = {
-  decide(ctx: Readonly<OrderState>) {
-    const context = apply(ctx, { type: 'cancelOrder' });
-    return {
-      context,
-      next: terminal('cancelled'),
-      response: context,
-      finalize: {
-        action: 'cancelAndNotify' as const,
-        orderId: ctx.order.orderId,
-        email: ctx.order.customerEmail,
-      },
-    };
-  },
-  finalize: omsFinalize,
-};
-
-/**
- * updateStatus transition — shared by ready_to_fulfill, processing, partially_shipped, shipped.
- */
-const updateStatusEntry = {
-  decide(ctx: Readonly<OrderState>, event: Extract<OrderEvent, { type: 'updateStatus' }>) {
-    const context = apply(ctx, { type: 'updateStatus', status: event.status });
-    return {
-      context,
-      next: nextForStatus(event.status),
-      response: context,
-      finalize: finalizeForUpdateStatus(ctx, event.status),
-    };
-  },
-  finalize: omsFinalize,
-};
-
-// ==================
-// State: pending_assignment (escape hatch — transitional, no event input)
-// ==================
-
-/**
- * Transitional initial state. (The mono posts the ORDER_CAPTURE accounting transaction
- * here; the demo has no ledger, so this is a pure hop to `assigning_fulfillers`.)
- */
-const pendingAssignment = oms.state('pending_assignment', {
-  decide(ctx) {
-    return {
-      context: ctx,
-      next: 'assigning_fulfillers' as const,
-      finalize: { action: 'none' as const },
-    };
-  },
-  finalize: omsFinalize,
-});
-
-// ==================
-// State: assigning_fulfillers (transitional — resolves fulfiller assignments)
-// ==================
-
-/**
- * Transitional state. `prepare` calls the fulfiller-resolution activity (impure I/O);
- * `decide` records the resulting assignments on the order. Advances to
- * `requesting_fulfillment` when at least one assignment resolved, otherwise falls back
- * to the manual `ready_to_fulfill` path.
- */
-const assigningFulfillers = oms.state('assigning_fulfillers', {
-  async prepare(ctx, input: StateInput<OrderEvent, FulfillmentStatusUpdate>) {
-    const lineItems: OrderLineItem[] = (ctx.order.items as OrderCartItem[]).map((item) => ({
-      lineItemId: item.lineItemId,
-      variantId: item.variantId,
-      productId: item.productId || 'unknown',
-      quantity: item.quantity,
-      productTitle: item.title || 'Unknown Product',
-      variantTitle: item.variantTitle || 'Unknown Variant',
-      unitPrice: item.price,
-      currency: ctx.order.currency,
-      optionLabels: [],
-      productVersion: 1,
-      variantVersion: 1,
-      snapshotTimestamp: input.timestamp,
-      thumbnailUrl: '',
-    }));
-    const resolved = await resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
-    // Assignment IDs are generated here — prepare is the impure phase; `decide` stays
-    // pure (framework/authoring.ts doctrine), so it only consumes the prepared IDs.
-    return resolved.map((assignment) => ({
-      ...assignment,
-      assignmentId: `asg-${uuid4().slice(0, 8)}`,
-    }));
-  },
-  decide(
-    ctx,
-    _input,
-    prepared: Array<{
-      assignmentId: string;
-      fulfillerId: string;
-      fulfillerName?: string;
-      fulfillerType?: string;
-      sku?: string;
-    }>,
-  ) {
-    const draft = copyOrderState(ctx);
-    for (let i = 0; i < ctx.order.items.length; i++) {
-      const item = ctx.order.items[i];
-      const assignment = prepared[i];
-      if (!assignment) continue; // unresolved line — falls back to the manual path
-      draft.assignments.push({
-        assignmentId: assignment.assignmentId,
-        lineItemId: item.lineItemId,
-        variantId: item.variantId,
-        fulfillerId: assignment.fulfillerId,
-        fulfillerName: assignment.fulfillerName,
-        fulfillerType: assignment.fulfillerType,
-        quantity: item.quantity,
-        status: 'assigned',
-        sku: assignment.sku,
-      });
+  for (const l of lines) {
+    const item = state.order.items.find((i) => i.lineItemId === l.lineItemId);
+    if (!item) return `Unknown line item in refund selection: ${l.lineItemId}`;
+    if (l.quantity <= 0) return `Non-positive refund quantity for ${l.lineItemId}`;
+    const remaining = item.quantity - (alreadyRefunded[l.lineItemId] ?? 0);
+    if (l.quantity > remaining) {
+      return `Refund quantity ${l.quantity} exceeds remaining ${remaining} for ${l.lineItemId}`;
     }
-    return {
-      context: draft,
-      next:
-        draft.assignments.length > 0
-          ? ('requesting_fulfillment' as const)
-          : ('ready_to_fulfill' as const),
-      finalize: { action: 'none' as const },
-    };
-  },
-  finalize: omsFinalize,
-});
+  }
+  return undefined;
+}
+
+/**
+ * Pure refund computation (simplified from the mono's accounting-package breakdown):
+ * pro-rates order tax by the refunded retail share, guards against over-refunding, and
+ * reports whether every unit is now refunded. Caller mistakes are rejected by
+ * {@link refundSelectionProblem} in the blocks' guards before this runs; a throw here is
+ * a backstop, not control flow.
+ */
+function computeRefundRecord(
+  context: Readonly<OrderState>,
+  selections: RefundLineInput[] | undefined,
+  reason: string | undefined,
+  at: string,
+): { record: RefundRecord; fullyRefunded: boolean } {
+  const alreadyRefunded = refundedQuantities(context);
+
+  const remainingFor = (lineItemId: string): number => {
+    const item = context.order.items.find((i) => i.lineItemId === lineItemId);
+    if (!item) throw new Error(`Unknown line item in refund selection: ${lineItemId}`);
+    return item.quantity - (alreadyRefunded[lineItemId] ?? 0);
+  };
+
+  // Omitted/empty selection = full refund of all remaining quantity.
+  const lines =
+    selections ??
+    context.order.items
+      .map((item) => ({ lineItemId: item.lineItemId, quantity: remainingFor(item.lineItemId) }))
+      .filter((l) => l.quantity > 0);
+
+  if (lines.length === 0) throw new Error('Nothing left to refund');
+
+  let refundAmount = 0;
+  for (const l of lines) {
+    if (l.quantity <= 0) throw new Error(`Non-positive refund quantity for ${l.lineItemId}`);
+    const remaining = remainingFor(l.lineItemId);
+    if (l.quantity > remaining) {
+      throw new Error(
+        `Refund quantity ${l.quantity} exceeds remaining ${remaining} for ${l.lineItemId}`,
+      );
+    }
+    const item = context.order.items.find((i) => i.lineItemId === l.lineItemId)!;
+    refundAmount += item.price * l.quantity;
+  }
+
+  const refundedAfter: Record<string, number> = { ...alreadyRefunded };
+  for (const l of lines) {
+    refundedAfter[l.lineItemId] = (refundedAfter[l.lineItemId] ?? 0) + l.quantity;
+  }
+
+  // Pro-rate order tax by the refunded retail share of the subtotal — computed CUMULATIVELY,
+  // then less the tax already refunded, so each record is a whole number of cents AND the
+  // records still sum to exactly the tax charged.
+  //
+  // Rounding each record independently does not have that property: two half refunds of a 375
+  // tax would each round 187.5 up to 188 and refund 376 — a cent more than was charged. Here
+  // the first record takes round(375 × 2999/5998) = 188 and the second takes
+  // round(375 × 5998/5998) − 188 = 187. A full refund always lands on the charged tax exactly,
+  // because its cumulative share is 1.
+  const refundedSubtotalAfter = context.order.items.reduce(
+    (sum, item) => sum + item.price * (refundedAfter[item.lineItemId] ?? 0),
+    0,
+  );
+  const taxRefundedSoFar = (context.refunds ?? []).reduce((sum, r) => sum + r.taxAmount, 0);
+  const cumulativeTax =
+    context.order.subtotal > 0
+      ? roundCents(context.order.tax * (refundedSubtotalAfter / context.order.subtotal))
+      : 0;
+  const taxAmount = cumulativeTax - taxRefundedSoFar;
+  const fullyRefunded = context.order.items.every(
+    (item) => (refundedAfter[item.lineItemId] ?? 0) >= item.quantity,
+  );
+
+  const record: RefundRecord = {
+    refundId: `refund-${(context.refunds?.length ?? 0) + 1}`,
+    timestamp: at,
+    reason,
+    lines: lines.map((l) => ({ lineItemId: l.lineItemId, quantity: l.quantity })),
+    // Integral already (cents × whole quantities); rounded defensively so no arithmetic
+    // upstream can leak a fraction into a payable amount.
+    refundAmount: roundCents(refundAmount),
+    taxAmount,
+  };
+
+  return { record, fullyRefunded };
+}
+
+/** Normalize an empty selection list to "the full remainder". */
+function normalizeLines(lines: RefundLineInput[] | undefined): RefundLineInput[] | undefined {
+  return lines && lines.length > 0 ? lines : undefined;
+}
 
 // ==================
-// State: requesting_fulfillment (transitional — starts the fulfillment child)
+// Intake math (pure)
 // ==================
 
 /**
- * Pure half of the old imperative `triggerFulfillment`: group assignments by fulfiller,
- * build the `FulfillerOrder` records and the `FulfillmentFulfillerOrderInput[]` payload.
- * Mutates `draft.assignments` in place (fulfillerOrderId + status). The impure half —
- * `startChild('fulfillmentWorkflow')` + indexing — runs in the `startFulfillment`
- * finalize action.
+ * Pure fulfiller-order construction: group assignments by fulfiller, build the
+ * `FulfillerOrder` records and the `FulfillmentFulfillerOrderInput[]` payload. Reads
+ * state only — the assignment updates (fulfillerOrderId + status) are applied by
+ * `evolve` from the emitted event, and the child start + indexing are the
+ * `FulfillmentRequested` effect. Ids are prepared (minted) per fulfiller.
  */
-function buildFulfillment(
-  draft: OrderState,
-  timestamp: string,
+export function buildFulfillment(
+  state: Readonly<OrderState>,
+  at: string,
   fulfillerOrderIds: Record<string, string>,
 ): {
   fulfillerOrders: FulfillerOrder[];
   fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[];
 } {
   const byFulfiller: Record<string, OrderAssignment[]> = {};
-  for (const a of draft.assignments) {
+  for (const a of state.assignments) {
     (byFulfiller[a.fulfillerId] ??= []).push(a);
   }
 
@@ -428,13 +329,11 @@ function buildFulfillment(
   const fulfillmentInputs: Fulfillment.FulfillmentFulfillerOrderInput[] = [];
 
   for (const [fulfillerId, assignments] of Object.entries(byFulfiller)) {
-    // IDs are pre-generated per fulfiller in the state's `prepare` (impure phase) —
-    // this function runs in `decide`, which stays pure.
     const fulfillerOrderId = fulfillerOrderIds[fulfillerId];
 
     fulfillerOrders.push({
       fulfillerOrderId,
-      orderId: draft.order.orderId,
+      orderId: state.order.orderId,
       fulfillerId,
       fulfillerName: assignments[0].fulfillerName || fulfillerId,
       status: 'pending',
@@ -443,29 +342,23 @@ function buildFulfillment(
         variantId: a.variantId,
         quantity: a.quantity,
       })),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      statusHistory: [{ status: 'pending', timestamp, note: 'Fulfiller order created' }],
+      createdAt: at,
+      updatedAt: at,
+      statusHistory: [{ status: 'pending', timestamp: at, note: 'Fulfiller order created' }],
     });
-
-    for (const a of assignments) {
-      a.fulfillerOrderId = fulfillerOrderId;
-      a.status = 'fulfilled';
-    }
 
     const items: Fulfillment.FulfillmentItem[] = assignments.map((a) => {
       // Match by the assignment's own line item — assignments are line-scoped, and
       // matching on variantId would price duplicate-variant lines from the first line.
-      const orderItem = (draft.order.items as OrderCartItem[]).find(
-        (i) => i.lineItemId === a.lineItemId,
-      );
+      const orderItem = state.order.items.find((i) => i.lineItemId === a.lineItemId);
       return {
         sku: a.sku || a.variantId,
         productId: a.variantId,
         variantId: a.variantId,
         quantity: a.quantity,
         unitPrice: orderItem?.price ?? 0,
-        title: orderItem?.title || orderItem?.variantTitle || `Item ${a.variantId.slice(0, 8)}`,
+        title:
+          orderItem?.productTitle || orderItem?.variantTitle || `Item ${a.variantId.slice(0, 8)}`,
       };
     });
 
@@ -480,332 +373,1062 @@ function buildFulfillment(
   return { fulfillerOrders, fulfillmentInputs };
 }
 
-const requestingFulfillment = oms.state('requesting_fulfillment', {
-  // Fulfiller-order IDs are generated here — prepare is the impure phase; `decide`
-  // stays pure (framework/authoring.ts doctrine). One ID per fulfiller, mirroring
-  // `buildFulfillment`'s group-by-fulfiller; decide remains the source of truth for
-  // the grouping itself and simply consumes the prepared IDs.
-  async prepare(ctx) {
+// ==================
+// Status aggregation (pure)
+// ==================
+
+/**
+ * The machine state implied by the aggregate status of all fulfiller orders (forward-only).
+ *
+ * `rejected` counts as TERMINAL for aggregation — a rejected line must not hold the rest of a
+ * mixed order back — but it is not DELIVERY. The distinction is the whole of the mono's #284:
+ * the old `isDelivered = delivered || rejected` made an ALL-rejected order aggregate to
+ * `delivered`, stamp `deliveredAt`, and tell the shopper their rejected order had arrived.
+ * All-rejected now aggregates to `rejected`; mixed delivered+rejected stays `delivered`
+ * deliberately (the deliverable part genuinely arrived — the rejected line stays visible on
+ * the fulfiller order, not hidden in the aggregate).
+ */
+export function aggregateShippingState(
+  fulfillerOrders: ReadonlyArray<Pick<FulfillerOrder, 'status'>>,
+): 'processing' | 'partially_shipped' | 'shipped' | 'delivered' | 'rejected' {
+  const isDelivered = (s: FulfillerOrder['status']) => s === 'delivered' || s === 'rejected';
+  const isShipped = (s: FulfillerOrder['status']) =>
+    s === 'shipped' || s === 'delivered' || s === 'rejected';
+  if (fulfillerOrders.length > 0 && fulfillerOrders.every((so) => so.status === 'rejected'))
+    return 'rejected';
+  if (fulfillerOrders.every((so) => isDelivered(so.status))) return 'delivered';
+  if (fulfillerOrders.every((so) => isShipped(so.status))) return 'shipped';
+  if (fulfillerOrders.some((so) => so.status === 'shipped' || so.status === 'delivered'))
+    return 'partially_shipped';
+  return 'processing';
+}
+
+/**
+ * The statuses an admin `updateStatus` may force. Anything else (intake statuses,
+ * typos) is rejected by the shared guard — never a throw from `decide`. (Demo
+ * divergence: no `closed` — the demo has no return-window auto-close.)
+ */
+export const FORCEABLE_STATUSES: readonly OrderStatus[] = [
+  'processing',
+  'partially_shipped',
+  'shipped',
+  'delivered',
+  'return_requested',
+  'cancelled',
+  'refunded',
+  'returned',
+  'complete',
+];
+
+// ==================
+// Shared guard + shared evolve entries — the pieces referenced by MORE THAN ONE command
+// block. Everything used by exactly one command lives INLINE in that command's block
+// below (the inlining rule: the block IS the code, not an index of named functions).
+// ==================
+
+/**
+ * Reject an admin `updateStatus` targeting a status the machine cannot be forced into.
+ * Shared by every state that lists `updateStatus` (the `delivered` state layers its
+ * refund enrichment + refundability check on top of this same guard).
+ */
+function guardForceableStatus(
+  _context: Readonly<OrderState>,
+  command: { status: OrderStatus },
+): Rejection | void {
+  if (!FORCEABLE_STATUSES.includes(command.status)) {
+    return reject(`Unexpected status in updateStatus: ${command.status}`);
+  }
+}
+
+/**
+ * `delivered`'s updateStatus guard: an admin 'refunded' is enriched into a real
+ * `refundOrder` command, so its selection (the full remainder) must also be refundable —
+ * this keeps the old "Nothing left to refund" rejection instead of a decide-throw.
+ */
+function guardDeliveredUpdateStatus(
+  context: Readonly<OrderState>,
+  command: { status: OrderStatus },
+): Rejection | void {
+  const forceable = guardForceableStatus(context, command);
+  if (forceable) return forceable;
+  if (command.status === 'refunded') {
+    const problem = refundSelectionProblem(context, undefined);
+    if (problem) return reject(problem);
+  }
+}
+
+/** Emitted by cancelOrder and by updateStatus-to-cancelled. */
+function evolveOrderCancelled(
+  context: Readonly<OrderState>,
+  _event: Ev<'OrderCancelled'>,
+): OrderState {
+  return { ...context, status: 'cancelled' };
+}
+
+/** Emitted by a fully-refunding refundOrder and by updateStatus-to-refunded. */
+function evolveOrderRefunded(
+  context: Readonly<OrderState>,
+  _event: Ev<'OrderRefunded'>,
+): OrderState {
+  return { ...context, status: 'refunded' };
+}
+
+// ==================
+// Command blocks — ONE exported structure per command, every field that defines the
+// command in one value, with the code INLINED. The `m.state` declarations at the bottom
+// reference these SAME blocks (the framework reads only `guard`/`prepare`; structural
+// typing admits the extra fields), the central `decide`/`evolve` dispatchers are
+// assembled from them, and tests exercise their fields directly.
+// ==================
+
+/**
+ * A block's evolve — keyed by EVENT TYPE, because evolve's unit is the event, not the
+ * command: one command may emit several event types, and some events are shared across
+ * commands (those reference one shared evolve function instead of inlining twice). The
+ * machine's single `evolve(context, event)` is assembled by merging every block's map.
+ */
+type EvolveMap = {
+  [E in OrderEvent['type']]?: (context: Readonly<OrderState>, event: Ev<E>) => OrderState;
+};
+
+/** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
+export interface CommandBlock<K extends OrderCommand['type']> {
+  guard?: (context: Readonly<OrderState>, command: Wire<K>) => Rejection | void;
+  prepare?: (context: Readonly<OrderState>, command: Wire<K>) => Promise<object | void>;
+  decide: (command: Enriched<K>, context: Readonly<OrderState>) => OrderEvent[];
+  evolve?: EvolveMap;
+}
+
+// ==================
+// Command: capturePayment — transitional intake 1/3. A pure hop — the mono decides the
+// ORDER_CAPTURE ledger numbers here and posts them as the `PaymentCaptured` effect; the
+// demo has no accounting, so the event carries nothing and has no effect.
+// ==================
+
+export const capturePaymentBlock: CommandBlock<'capturePayment'> = {
+  decide: (command, _context) => [{ type: 'PaymentCaptured', at: command.at }],
+
+  evolve: {
+    // Nothing to apply — the demo has no ledger; this is the intake hop marker.
+    PaymentCaptured: (context, _event) => context,
+  },
+};
+
+// ==================
+// Command: assignFulfillers — transitional intake 2/3. `prepare` resolves fulfillers
+// (impure I/O) and mints assignment ids; `decide` records the assignments, positionally
+// aligned to the order lines. No resolution at all decides the manual fallback.
+// ==================
+
+export const assignFulfillersBlock: CommandBlock<'assignFulfillers'> = {
+  /**
+   * I/O phase: resolve fulfiller assignments (impure) and mint assignment ids; `decide`
+   * stays pure and only consumes the prepared, positionally-aligned resolutions. The
+   * line-item display snapshot rides the CartItem from add-to-cart (backlog #1); the
+   * 'Unknown Product' fallbacks remain only for pre-snapshot lines, and the order's own
+   * creation instant is the stable snapshot marker.
+   */
+  prepare: async (context) => {
+    const lineItems: OrderLineItem[] = context.order.items.map((item) => ({
+      lineItemId: item.lineItemId,
+      variantId: item.variantId,
+      productId: item.productId || 'unknown',
+      quantity: item.quantity,
+      productTitle: item.productTitle || 'Unknown Product',
+      variantTitle: item.variantTitle || 'Unknown Variant',
+      unitPrice: item.price,
+      currency: context.order.currency,
+      optionLabels: item.optionLabels ?? [],
+      productVersion: 1,
+      variantVersion: 1,
+      snapshotTimestamp: context.order.createdAt,
+      thumbnailUrl: item.thumbnailUrl ?? '',
+    }));
+    const resolved = await resolveFulfillerAssignments(lineItems, { preferredFulfillers: [] });
+    return {
+      resolved: resolved.map((assignment) =>
+        assignment ? { ...assignment, assignmentId: `asg-${uuid4().slice(0, 8)}` } : null,
+      ),
+    };
+  },
+
+  decide: (command, context) => {
+    const at = command.at;
+    const assignments: OrderAssignment[] = [];
+    for (let i = 0; i < context.order.items.length; i++) {
+      const item = context.order.items[i];
+      const assignment = command.resolved[i];
+      if (!assignment) continue; // unresolved line — falls back to the manual path
+      assignments.push({
+        assignmentId: assignment.assignmentId,
+        lineItemId: item.lineItemId,
+        variantId: item.variantId,
+        fulfillerId: assignment.fulfillerId,
+        fulfillerName: assignment.fulfillerName,
+        fulfillerType: assignment.fulfillerType,
+        quantity: item.quantity,
+        status: 'assigned',
+        sku: assignment.sku,
+      });
+    }
+    return assignments.length > 0
+      ? [{ type: 'FulfillersAssigned', assignments, at }]
+      : [{ type: 'NoFulfillersResolved', at }];
+  },
+
+  evolve: {
+    // Aliasing the event's assignments into the context is not a live hazard: events are
+    // transient per ADR-0003, never persisted or shared, and nothing mutates them.
+    FulfillersAssigned: (context, event) => ({
+      ...context,
+      assignments: [...context.assignments, ...event.assignments],
+    }),
+    NoFulfillersResolved: (context, _event) => context,
+  },
+};
+
+// ==================
+// Command: requestFulfillment — transitional intake 3/3. `prepare` mints fulfiller-order
+// ids; `decide` groups assignments into fulfiller orders (`buildFulfillment`); the child
+// start + indexing are the `FulfillmentRequested` effect.
+// ==================
+
+export const requestFulfillmentBlock: CommandBlock<'requestFulfillment'> = {
+  // Mint one fulfiller-order id per fulfiller, mirroring `buildFulfillment`'s
+  // group-by-fulfiller; `decide` remains the source of truth for the grouping itself.
+  prepare: async (context) => {
     const fulfillerOrderIds: Record<string, string> = {};
-    for (const a of ctx.assignments) {
+    for (const a of context.assignments) {
       fulfillerOrderIds[a.fulfillerId] ??= `so-${uuid4().slice(0, 8)}`;
     }
     return { fulfillerOrderIds };
   },
-  decide(
-    ctx,
-    input: StateInput<OrderEvent, FulfillmentStatusUpdate>,
-    prepared: { fulfillerOrderIds: Record<string, string> },
-  ) {
-    const draft = copyOrderState(ctx);
+
+  decide: (command, context) => {
     const { fulfillerOrders, fulfillmentInputs } = buildFulfillment(
-      draft,
-      input.timestamp,
-      prepared.fulfillerOrderIds,
+      context,
+      command.at,
+      command.fulfillerOrderIds,
     );
-    draft.fulfillerOrders = fulfillerOrders;
-    draft.status = 'processing';
-    return {
-      context: draft,
-      next: 'processing' as const,
-      finalize: {
-        action: 'startFulfillment' as const,
-        order: ctx.order,
-        customerEmail: ctx.order.customerEmail,
-        fulfillmentInputs,
+    return [{ type: 'FulfillmentRequested', fulfillerOrders, fulfillmentInputs, at: command.at }];
+  },
+
+  evolve: {
+    // Install the fulfiller orders and link each covered assignment to its fulfiller
+    // order — a pure rebuild: every touched assignment is a NEW object.
+    FulfillmentRequested: (context, event) => {
+      const fulfillerOrderIdByAssignment = new Map<string, string>();
+      for (const so of event.fulfillerOrders) {
+        for (const item of so.items) {
+          fulfillerOrderIdByAssignment.set(item.assignmentId, so.fulfillerOrderId);
+        }
+      }
+      return {
+        ...context,
+        fulfillerOrders: event.fulfillerOrders,
+        assignments: context.assignments.map((assignment) => {
+          const fulfillerOrderId = fulfillerOrderIdByAssignment.get(assignment.assignmentId);
+          return fulfillerOrderId
+            ? { ...assignment, fulfillerOrderId, status: 'fulfilled' as const }
+            : assignment;
+        }),
+        status: 'processing',
+      };
+    },
+  },
+};
+
+// ==================
+// Command: cancelOrder — the whole story. Emits `OrderCancelled` — the same event
+// updateStatus-to-cancelled emits, so both blocks reference the same shared evolve entry
+// (and the machine-level effect fires for both).
+// ==================
+
+export const cancelOrderBlock: CommandBlock<'cancelOrder'> = {
+  decide: (command, _context) => [{ type: 'OrderCancelled', at: command.at }],
+
+  evolve: {
+    OrderCancelled: evolveOrderCancelled, // shared with updateStatus
+  },
+};
+
+// ==================
+// Command: updateStatus — an admin forces a status. One event PER TARGET
+// (`OrderShipped`, `OrderRefunded`, …), so route tables show every admin jump as an
+// explicit edge; unknown statuses are guard-rejected, never a decide-throw. In
+// `delivered`, the state's entry layers an `enrich` on this block that turns a forced
+// 'refunded' into a real `refundOrder` command (so it records a refund and trues up tax
+// exactly).
+// ==================
+
+export const updateStatusBlock: CommandBlock<'updateStatus'> = {
+  guard: guardForceableStatus, // shared guard — referenced, not duplicated
+
+  decide: (command, _context) => {
+    const at = command.at;
+    switch (command.status) {
+      case 'processing':
+        return [{ type: 'OrderProcessing', at }];
+      case 'partially_shipped':
+        return [{ type: 'OrderPartiallyShipped', at }];
+      case 'shipped':
+        return [{ type: 'OrderShipped', at }];
+      case 'delivered':
+        return [{ type: 'OrderDelivered', at }];
+      case 'return_requested':
+        return [{ type: 'OrderReturnRequested', at }];
+      case 'cancelled':
+        return [{ type: 'OrderCancelled', at }];
+      case 'refunded':
+        return [{ type: 'OrderRefunded', at }];
+      case 'returned':
+        return [{ type: 'OrderReturned', at }];
+      case 'complete':
+        return [{ type: 'OrderCompleted', at }];
+      default:
+        // A status the guard should have rejected — decide nothing, stay put.
+        return [];
+    }
+  },
+
+  evolve: {
+    OrderProcessing: (context, _event) => ({ ...context, status: 'processing' }),
+    OrderPartiallyShipped: (context, _event) => ({ ...context, status: 'partially_shipped' }),
+    OrderShipped: (context, _event) => ({ ...context, status: 'shipped' }),
+    // Deliberately does NOT set `deliveredAt` — only a real fulfilment aggregate does.
+    OrderDelivered: (context, _event) => ({ ...context, status: 'delivered' }),
+    OrderReturnRequested: (context, _event) => ({ ...context, status: 'return_requested' }),
+    OrderReturned: (context, _event) => ({ ...context, status: 'returned' }),
+    OrderCompleted: (context, _event) => ({ ...context, status: 'complete' }),
+    OrderCancelled: evolveOrderCancelled, // shared with cancelOrder
+    OrderRefunded: evolveOrderRefunded, // shared with refundOrder
+  },
+};
+
+// ==================
+// Command: submitFeedback — the whole story (the thank-you email is the event's effect)
+// ==================
+
+export const submitFeedbackBlock: CommandBlock<'submitFeedback'> = {
+  decide: (command, _context) => [
+    {
+      type: 'FeedbackSubmitted',
+      rating: command.rating,
+      comment: command.comment,
+      at: command.at,
+    },
+  ],
+
+  evolve: {
+    FeedbackSubmitted: (context, event) => ({
+      ...context,
+      status: 'complete',
+      customerFeedback: {
+        rating: event.rating,
+        comment: event.comment,
+        submittedAt: event.at,
+      },
+    }),
+  },
+};
+
+// ==================
+// Command: refundOrder — the whole story. The (pure) refund breakdown is computed in
+// `decide`; the customer email is the `OrderRefunded` effect (the demo has no ledger to
+// post to). A full refund additionally decides the terminal `OrderRefunded` move —
+// routing keys on the event.
+// ==================
+
+export const refundOrderBlock: CommandBlock<'refundOrder'> = {
+  // Selection mistakes (unknown line, non-positive qty, over-refund) are pure rejections,
+  // so `decide`'s refund math never throws for a caller mistake.
+  guard: (context, command) => {
+    const problem = refundSelectionProblem(context, command.lines);
+    if (problem) return reject(problem);
+  },
+
+  decide: (command, context) => {
+    const at = command.at;
+    const { record, fullyRefunded } = computeRefundRecord(
+      context,
+      normalizeLines(command.lines),
+      command.reason,
+      at,
+    );
+    const events: OrderEvent[] = [{ type: 'Refunded', record, fullyRefunded, at }];
+    // A full refund also decides the terminal move — routing keys on the event.
+    if (fullyRefunded) events.push({ type: 'OrderRefunded', at });
+    return events;
+  },
+
+  evolve: {
+    Refunded: (context, event) => ({
+      ...context,
+      refunds: [...(context.refunds ?? []), event.record],
+      status: event.fullyRefunded ? 'refunded' : context.status,
+      updatedAt: event.record.timestamp,
+    }),
+    OrderRefunded: evolveOrderRefunded, // shared with updateStatus
+  },
+};
+
+// ==================
+// Command: requestReturn — the whole story (records the in-flight request; the review
+// happens in `return_requested`)
+// ==================
+
+export const requestReturnBlock: CommandBlock<'requestReturn'> = {
+  decide: (command, _context) => [
+    {
+      type: 'ReturnRequested',
+      record: {
+        lines: normalizeLines(command.lines),
+        reason: command.reason,
+        requestedAt: command.at,
+        requestedBy: command.updatedBy,
+      },
+      at: command.at,
+    },
+  ],
+
+  evolve: {
+    ReturnRequested: (context, event) => ({ ...context, returnRequest: event.record }),
+  },
+};
+
+// ==================
+// Command: confirmReturn — the whole story. Issues the refund for the requested lines
+// (the decided `ReturnConfirmed` carries the record; the customer email is its effect)
+// and finishes the order as `returned`.
+// ==================
+
+export const confirmReturnBlock: CommandBlock<'confirmReturn'> = {
+  // Same pure validation as refundOrder, against the STORED request's lines.
+  guard: (context) => {
+    const problem = refundSelectionProblem(context, context.returnRequest?.lines);
+    if (problem) return reject(problem);
+  },
+
+  decide: (command, context) => {
+    const req = context.returnRequest;
+    const { record } = computeRefundRecord(
+      context,
+      req?.lines,
+      command.reason ?? req?.reason,
+      command.at,
+    );
+    return [{ type: 'ReturnConfirmed', record, at: command.at }];
+  },
+
+  evolve: {
+    ReturnConfirmed: (context, event) => ({
+      ...context,
+      refunds: [...(context.refunds ?? []), event.record],
+      status: 'returned',
+      returnRequest: undefined,
+      updatedAt: event.record.timestamp,
+    }),
+  },
+};
+
+// ==================
+// Command: denyReturn — the whole story (clears the request; routing drops back to
+// `delivered`)
+// ==================
+
+export const denyReturnBlock: CommandBlock<'denyReturn'> = {
+  decide: (command, _context) => [{ type: 'ReturnDenied', at: command.at }],
+
+  evolve: {
+    ReturnDenied: (context, _event) => ({ ...context, returnRequest: undefined }),
+  },
+};
+
+// ==================
+// Command: fulfillmentStatus — the child fulfillment workflow's status signal, mapped to
+// a command at registration. `decide` emits the applied update AND the aggregate OUTCOME
+// (projected onto the current set), so routing keys on decided events instead of
+// re-reading the applied status.
+// ==================
+
+export const fulfillmentStatusBlock: CommandBlock<'fulfillmentStatus'> = {
+  decide: (command, context) => {
+    const at = command.at;
+    const update = command.update;
+    const known = context.fulfillerOrders.some(
+      (so) => so.fulfillerOrderId === update.fulfillerOrderId,
+    );
+    if (!known) return []; // stay put; nothing happened to THIS order
+    const events: OrderEvent[] = [{ type: 'FulfillmentApplied', update, at }];
+    // Decide the aggregate OUTCOME by projecting the update onto the current set —
+    // routing keys on these events instead of re-reading the applied status.
+    const projected = context.fulfillerOrders.map((so) =>
+      so.fulfillerOrderId === update.fulfillerOrderId ? { status: update.status } : so,
+    );
+    const aggregate = aggregateShippingState(projected);
+    if (aggregate === 'rejected') events.push({ type: 'FulfillmentRejected', at });
+    else if (aggregate === 'delivered') events.push({ type: 'FulfillmentDelivered', at });
+    else if (aggregate === 'shipped') events.push({ type: 'FulfillmentShipped', at });
+    else if (aggregate === 'partially_shipped')
+      events.push({ type: 'FulfillmentPartiallyShipped', at });
+    return events;
+  },
+
+  evolve: {
+    // Apply the update to the one fulfiller order (status, tracking, history entry),
+    // cascade to its assignments, then aggregate — a pure rebuild of the old in-place
+    // mutation: every touched fulfiller order, history entry, and assignment is a NEW
+    // object; untouched ones are shared structurally.
+    FulfillmentApplied: (context, event) => {
+      const { update } = event;
+      const at = event.at;
+      const target = context.fulfillerOrders.find(
+        (so) => so.fulfillerOrderId === update.fulfillerOrderId,
+      );
+      if (!target) return context;
+
+      const fulfillerOrders = context.fulfillerOrders.map((so) => {
+        if (so.fulfillerOrderId !== update.fulfillerOrderId) return so;
+        const lastHistoryEntry = so.statusHistory[so.statusHistory.length - 1];
+        const statusHistory =
+          lastHistoryEntry && lastHistoryEntry.status === update.status
+            ? [
+                ...so.statusHistory.slice(0, -1),
+                {
+                  ...lastHistoryEntry,
+                  timestamp: at,
+                  ...(update.error ? { note: update.error } : {}),
+                },
+              ]
+            : [
+                ...so.statusHistory,
+                {
+                  status: update.status,
+                  timestamp: at,
+                  note: update.error || `Status updated from fulfillment workflow`,
+                },
+              ];
+        return {
+          ...so,
+          status: update.status,
+          updatedAt: at,
+          ...(update.carrier ? { carrier: update.carrier } : {}),
+          ...(update.trackingNumber ? { trackingNumber: update.trackingNumber } : {}),
+          ...(update.trackingUrl ? { trackingUrl: update.trackingUrl } : {}),
+          statusHistory,
+        };
+      });
+
+      const coveredAssignmentIds = new Set(target.items.map((item) => item.assignmentId));
+      const assignments = context.assignments.map((assignment) => {
+        if (!coveredAssignmentIds.has(assignment.assignmentId)) return assignment;
+        if (update.status === 'shipped') {
+          return {
+            ...assignment,
+            status: 'shipped' as const,
+            ...(update.carrier ? { carrier: update.carrier } : {}),
+          };
+        }
+        if (update.status === 'delivered') return { ...assignment, status: 'delivered' as const };
+        if (update.status === 'rejected') return { ...assignment, status: 'rejected' as const };
+        return assignment;
+      });
+
+      const aggregate = aggregateShippingState(fulfillerOrders);
+      return {
+        ...context,
         fulfillerOrders,
-      },
-    };
-  },
-  finalize: omsFinalize,
-});
-
-// ==================
-// State: ready_to_fulfill (manual fallback when no assignments resolved)
-// ==================
-
-const readyToFulfill = oms.transitions(
-  'ready_to_fulfill',
-  {
-    cancelOrder: cancelOrderEntry,
-    updateStatus: updateStatusEntry,
-  },
-  {
-    onTimeout: {
-      decide(ctx) {
-        return { context: ctx, next: 'ready_to_fulfill' as const, finalize: { action: 'none' } };
-      },
-      finalize: omsFinalize,
+        assignments,
+        // The all-rejected aggregate is the order FAILING, not arriving (mono #284) — and only
+        // a genuine delivery stamps deliveredAt.
+        status: aggregate === 'rejected' ? 'failed' : aggregate,
+        ...(aggregate === 'delivered' ? { deliveredAt: at } : {}),
+      };
     },
-    onSignal: {
-      // Signals at ready_to_fulfill (e.g. stale fulfillment callbacks) are safe to ignore.
-      decide(ctx) {
-        return { context: ctx, next: 'ready_to_fulfill' as const, finalize: { action: 'none' } };
-      },
-      finalize: omsFinalize,
-    },
+
+    // Aggregate outcomes (FulfillmentApplied already applied the status; idempotent).
+    FulfillmentPartiallyShipped: (context, _event) => ({
+      ...context,
+      status: 'partially_shipped',
+    }),
+    FulfillmentShipped: (context, _event) => ({ ...context, status: 'shipped' }),
+    FulfillmentDelivered: (context, _event) => ({ ...context, status: 'delivered' }),
+    FulfillmentRejected: (context, _event) => ({ ...context, status: 'failed' }),
   },
-);
+};
 
 // ==================
-// Unified fulfillment-status signal handler
-//
-// Shared by processing / partially_shipped / shipped. Applies a fulfiller-order-level
-// FulfillmentStatusUpdate, then advances to the state implied by the AGGREGATE status of
-// all fulfiller orders (forward-only, since fulfiller orders move pending→shipped→delivered).
+// The central decide / evolve — dispatchers ASSEMBLED from the blocks above, conforming
+// to the framework's `MachineDecider`.
 // ==================
 
 /**
- * Apply a fulfillment status update (via the pure decider) and advance to the state implied by
- * the AGGREGATE status of all fulfiller orders. An update for an unknown fulfiller order emits
- * no fact — log + stay put. Branches on the aggregate with literal `next` targets so the diagram
- * generator resolves the edges.
+ * Every command's block, keyed by command type — the machine's whole command surface.
+ * The mapped type pins each key to ITS OWN block, so a mixed-up entry is a type error.
  */
-function applyFulfillmentStatus(
-  ctx: Readonly<OrderState>,
-  update: FulfillmentStatusUpdate,
-  meta: InputMeta,
-): OmsDecision {
-  const facts = omsDecide(
-    { type: 'fulfillmentStatus', update, at: meta.timestamp },
-    ctx as OrderState,
-  );
-  if (facts.length === 0) {
-    log.warn('[OMS] Received fulfillment status for unknown fulfiller order', {
-      fulfillerOrderId: update.fulfillerOrderId,
-    });
-    return { context: ctx as OrderState, next: SELF, finalize: { action: 'none' } };
+const blocks: { [K in OrderCommand['type']]: CommandBlock<K> } = {
+  capturePayment: capturePaymentBlock,
+  assignFulfillers: assignFulfillersBlock,
+  requestFulfillment: requestFulfillmentBlock,
+  cancelOrder: cancelOrderBlock,
+  updateStatus: updateStatusBlock,
+  submitFeedback: submitFeedbackBlock,
+  refundOrder: refundOrderBlock,
+  requestReturn: requestReturnBlock,
+  confirmReturn: confirmReturnBlock,
+  denyReturn: denyReturnBlock,
+  fulfillmentStatus: fulfillmentStatusBlock,
+};
+
+/** A block's decide, widened for dispatch (the `blocks` mapped type guarantees the match). */
+type AnyDecide = (command: EnrichedOrderCommand, context: Readonly<OrderState>) => OrderEvent[];
+
+/** An evolve entry, widened for dispatch (the assembled map keys guarantee the match). */
+type AnyEvolveEntry = (context: Readonly<OrderState>, event: OrderEvent) => OrderState;
+
+/**
+ * Merge every block's evolve map into the machine's single event → entry table.
+ * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
+ * above) — two blocks inlining different code for one event throws here, at module
+ * load, so shared events cannot silently diverge.
+ */
+function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
+  const merged: EvolveMap = {};
+  for (const block of blockList) {
+    if (!block.evolve) continue;
+    for (const type of Object.keys(block.evolve) as OrderEvent['type'][]) {
+      const entry = block.evolve[type];
+      if (!entry) continue;
+      const existing = merged[type];
+      if (existing && existing !== entry) {
+        throw new Error(
+          `oms evolve assembly: event '${type}' has two different evolve entries — ` +
+            'share one named evolve function between the blocks instead',
+        );
+      }
+      (merged as Record<OrderEvent['type'], unknown>)[type] = entry;
+    }
   }
-  const context = facts.reduce(evolve, ctx as OrderState);
-  const agg = aggregateShippingState(context.fulfillerOrders);
-  if (agg === 'delivered')
-    return { context, next: 'delivered' as const, finalize: { action: 'none' } };
-  if (agg === 'shipped') return { context, next: 'shipped' as const, finalize: { action: 'none' } };
-  if (agg === 'partially_shipped')
-    return { context, next: 'partially_shipped' as const, finalize: { action: 'none' } };
-  return { context, next: 'processing' as const, finalize: { action: 'none' } };
+  return merged;
 }
 
-/** Shared onSignal entry for the shipment-tracking states. */
-const fulfillmentSignalEntry = {
-  decide: applyFulfillmentStatus,
-  finalize: omsFinalize,
-};
-
-/** Shared onTimeout no-op (stay put) for the shipment-tracking states. */
-const stayPutOnTimeout = {
-  decide(ctx: Readonly<OrderState>) {
-    return { context: ctx, next: SELF, finalize: { action: 'none' as const } };
-  },
-  finalize: omsFinalize,
-};
-
-const processing = oms.transitions(
-  'processing',
-  {
-    cancelOrder: cancelOrderEntry,
-    updateStatus: updateStatusEntry,
-  },
-  {
-    onTimeout: stayPutOnTimeout,
-    onSignal: fulfillmentSignalEntry,
-  },
-);
-
-const partiallyShipped = oms.transitions(
-  'partially_shipped',
-  {
-    cancelOrder: cancelOrderEntry,
-    updateStatus: updateStatusEntry,
-  },
-  {
-    onTimeout: stayPutOnTimeout,
-    onSignal: fulfillmentSignalEntry,
-  },
-);
-
-const shipped = oms.transitions(
-  'shipped',
-  {
-    cancelOrder: cancelOrderEntry,
-    updateStatus: updateStatusEntry,
-  },
-  {
-    onTimeout: stayPutOnTimeout,
-    onSignal: fulfillmentSignalEntry,
-  },
-);
-
-// ==================
-// State: delivered — post-delivery lifecycle (feedback, refunds, returns)
-// ==================
-
-const delivered = oms.transitions(
-  'delivered',
-  {
-    submitFeedback: {
-      decide(ctx, event: Extract<OrderEvent, { type: 'submitFeedback' }>, meta) {
-        const context = apply(ctx, {
-          type: 'submitFeedback',
-          rating: event.rating,
-          comment: event.comment,
-          at: meta.timestamp,
-        });
-        return {
-          context,
-          next: terminal('complete'),
-          response: context,
-          finalize: {
-            action: 'sendFeedback' as const,
-            orderId: ctx.order.orderId,
-            email: ctx.order.customerEmail,
-          },
-        };
-      },
-      finalize: omsFinalize,
-    },
-    updateStatus: {
-      decide(ctx, event: Extract<OrderEvent, { type: 'updateStatus' }>, meta) {
-        // 'refunded' via the generic status update = full refund of all remaining
-        // quantity. Route through the refund command so it records a refund exactly
-        // (handles the case where partials came first).
-        if (event.status === 'refunded') {
-          const context = apply(ctx, {
-            type: 'refundOrder',
-            lines: undefined,
-            reason: event.note,
-            at: meta.timestamp,
-          });
-          const next =
-            context.status === 'refunded' ? terminal('refunded') : ('delivered' as const);
-          return { context, next, response: context, finalize: refundFinalize(context) };
-        }
-        const context = apply(ctx, { type: 'updateStatus', status: event.status });
-        return { context, next: nextForStatus(event.status), response: context };
-      },
-      finalize: omsFinalize,
-    },
-    refundOrder: {
-      decide(ctx, event: Extract<OrderEvent, { type: 'refundOrder' }>, meta) {
-        // Empty/omitted selection = full refund of all remaining quantity.
-        const selections = event.lines && event.lines.length > 0 ? event.lines : undefined;
-        const context = apply(ctx, {
-          type: 'refundOrder',
-          lines: selections,
-          reason: event.reason,
-          at: meta.timestamp,
-        });
-        const next = context.status === 'refunded' ? terminal('refunded') : ('delivered' as const);
-        return { context, next, response: context, finalize: refundFinalize(context) };
-      },
-      finalize: omsFinalize,
-    },
-    requestReturn: {
-      decide(ctx, event: Extract<OrderEvent, { type: 'requestReturn' }>, meta) {
-        const lines = event.lines && event.lines.length > 0 ? event.lines : undefined;
-        const context = apply(ctx, {
-          type: 'requestReturn',
-          lines,
-          reason: event.reason,
-          updatedBy: event.updatedBy,
-          at: meta.timestamp,
-        });
-        return { context, next: 'return_requested' as const, response: context };
-      },
-      finalize: omsFinalize,
-    },
-  },
-  {
-    onTimeout: {
-      decide(ctx) {
-        return { context: ctx, next: 'delivered' as const, finalize: { action: 'none' } };
-      },
-      finalize: omsFinalize,
-    },
-    onSignal: {
-      decide(ctx) {
-        return { context: ctx, next: 'delivered' as const, finalize: { action: 'none' } };
-      },
-      finalize: omsFinalize,
-    },
-  },
-);
-
-// ==================
-// State: return_requested — new returns lifecycle off `delivered`
-// ==================
+const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
 
 /**
- * A return has been requested on a delivered order. `confirmReturn` issues the refund
- * (via the decider's ReturnConfirmed fact) and finishes the order as `returned`; `denyReturn`
- * clears the request and drops back to `delivered`.
+ * decide(command, context) → events.
+ *
+ * Pure: emits the events implied by the command in the current state, and nothing else.
+ * It never mutates and never reads a clock or generates ids (those arrive on the
+ * command). Rejection (unforceable status, invalid refund selection) lives in the
+ * blocks' `guard`s; a fulfilment update for an unknown fulfiller order emits nothing
+ * (stay put). This is a thin dispatcher: each command's decision code lives inline in
+ * its block above.
  */
-const returnRequested = oms.transitions(
-  'return_requested',
-  {
-    confirmReturn: {
-      decide(ctx, event: Extract<OrderEvent, { type: 'confirmReturn' }>, meta) {
-        const context = apply(ctx, {
-          type: 'confirmReturn',
-          reason: event.reason,
-          at: meta.timestamp,
-        });
-        return {
-          context,
-          next: terminal('returned'),
-          response: context,
-          finalize: {
-            action: 'sendStatusEmail' as const,
-            orderId: ctx.order.orderId,
-            status: 'returned' as const,
-            email: ctx.order.customerEmail,
-          },
-        };
-      },
-      finalize: omsFinalize,
-    },
-    denyReturn: {
-      decide(ctx) {
-        const context = apply(ctx, { type: 'denyReturn' });
-        return { context, next: 'delivered' as const, response: context };
-      },
-      finalize: omsFinalize,
-    },
+export function decide(command: EnrichedOrderCommand, context: Readonly<OrderState>): OrderEvent[] {
+  return (blocks[command.type].decide as AnyDecide)(command, context);
+}
+
+/**
+ * evolve(context, event) → context.
+ *
+ * Pure application of a single event — the ONLY writer of order status / feedback /
+ * refunds / return request / assignment / fulfiller-order state — and it writes them by
+ * returning a NEW value built by structural sharing. The dispatcher hands the context to
+ * the emitting block's evolve entry; an event that changes nothing returns the context
+ * as-is. No deep copy, no mutation anywhere (`copyOrderState` is retired).
+ */
+export function evolve(context: Readonly<OrderState>, event: OrderEvent): OrderState {
+  const entry = evolveByEvent[event.type];
+  return entry ? (entry as AnyEvolveEntry)(context, event) : context;
+}
+
+/**
+ * The assembled decider, conforming to the framework's `MachineDecider` shape (ADR-0024:
+ * `isTerminal` is gone — terminality is the route tables' job; `initialState` remains as
+ * the canonical empty shape for decider unit tests, never consulted at runtime).
+ */
+export const omsDecider: MachineDecider<EnrichedOrderCommand, OrderEvent, OrderState> = {
+  decide,
+  evolve,
+  initialState: {
+    order: undefined as unknown as OrderState['order'],
+    status: 'pending_assignment',
+    statusHistory: [],
+    assignments: [],
+    fulfillerOrders: [],
   },
-  {
-    onTimeout: {
-      decide(ctx) {
-        return { context: ctx, next: 'return_requested' as const, finalize: { action: 'none' } };
-      },
-      finalize: omsFinalize,
-    },
-    onSignal: {
-      decide(ctx) {
-        return { context: ctx, next: 'return_requested' as const, finalize: { action: 'none' } };
-      },
-      finalize: omsFinalize,
-    },
-  },
-);
+};
 
 // ==================
-// State Registry
+// Effects (event-keyed reactions; failures are logged and swallowed — the decision
+// is already committed, same contract as the old surface's finalize)
+// ==================
+
+const fulfillmentCancelSignal = defineSignal('cancel');
+
+async function triggerFulfillmentCancel(orderId: string): Promise<void> {
+  try {
+    const fulfillmentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
+    const handle = getExternalWorkflowHandle(fulfillmentWorkflowId);
+    await handle.signal(fulfillmentCancelSignal);
+    log.info('[OMS] Sent cancel signal to fulfillment workflow');
+  } catch (e) {
+    log.warn('[OMS] Failed to signal fulfillment cancel (may have already completed)', {
+      error: String(e),
+    });
+  }
+}
+
+/** Index the new fulfiller orders and start the fulfillment child. */
+async function startFulfillmentEffect(
+  event: Ev<'FulfillmentRequested'>,
+  context: Readonly<OrderState>,
+): Promise<void> {
+  const order = context.order;
+  // Index the newly-created fulfiller orders so the admin sees them immediately.
+  for (const so of event.fulfillerOrders) {
+    await indexFulfillerOrder(buildFulfillerOrderDocument(so, order.correlationId));
+  }
+  // Price validation — warn on $0 items to catch cart manipulation.
+  const zeroItems = event.fulfillmentInputs
+    .flatMap((fo) => fo.items)
+    .filter((i) => i.unitPrice <= 0);
+  if (zeroItems.length > 0) {
+    log.warn('[OMS] Order contains items with zero or negative price', {
+      orderId: order.orderId,
+      zeroSkus: zeroItems.map((i) => i.sku),
+    });
+  }
+  // Pass the journey's correlationId along: this workflow's own CorrelationId
+  // Search Attribute first, the order record's copy as the fallback (ADR-0011).
+  const fulfillmentStart = buildWorkflowStartOptions({
+    storeId: DEMO_STORE_ID,
+    domain: 'fulfillment',
+    entityId: order.orderId,
+    correlationId: workflowCorrelationId() ?? order.correlationId,
+    orderId: order.orderId,
+    cartId: order.cartId,
+  });
+  await startChild('fulfillmentWorkflow', {
+    ...fulfillmentStart,
+    // Without an explicit policy, Temporal defaults to TERMINATE — if OMS closes (complete,
+    // fail, cancel, or workflowExecutionTimeout expiry) before fulfillment naturally
+    // finishes, it would be killed mid-flight. ABANDON lets it keep running independently;
+    // it tracks its own cancellation via the fulfillment cancel signal and completes on its
+    // own once its fulfiller-order children do.
+    parentClosePolicy: 'ABANDON',
+    args: [
+      {
+        orderId: order.orderId,
+        cartId: order.cartId,
+        customerId: order.customerEmail,
+        customerEmail: order.customerEmail,
+        confirmationNumber: order.confirmationNumber,
+        shippingAddress: {
+          firstName: order.shippingAddress.firstName,
+          lastName: order.shippingAddress.lastName,
+          email: order.customerEmail,
+          phone: order.shippingAddress.phone,
+          address1: order.shippingAddress.address1,
+          address2: order.shippingAddress.address2,
+          city: order.shippingAddress.city,
+          region: order.shippingAddress.state,
+          zip: order.shippingAddress.postalCode,
+          country: order.shippingAddress.country,
+        },
+        shippingMethod: 'standard',
+        fulfillerOrders: event.fulfillmentInputs,
+      } satisfies Fulfillment.FulfillmentOrderRequest,
+    ],
+    taskQueue: FULFILLMENT_TASK_QUEUE,
+    workflowExecutionTimeout: '90 days',
+  });
+}
+
+// ==================
+// The machine (ADR-0024 decider-native surface) — binds the decider + shared type
+// params once.
+// ==================
+
+const m = defineMachine<OrderStateName, OrderCommand, OrderEvent, OrderState, OrderState>({
+  decider: omsDecider,
+  // Every wire command answers with the post-evolve order state (the old `response: context`).
+  respond: (context) => context,
+  effects: {
+    FulfillmentRequested: startFulfillmentEffect,
+    // Machine-level: a cancel is a cancel wherever it was decided (command or forced
+    // status). Note: the old surface skipped the email + fulfillment cancel when an admin
+    // forced 'cancelled' from `delivered` — an inconsistency, not a behavior worth keeping
+    // (same call as the mono's migration).
+    OrderCancelled: async (_event, context) => {
+      await sendOrderStatusEmail(
+        context.order.customerEmail,
+        context.order.orderId,
+        'cancelled',
+        {},
+      );
+      await triggerFulfillmentCancel(context.order.orderId);
+    },
+    FeedbackSubmitted: async (_event, context) => {
+      await sendFeedbackThankYouEmail(context.order.customerEmail, context.order.orderId);
+    },
+    // Any path to fully-refunded notifies the customer (the demo has no ledger to post
+    // to — mono records the refund with Stripe-first ordering here instead).
+    OrderRefunded: async (_event, context) => {
+      await sendOrderStatusEmail(
+        context.order.customerEmail,
+        context.order.orderId,
+        'refunded',
+        {},
+      );
+    },
+    ReturnConfirmed: async (_event, context) => {
+      await sendOrderStatusEmail(
+        context.order.customerEmail,
+        context.order.orderId,
+        'returned',
+        {},
+      );
+    },
+  } satisfies EffectsMap<OrderEvent, OrderState>,
+});
+
+/**
+ * Status emails for admin-forced moves, shared by the pre-delivery states. State-level
+ * deliberately: the aggregate-driven versions of these moves (`Fulfillment*` events) send
+ * nothing, and `delivered`'s own forced moves never emailed on the old surface either.
+ */
+const forcedStatusEmailEffects: EffectsMap<OrderEvent, OrderState> = {
+  OrderShipped: async (_event, context) => {
+    await sendOrderStatusEmail(context.order.customerEmail, context.order.orderId, 'shipped', {});
+  },
+  OrderDelivered: async (_event, context) => {
+    await sendOrderStatusEmail(context.order.customerEmail, context.order.orderId, 'delivered', {});
+  },
+};
+
+// ==================
+// State Registry — the commands tables reference the SAME blocks the dispatchers are
+// assembled from; the framework reads only their `guard`/`prepare`.
 // ==================
 
 export const OMS_STATES: StateRegistry<
   OrderStateName,
-  OrderEvent,
+  OrderCommand,
   OrderState,
   OrderState,
-  FulfillmentStatusUpdate
+  OrderCommand
 > = {
-  pending_assignment: { ...pendingAssignment, timeout: '1 minute', transitional: true },
-  assigning_fulfillers: { ...assigningFulfillers, timeout: '1 minute', transitional: true },
-  requesting_fulfillment: { ...requestingFulfillment, timeout: '1 minute', transitional: true },
-  ready_to_fulfill: { ...readyToFulfill, timeout: '365 days' },
-  processing: { ...processing, timeout: '365 days' },
-  partially_shipped: { ...partiallyShipped, timeout: '365 days' },
-  shipped: { ...shipped, timeout: '365 days' },
-  delivered: { ...delivered, timeout: '30 days' },
-  return_requested: { ...returnRequested, timeout: '30 days' },
+  /**
+   * Transitional intake 1/3: a pure hop — the mono decides the ORDER_CAPTURE ledger
+   * numbers here and posts them as the `PaymentCaptured` effect; the demo has no
+   * accounting, so the event carries nothing and has no effect (see `capturePaymentBlock`).
+   */
+  pending_assignment: m.state('pending_assignment', {
+    commands: { capturePayment: capturePaymentBlock },
+    route: { PaymentCaptured: 'assigning_fulfillers' },
+    timeout: '1 minute',
+    transitional: true,
+    onTimeout: () => ({ type: 'capturePayment' }),
+  }),
+
+  /**
+   * Transitional intake 2/3: `prepare` resolves fulfillers (impure I/O) and mints
+   * assignment ids; `decide` records the assignments. No resolution at all falls back
+   * to the manual `ready_to_fulfill` path.
+   */
+  assigning_fulfillers: m.state('assigning_fulfillers', {
+    commands: { assignFulfillers: assignFulfillersBlock },
+    route: {
+      FulfillersAssigned: 'requesting_fulfillment',
+      NoFulfillersResolved: 'ready_to_fulfill',
+    },
+    timeout: '1 minute',
+    transitional: true,
+    onTimeout: () => ({ type: 'assignFulfillers' }),
+  }),
+
+  /**
+   * Transitional intake 3/3: `prepare` mints fulfiller-order ids; `decide` groups
+   * assignments into fulfiller orders; the child start + indexing are the
+   * `FulfillmentRequested` effect.
+   */
+  requesting_fulfillment: m.state('requesting_fulfillment', {
+    commands: { requestFulfillment: requestFulfillmentBlock },
+    route: { FulfillmentRequested: 'processing' },
+    timeout: '1 minute',
+    transitional: true,
+    onTimeout: () => ({ type: 'requestFulfillment' }),
+  }),
+
+  /** No fulfiller resolved — the order waits for manual handling (admin status moves). */
+  ready_to_fulfill: m.state('ready_to_fulfill', {
+    commands: {
+      cancelOrder: cancelOrderBlock,
+      updateStatus: updateStatusBlock,
+    },
+    route: {
+      OrderCancelled: terminal('cancelled'),
+      OrderProcessing: 'processing',
+      OrderPartiallyShipped: 'partially_shipped',
+      OrderShipped: 'shipped',
+      OrderDelivered: 'delivered',
+      OrderReturnRequested: 'return_requested',
+      OrderRefunded: terminal('refunded'),
+      OrderReturned: terminal('returned'),
+      OrderCompleted: terminal('complete'),
+    },
+    effects: forcedStatusEmailEffects,
+    timeout: '365 days',
+  }),
+
+  processing: m.state('processing', {
+    commands: {
+      cancelOrder: cancelOrderBlock,
+      updateStatus: updateStatusBlock,
+      fulfillmentStatus: fulfillmentStatusBlock,
+    },
+    route: {
+      FulfillmentPartiallyShipped: 'partially_shipped',
+      FulfillmentShipped: 'shipped',
+      FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
+      OrderCancelled: terminal('cancelled'),
+      OrderProcessing: SELF,
+      OrderPartiallyShipped: 'partially_shipped',
+      OrderShipped: 'shipped',
+      OrderDelivered: 'delivered',
+      OrderReturnRequested: 'return_requested',
+      OrderRefunded: terminal('refunded'),
+      OrderReturned: terminal('returned'),
+      OrderCompleted: terminal('complete'),
+      '*': SELF,
+    },
+    effects: forcedStatusEmailEffects,
+    timeout: '365 days',
+  }),
+
+  partially_shipped: m.state('partially_shipped', {
+    commands: {
+      cancelOrder: cancelOrderBlock,
+      updateStatus: updateStatusBlock,
+      fulfillmentStatus: fulfillmentStatusBlock,
+    },
+    route: {
+      FulfillmentPartiallyShipped: SELF,
+      FulfillmentShipped: 'shipped',
+      FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
+      OrderCancelled: terminal('cancelled'),
+      OrderProcessing: 'processing',
+      OrderPartiallyShipped: SELF,
+      OrderShipped: 'shipped',
+      OrderDelivered: 'delivered',
+      OrderReturnRequested: 'return_requested',
+      OrderRefunded: terminal('refunded'),
+      OrderReturned: terminal('returned'),
+      OrderCompleted: terminal('complete'),
+      '*': SELF,
+    },
+    effects: forcedStatusEmailEffects,
+    timeout: '365 days',
+  }),
+
+  shipped: m.state('shipped', {
+    commands: {
+      cancelOrder: cancelOrderBlock,
+      updateStatus: updateStatusBlock,
+      fulfillmentStatus: fulfillmentStatusBlock,
+    },
+    route: {
+      FulfillmentShipped: SELF,
+      FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
+      OrderCancelled: terminal('cancelled'),
+      OrderProcessing: 'processing',
+      OrderPartiallyShipped: 'partially_shipped',
+      OrderShipped: SELF,
+      OrderDelivered: 'delivered',
+      OrderReturnRequested: 'return_requested',
+      OrderRefunded: terminal('refunded'),
+      OrderReturned: terminal('returned'),
+      OrderCompleted: terminal('complete'),
+      '*': SELF,
+    },
+    effects: forcedStatusEmailEffects,
+    timeout: '365 days',
+  }),
+
+  /**
+   * Delivered — post-delivery lifecycle (feedback, refunds, returns). An admin
+   * 'refunded' status is enriched into a real `refundOrder` command, so it records a
+   * refund and trues up tax exactly (handles the case where partials came first).
+   * Timeouts are ignored (no `onTimeout`): the demo has no return-window auto-close.
+   */
+  delivered: m.state('delivered', {
+    commands: {
+      submitFeedback: submitFeedbackBlock,
+      // The updateStatus block with TWO phases replaced: this state's refundability guard
+      // (demo divergence: `guardDeliveredUpdateStatus`) and an `enrich` that normalizes a
+      // 'refunded' status into a real `refundOrder` command. Everything else — decide,
+      // evolve — is the block's, which is what the spread says.
+      //
+      // Ported from mono #270 (`f0648dc0`). This was a bare `{ guard, enrich }` literal whose
+      // own comment said it was "spelled as a literal so the diagram generator resolves the
+      // guard" — a workaround for one generator limitation that created a worse one: emissions
+      // derive from the handler's evolve map, the literal carried none, and the generated
+      // diagram rendered this command as "(no events — idempotent no-op)" when it can force
+      // many statuses. A bare literal is now reserved for its honest meaning — "deliberately
+      // NOT the block", as cart's `beginCheckout: {}` uses it.
+      //
+      // Accepted imprecision: the render lists `OrderRefunded` under this command, which
+      // `enrich` actually diverts to `refundOrder`. The outcome is right; only the mechanism
+      // is indirect. Naming one edge by its effect beats silently omitting the rest.
+      updateStatus: {
+        ...updateStatusBlock,
+        guard: guardDeliveredUpdateStatus,
+        enrich: (command, _prepared, meta) =>
+          command.status === 'refunded'
+            ? { type: 'refundOrder' as const, reason: command.note, at: meta.timestamp }
+            : { ...command, at: meta.timestamp },
+      },
+      refundOrder: refundOrderBlock,
+      requestReturn: requestReturnBlock,
+    },
+    route: {
+      FeedbackSubmitted: terminal('complete'),
+      // Partial refunds stay; a full refund additionally decides `OrderRefunded`
+      // (last routed event wins → terminal).
+      Refunded: SELF,
+      ReturnRequested: 'return_requested',
+      OrderCancelled: terminal('cancelled'),
+      OrderProcessing: 'processing',
+      OrderPartiallyShipped: 'partially_shipped',
+      OrderShipped: 'shipped',
+      OrderDelivered: SELF,
+      OrderReturnRequested: 'return_requested',
+      OrderRefunded: terminal('refunded'),
+      OrderReturned: terminal('returned'),
+      OrderCompleted: terminal('complete'),
+    },
+    timeout: '30 days',
+  }),
+
+  /**
+   * A return has been requested on a delivered order. `confirmReturn` issues the refund
+   * (the decided `ReturnConfirmed` carries the record; the customer email is its effect)
+   * and finishes the order as `returned`; `denyReturn` clears the request and drops back
+   * to `delivered`. Timeouts are ignored — the demo has no review-SLA auto-close.
+   */
+  return_requested: m.state('return_requested', {
+    commands: {
+      confirmReturn: confirmReturnBlock,
+      denyReturn: denyReturnBlock,
+    },
+    route: {
+      ReturnConfirmed: terminal('returned'),
+      ReturnDenied: 'delivered',
+    },
+    timeout: '30 days',
+  }),
 };

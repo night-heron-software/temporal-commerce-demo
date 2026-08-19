@@ -65,6 +65,62 @@ describe('buildOrderDocument', () => {
     expect(doc.orderId).toBe('o-1');
   });
 
+  it('projects the refund ledger so it survives workflow close (backlog #4 / R4)', () => {
+    const doc = buildOrderDocument(
+      order,
+      {
+        ...state,
+        refunds: [
+          {
+            refundId: 'refund-1',
+            timestamp: '2026-08-11T00:00:00.000Z',
+            reason: 'partial probe',
+            lines: [{ lineItemId: 'li-1', quantity: 1 }],
+            refundAmount: 1500,
+            taxAmount: 120,
+          },
+        ],
+      },
+      order.customerEmail,
+    );
+    expect(doc.refunds).toEqual([
+      {
+        refundId: 'refund-1',
+        timestamp: '2026-08-11T00:00:00.000Z',
+        reason: 'partial probe',
+        lines: [{ lineItemId: 'li-1', quantity: 1 }],
+        refundAmount: 1500,
+        taxAmount: 120,
+      },
+    ]);
+  });
+
+  it('omits refunds when the order has none (no empty-array noise)', () => {
+    const doc = buildOrderDocument(order, state, order.customerEmail);
+    expect(doc.refunds).toBeUndefined();
+  });
+
+  it('maps the display snapshot onto item docs (backlog #1 / R1)', () => {
+    const doc = buildOrderDocument(
+      {
+        ...order,
+        items: [
+          {
+            ...order.items[0],
+            productTitle: 'California Surf — Tee [Simulated]',
+            variantTitle: 'Baby Blue / 4XL',
+          },
+        ],
+      },
+      state,
+      order.customerEmail,
+    );
+    expect(doc.items[0]).toMatchObject({
+      productTitle: 'California Surf — Tee [Simulated]',
+      variantTitle: 'Baby Blue / 4XL',
+    });
+  });
+
   it('stays communication-free — the summaries are joined by the indexOrder activity, not the pure builder', () => {
     const doc = buildOrderDocument(order, state, order.customerEmail);
     expect('communications' in doc).toBe(false);

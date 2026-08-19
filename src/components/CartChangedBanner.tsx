@@ -2,41 +2,147 @@
 
 import { useCart } from '@/context/CartContext';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import { acknowledgeCartChange } from '@/app/shop/cart-actions';
+import { useEffect, useState } from 'react';
+import { acknowledgeCartChange, getCheckoutState } from '@/app/shop/cart-actions';
+import type { Cart } from '@/temporal/contracts';
+import { cartLineLabel } from '@/app/shop/cart-line-display';
 
 /**
- * Banner shown during checkout when the cart has been modified since checkout started.
- * Compares cart.cartVersion against checkout.cartVersionAcknowledged.
+ * Banner shown during checkout when the cart has been modified since the shopper last
+ * approved it (cart.cartVersion vs the CHECKOUT's cartVersionAcknowledged).
+ *
+ * Remediation R3 (backlog #3, F5+F6): the bounce back to payment is treated as an event
+ * to be EXPLAINED, not a redirect to be survived —
+ * - reads the acknowledged version from the LIVE checkout state (`getCheckoutState`),
+ *   not the cart query's `checkout` snapshot — the cart workflow initializes that
+ *   snapshot to undefined and never mirrors the live ack, so the previous banner's
+ *   guard was never true and it was DEAD CODE on every page it was mounted on (why
+ *   F5/F6's operator saw no messaging at all);
+ * - names what changed line by line ("Bald Eagle Portrait — M / Royal Blue: quantity
+ *   1 → 2") by diffing against a snapshot of the last-approved cart (sessionStorage,
+ *   captured whenever the cart is in its approved state), using the R1 display snapshot
+ *   for human names;
+ * - shows the previous vs new total;
+ * - polls both while mounted (the recompute nudge lands server-side; without a poll the
+ *   page learns about it only on reload — F5's half of the gap).
  */
+
+const POLL_MS = 3000;
+
+interface ApprovedSnapshot {
+  cartVersion: number;
+  totalPrice: number;
+  items: Array<{
+    lineItemId: string;
+    label: string;
+    quantity: number;
+  }>;
+}
+
+function snapshotKey(cartId: string) {
+  return `approved-cart-${cartId}`;
+}
+
+// One fallback rule for line identity (cart-line-display.ts): `Variant <id>`, never
+// `SKU <id>` — a variantId is not a sku (mono #252 Phase 5a).
+const itemLabel = (item: Cart.CartItem): string => cartLineLabel(item);
+
+function buildSnapshot(cart: Cart.CartDetails): ApprovedSnapshot {
+  return {
+    cartVersion: cart.cartVersion,
+    totalPrice: cart.totalPrice,
+    items: cart.items.map((i) => ({
+      lineItemId: i.lineItemId,
+      label: itemLabel(i),
+      quantity: i.quantity,
+    })),
+  };
+}
+
+/** Human lines describing old → new, by lineItemId. */
+function diffLines(prev: ApprovedSnapshot, cart: Cart.CartDetails): string[] {
+  const lines: string[] = [];
+  const prevById = new Map(prev.items.map((i) => [i.lineItemId, i]));
+  const nowById = new Map(cart.items.map((i) => [i.lineItemId, i]));
+
+  for (const item of cart.items) {
+    const before = prevById.get(item.lineItemId);
+    if (!before) {
+      lines.push(`${itemLabel(item)}: added (× ${item.quantity})`);
+    } else if (before.quantity !== item.quantity) {
+      lines.push(`${before.label}: quantity ${before.quantity} → ${item.quantity}`);
+    }
+  }
+  for (const before of prev.items) {
+    if (!nowById.has(before.lineItemId)) {
+      lines.push(`${before.label}: removed`);
+    }
+  }
+  return lines;
+}
+
 export function CartChangedBanner() {
   const { cart, cartId, refreshCart } = useCart();
   const router = useRouter();
   const [dismissing, setDismissing] = useState(false);
+  const [acknowledgedVersion, setAcknowledgedVersion] = useState<number | undefined>(undefined);
 
-  // Only show if in checkout and cart version has changed
-  if (
-    !cart ||
-    !cartId ||
-    cart.status !== 'checkout' ||
-    !cart.checkout ||
-    cart.checkout.cartVersionAcknowledged === undefined
-  ) {
+  // Poll cart + LIVE checkout state while mounted so a recompute lands here without a
+  // manual reload (F5). The acknowledged version lives only on the checkout child.
+  useEffect(() => {
+    if (!cartId) return;
+    let cancelled = false;
+    const tick = () => {
+      refreshCart();
+      getCheckoutState(cartId).then((state) => {
+        if (!cancelled) setAcknowledgedVersion(state?.cartVersionAcknowledged);
+      });
+    };
+    tick();
+    const timer = setInterval(tick, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [cartId, refreshCart]);
+
+  const inCheckout =
+    !!cart && !!cartId && cart.status === 'checkout' && acknowledgedVersion !== undefined;
+
+  const currentVersion = cart?.cartVersion ?? 0;
+  const changed = inCheckout && currentVersion > (acknowledgedVersion ?? 0);
+
+  // While the cart is in its APPROVED state, keep a snapshot to diff against later.
+  useEffect(() => {
+    if (inCheckout && !changed && cart) {
+      try {
+        sessionStorage.setItem(snapshotKey(cart.cartId), JSON.stringify(buildSnapshot(cart)));
+      } catch {
+        // storage unavailable — the banner degrades to its generic message
+      }
+    }
+  }, [inCheckout, changed, cart]);
+
+  if (!inCheckout || !changed || !cart || !cartId) {
     return null;
   }
 
-  const currentVersion = cart.cartVersion ?? 0;
-  const acknowledgedVersion = cart.checkout.cartVersionAcknowledged ?? 0;
-
-  if (currentVersion <= acknowledgedVersion) {
-    return null;
+  let prev: ApprovedSnapshot | null = null;
+  try {
+    const raw = sessionStorage.getItem(snapshotKey(cartId));
+    prev = raw ? (JSON.parse(raw) as ApprovedSnapshot) : null;
+  } catch {
+    prev = null;
   }
+  const changes = prev ? diffLines(prev, cart) : [];
+  const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
   async function handleDismiss() {
     if (!cartId) return;
     setDismissing(true);
     try {
       await acknowledgeCartChange(cartId, currentVersion);
+      setAcknowledgedVersion(currentVersion); // clear now, not on the next poll tick
       await refreshCart();
     } catch {
       // Non-blocking
@@ -67,11 +173,23 @@ export function CartChangedBanner() {
       </svg>
       <div className="flex-1">
         <p className="text-sm font-semibold text-[var(--heron-slate-dark)] dark:text-[var(--heron-cream)]">
-          Your cart has been updated
+          Your cart changed — please re-confirm payment
         </p>
-        <p className="text-xs text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)] mt-1">
-          Items in your cart have changed since you started checkout. Please review before
-          continuing.
+        {changes.length > 0 ? (
+          <ul className="text-xs text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)] mt-1 space-y-0.5 list-disc list-inside">
+            {changes.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)] mt-1">
+            Items in your cart have changed since you approved payment.
+          </p>
+        )}
+        <p className="text-xs font-medium text-[var(--heron-slate-dark)] dark:text-[var(--heron-cream)] mt-1.5">
+          {prev && prev.totalPrice !== cart.totalPrice
+            ? `Total: ${fmt(prev.totalPrice)} → ${fmt(cart.totalPrice)}`
+            : `Total: ${fmt(cart.totalPrice)}`}
         </p>
         <div className="flex gap-2 mt-3">
           <button
@@ -85,7 +203,7 @@ export function CartChangedBanner() {
             disabled={dismissing}
             className="text-xs font-medium px-3 py-1.5 rounded-lg bg-transparent border border-[var(--heron-gray)] text-[var(--heron-gray-dark)] dark:text-[var(--heron-gray)] hover:bg-[var(--heron-cream-dark)] dark:hover:bg-[var(--heron-slate-dark)] transition-colors disabled:opacity-50"
           >
-            {dismissing ? 'Dismissing...' : 'Continue Anyway'}
+            {dismissing ? 'Dismissing...' : 'Got it — continue'}
           </button>
         </div>
       </div>

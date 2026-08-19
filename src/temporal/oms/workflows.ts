@@ -15,7 +15,7 @@ import {
   OrderWorkflowInput,
   StatusHistoryEntry,
   OrderStateName,
-  OrderEvent,
+  OrderCommand,
   OrderStatus,
   FulfillmentStatusUpdate,
 } from './types';
@@ -38,6 +38,7 @@ import {
   runStateMachine,
   StateMachineConfig,
   MappedUpdateRegistration,
+  SignalRegistration,
   deriveDisplayStatus,
 } from '../framework';
 
@@ -84,10 +85,10 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
   // Wire State Machine Config
   const config: StateMachineConfig<
     OrderStateName,
-    OrderEvent,
+    OrderCommand,
     OrderState,
     OrderState,
-    FulfillmentStatusUpdate
+    OrderCommand
   > = {
     states: OMS_STATES,
     initialState: input.restoredState
@@ -104,7 +105,8 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
 
       // Idempotent bootstrap only. All order-intake orchestration — fulfiller
       // assignment (assigning_fulfillers), fulfiller-order creation + starting the
-      // fulfillment child (requesting_fulfillment) — lives in the state machine.
+      // fulfillment child (requesting_fulfillment) — lives in the state machine as
+      // decided events + effects.
       await saveOrderToDatabase(input.order);
       await insertStatusHistoryEntry(
         input.order.orderId,
@@ -124,6 +126,9 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
         let note = 'State transition';
         let updatedBy: 'system' | 'admin' | 'customer' = 'system';
 
+        // Excludes every string marker ('timeout' | 'signal' | 'automatic') rather than
+        // listing them (demo PR #45): a literal exclusion list would silently treat a
+        // newly-added marker as a command object and dereference `.type` on a string.
         if (typeof eventDesc !== 'string') {
           if (eventDesc.type === 'updateStatus') {
             note = eventDesc.note || 'Status updated';
@@ -233,7 +238,7 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     },
   };
 
-  const updateHandlers: MappedUpdateRegistration<OrderEvent, OrderState, OrderState>[] = [
+  const updateHandlers: MappedUpdateRegistration<OrderCommand, OrderState, OrderState>[] = [
     {
       definition: updateStatusUpdate,
       toEvent: (args) => ({
@@ -287,13 +292,24 @@ export async function orderWorkflow(input: OrderWorkflowInput): Promise<OrderSta
     },
   ];
 
-  await runStateMachine<
-    OrderStateName,
-    OrderEvent,
-    OrderState,
-    OrderState,
-    FulfillmentStatusUpdate
-  >(config, state, updateHandlers, fulfillmentStatusSignal);
+  // ADR-0024: the child-workflow status signal is transport — mapped to the
+  // `fulfillmentStatus` command at registration.
+  const signals: SignalRegistration<OrderCommand>[] = [
+    {
+      definition: fulfillmentStatusSignal,
+      toSignal: (update: FulfillmentStatusUpdate): OrderCommand => ({
+        type: 'fulfillmentStatus',
+        update,
+      }),
+    },
+  ];
+
+  await runStateMachine<OrderStateName, OrderCommand, OrderState, OrderState, OrderCommand>(
+    config,
+    state,
+    updateHandlers,
+    signals,
+  );
 
   return state;
 }

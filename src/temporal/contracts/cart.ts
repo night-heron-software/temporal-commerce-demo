@@ -4,6 +4,16 @@ export interface CartItem {
   quantity: number;
   price: number;
   properties?: Record<string, unknown>;
+  // Display snapshot, captured at add-to-cart (backlog #1 / remediation R1). Optional:
+  // lines added before the snapshot existed fall back to showing the variantId, visibly.
+  // Mirrors OrderLineItem's naming (contracts/oms.ts) so the order path maps it through
+  // without renames. The seeded product names already carry the "[Simulated]" suffix.
+  productId?: string;
+  productTitle?: string;
+  /** Option labels joined for display, e.g. "Baby Blue / 4XL". */
+  variantTitle?: string;
+  optionLabels?: string[];
+  thumbnailUrl?: string;
 }
 
 export interface ShippingAddress {
@@ -29,7 +39,7 @@ export interface Order {
   orderId: string;
   cartId: string;
   /**
-   * The journey's correlationId (ADR-0011) — its own UUID minted at cart creation,
+   * The journey's correlationId — the cartId (R5 / ADR-0022 one-lifecycle-id),
    * captured from the ambient correlation context when the order is created.
    */
   correlationId: string;
@@ -93,22 +103,43 @@ export interface CartDetails {
 }
 
 // ==================
-// Cart Event Discriminated Union
+// Cart Command — one union for every intent the machine accepts (ADR-0024).
+//
+// The first block is the WIRE union (what `cartUpdate` callers send). The second
+// block is internal: signal-mapped commands from the checkout child (see `toSignal`
+// in cart/workflows.ts) and the commands the two states' timers synthesize. The
+// decider sees these enriched with prepared data + the deterministic timestamp
+// (see `EnrichedCartCommand` in cart/states.ts).
 // ==================
 
-export type CartEvent =
+export type CartCommand =
+  // — wire (cartUpdate) —
   | {
       type: 'addItem';
       variantId: string;
       quantity: number;
       price: number;
       properties?: Record<string, unknown>;
+      // Display snapshot resolved server-side at add-to-cart (see lib/variant-display.ts);
+      // absent when resolution fails — the line then falls back to its variantId.
+      productId?: string;
+      productTitle?: string;
+      variantTitle?: string;
+      optionLabels?: string[];
+      thumbnailUrl?: string;
     }
   | { type: 'updateQuantity'; lineItemId: string; quantity: number }
   | { type: 'removeItem'; lineItemId: string }
   | { type: 'applyCoupon'; code: string }
   | { type: 'linkUser'; email: string; userId: string }
-  | { type: 'beginCheckout' };
+  | { type: 'beginCheckout' }
+  // — from the checkout child (signal transport, mapped to commands at registration) —
+  | { type: 'checkoutCompleted'; result: CheckoutWorkflowResult }
+  | { type: 'submitStarted' }
+  | { type: 'submitAborted' }
+  // — synthesized by state timers (onTimeout) —
+  | { type: 'expireCart' }
+  | { type: 'checkoutTimedOut' };
 
 // Update response: either the updated cart state or void for terminal operations
 export type CartUpdateResponse = CartDetails | void;
@@ -148,7 +179,7 @@ export interface CheckoutWorkflowResult {
 import { defineQuery, defineSignal, defineUpdate } from '@temporalio/workflow';
 
 // Single consolidated cart update
-export const cartUpdate = defineUpdate<CartUpdateResponse, [CartEvent]>('cartUpdate');
+export const cartUpdate = defineUpdate<CartUpdateResponse, [CartCommand]>('cartUpdate');
 
 // Queries
 export const getCartQuery = defineQuery<CartDetails>('getCart');

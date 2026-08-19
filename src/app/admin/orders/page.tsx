@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getAllOrders, type OrderSummary } from '../admin-order-actions';
 import EntityIds from '@/components/EntityIds';
+import { temporalWorkflowsByTypeUrl } from '@/lib/temporal-links';
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
@@ -74,6 +75,7 @@ export default function AdminOrdersPage() {
       case 'ready_to_fulfill':
         return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300';
       case 'cancelled':
+      case 'failed':
         return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       default:
         return 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300';
@@ -94,7 +96,7 @@ export default function AdminOrdersPage() {
           </button>
         </div>
         <a
-          href="http://localhost:8233/namespaces/default/workflows?query=WorkflowType%3D%22orderWorkflow%22"
+          href={temporalWorkflowsByTypeUrl('orderWorkflow')}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm text-cyan-600 dark:text-cyan-400 hover:underline"
@@ -196,8 +198,8 @@ export default function AdminOrdersPage() {
                   className="border-b border-zinc-100 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-750 transition-colors"
                 >
                   <td className="px-4 py-3">
-                    <code className="bg-zinc-100 dark:bg-zinc-700 px-2 py-1 rounded text-sm font-mono">
-                      {order.confirmationNumber || order.orderId.substring(0, 8)}
+                    <code className="bg-zinc-100 dark:bg-zinc-700 px-2 py-1 rounded text-sm font-mono break-all">
+                      {order.confirmationNumber || order.orderId}
                     </code>
                     <div className="mt-1">
                       <EntityIds correlationId={order.correlationId} orderId={order.orderId} />

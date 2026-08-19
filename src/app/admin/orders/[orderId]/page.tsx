@@ -7,9 +7,10 @@ import { getOrderState, updateOrderStatus, cancelOrder } from '../../admin-order
 import { getOrderCommunications } from '../../../order-communications-actions';
 import type { OrderState } from '@/temporal/oms/types';
 import type { CommunicationDocument } from '@/temporal/contracts/elasticsearch';
-import EntityIds from '@/components/EntityIds';
+import EntityIds, { IdChip } from '@/components/EntityIds';
 import OrderCommunications from '@/components/OrderCommunications';
 import { buildWorkflowId, DEMO_STORE_ID } from '@/temporal/contracts/constants';
+import { temporalWorkflowUrl, temporalWorkflowsByCorrelationUrl } from '@/lib/temporal-links';
 
 export default function AdminOrderDetailPage() {
   const params = useParams();
@@ -90,6 +91,7 @@ export default function AdminOrderDetailPage() {
       case 'ready_to_fulfill':
         return 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-300';
       case 'cancelled':
+      case 'failed':
         return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
       default:
         return 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300';
@@ -121,7 +123,7 @@ export default function AdminOrderDetailPage() {
   const { order, status, statusHistory, fulfillerOrders = [], assignments = [] } = orderState;
 
   // Determine which fulfillment step buttons to show
-  const isTerminal = ['cancelled', 'refunded', 'complete', 'delivered'].includes(status);
+  const isTerminal = ['cancelled', 'refunded', 'complete', 'delivered', 'failed'].includes(status);
   const canProgress = !isTerminal && !isUpdating;
 
   return (
@@ -188,13 +190,24 @@ export default function AdminOrderDetailPage() {
 
       {/* Temporal UI + Order Trace Links */}
       <div className="p-3 bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800 rounded-lg mb-6 text-sm flex flex-wrap items-center gap-x-6 gap-y-1">
+        {/* R9: the PRIMARY link is the journey query (post-R5, one id = the whole cart
+            history); the single order workflow stays as a secondary link. Children only
+            appear with the UI's "Show Child Workflows" toggle on (not URL-addressable). */}
         <a
-          href={`http://localhost:8233/namespaces/default/workflows/${encodeURIComponent(buildWorkflowId(DEMO_STORE_ID, 'order', order.orderId))}`}
+          href={temporalWorkflowsByCorrelationUrl(order.correlationId ?? order.cartId)}
           target="_blank"
           rel="noopener noreferrer"
           className="text-cyan-700 dark:text-cyan-400 hover:underline"
         >
-          🔗 View this order workflow in Temporal UI →
+          ⚡ View this journey in Temporal UI →
+        </a>
+        <a
+          href={temporalWorkflowUrl(buildWorkflowId(DEMO_STORE_ID, 'order', order.orderId))}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cyan-700 dark:text-cyan-400 hover:underline"
+        >
+          🔗 Order workflow only →
         </a>
         <Link
           href={`/dev/order-trace?orderId=${order.orderId}`}
@@ -273,9 +286,13 @@ export default function AdminOrderDetailPage() {
               >
                 <div className="flex justify-between items-center">
                   <div>
-                    <span className="font-mono text-sm text-zinc-600 dark:text-zinc-400">
-                      {item.variantId.substring(0, 12)}...
-                    </span>
+                    {item.productTitle && (
+                      <div className="text-sm text-zinc-900 dark:text-zinc-100">
+                        {item.productTitle}
+                        {item.variantTitle ? ` — ${item.variantTitle}` : ''}
+                      </div>
+                    )}
+                    <IdChip label="variant:" value={item.variantId} />
                     <span className="ml-2 text-zinc-500">× {item.quantity}</span>
                   </div>
                   <span className="font-medium text-zinc-900 dark:text-zinc-100">
@@ -299,6 +316,50 @@ export default function AdminOrderDetailPage() {
           })}
         </div>
       </div>
+
+      {/* Refunds (backlog #4 / R4) — the ledger the projection now carries post-close */}
+      {(orderState.refunds?.length ?? 0) > 0 && (
+        <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 mb-8">
+          <h2 className="text-lg font-semibold mb-4 text-zinc-900 dark:text-zinc-100">
+            Refunds ({orderState.refunds!.length})
+          </h2>
+          <div className="space-y-3">
+            {orderState.refunds!.map((r) => (
+              <div
+                key={r.refundId}
+                className="p-4 bg-zinc-50 dark:bg-zinc-750 rounded-lg border border-zinc-100 dark:border-zinc-700"
+              >
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="font-mono text-xs text-zinc-500">{r.refundId}</span>
+                    <div className="text-sm text-zinc-900 dark:text-zinc-100 mt-1">
+                      {r.lines.map((l) => {
+                        const item = order.items.find((i) => i.lineItemId === l.lineItemId);
+                        const label = item?.productTitle ?? item?.variantId ?? l.lineItemId;
+                        return (
+                          <div key={l.lineItemId}>
+                            {label} × {l.quantity}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {r.reason && (
+                      <div className="text-xs text-zinc-500 mt-1">Reason: {r.reason}</div>
+                    )}
+                    <div className="text-xs text-zinc-400 mt-1">{formatDate(r.timestamp)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-medium text-zinc-900 dark:text-zinc-100">
+                      −{formatPrice(r.refundAmount)}
+                    </div>
+                    <div className="text-xs text-zinc-500">tax −{formatPrice(r.taxAmount)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Fulfiller Orders */}
       {fulfillerOrders.length > 0 && (

@@ -1,6 +1,7 @@
 /**
  * Fulfillment Workflow Types
- * Core data structures for the fulfillment workflow
+ * Core data structures for the fulfillment workflow — the single source of truth;
+ * fulfillment/types.ts and fulfillment/definitions.ts re-export from here.
  */
 
 // Re-export ShippingAddress from fulfillers (single source of truth)
@@ -105,6 +106,7 @@ export interface FulfillmentFulfillerOrderState {
 export interface FulfillmentLineItemState {
   sku: string;
   productId: string;
+  variantId: string;
   quantity: number;
   status: FulfillmentLineItemStatus;
   fulfillerLineItemId?: string;
@@ -129,6 +131,23 @@ export interface ShipmentItemRef {
   quantity: number;
 }
 
+// ============================================================================
+// The parent fulfillment machine (ADR-0024 decider-native surface)
+// ============================================================================
+
+export type FulfillmentStateName = 'received' | 'in_production';
+
+/**
+ * The commands the parent fulfillment machine accepts (ADR-0024) — signal transport
+ * mapped to this union at registration. The webhook `fulfillerStatus` signal is NOT a
+ * machine command: it is forwarded straight to the owning child by its own handler.
+ * `beginProduction` is synthesized by the transitional `received` state.
+ */
+export type FulfillmentCommand =
+  | { type: 'cancel' }
+  | { type: 'childStatus'; update: FulfillmentFulfillerOrderState }
+  | { type: 'beginProduction' };
+
 /**
  * Fulfillment Workflow Definitions
  * Signals, queries, and result types
@@ -142,6 +161,10 @@ export const getStatusQuery = wf.defineQuery<FulfillmentWorkflowState>('getStatu
 /** Signal: fulfiller status update (from webhook or polling) */
 export const fulfillerStatusSignal =
   wf.defineSignal<[FulfillerStatusUpdate]>('fulfillerStatusUpdate');
+
+/** Signal: status update from a child fulfiller order workflow */
+export const childStatusSignal =
+  wf.defineSignal<[FulfillmentFulfillerOrderState]>('childStatusUpdate');
 
 /** Signal: cancel fulfillment */
 export const cancelSignal = wf.defineSignal('cancel');

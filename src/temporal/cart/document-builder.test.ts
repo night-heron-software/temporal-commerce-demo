@@ -33,4 +33,29 @@ describe('buildCartDocument', () => {
     expect(doc.itemCount).toBe(1);
     expect(doc.createdAt).toBe('2026-07-01T00:00:00.000Z');
   });
+
+  it('maps the display snapshot onto item docs (backlog #1 / R1)', () => {
+    const doc = buildCartDocument(
+      {
+        ...cart,
+        items: [
+          {
+            ...cart.items[0],
+            productId: 'p1',
+            productTitle: 'California Surf — Tee [Simulated]',
+            variantTitle: 'Baby Blue / 4XL',
+            optionLabels: ['Baby Blue', '4XL'],
+            thumbnailUrl: 'https://img/front.webp',
+          },
+        ],
+      },
+      cart.createdAt,
+    );
+    expect(doc.items[0]).toMatchObject({
+      productTitle: 'California Surf — Tee [Simulated]',
+      variantTitle: 'Baby Blue / 4XL',
+      optionLabels: ['Baby Blue', '4XL'],
+      thumbnailUrl: 'https://img/front.webp',
+    });
+  });
 });

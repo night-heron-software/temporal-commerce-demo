@@ -1,16 +1,37 @@
 /**
- * Checkout states — the shell around the pure checkout Decider (prepare → decide → finalize).
+ * The checkout machine, co-located in one file (ADR-0024 decider-native surface,
+ * aligned with nightheron-mono's CommandBlock convention).
  *
- * All I/O (reservations, shipping/tax pricing, the PaymentIntent, the whole submit-order
- * pipeline) runs in `prepare` handlers; each command is enriched with the prepared result
- * before it reaches the pure core in `checkout-decider.ts`.
+ * Everything about the machine lives here, in reading order: the enriched command union
+ * (with one `prepared` shape per I/O-bearing command) and the past-tense event union;
+ * the evolve entries shared by several commands; then ONE `CommandBlock` PER COMMAND —
+ * a single exported structure holding the command's whole story, code inlined: its
+ * `prepare` (the only I/O), its `decide` case, and the `evolve` entries for the events
+ * it emits (the doc-pinned sagas `prepareSetShipping` / `prepareSubmitOrder` stay named
+ * functions the blocks reference); then the central `decide`/`evolve`, ASSEMBLED from
+ * the blocks; and finally the machine assembly: effects, the `m.state` declarations
+ * (whose commands tables reference the SAME blocks), and the registry.
  *
- * Topology matches the mono: `validating` (transitional escape hatch) → `collecting`, a single
- * prerequisite-accumulation state. The UI step (shipping → payment → review) is *derived* from
- * which prerequisites are satisfied (see `deriveStep` in `workflows.ts`), not tracked as
- * machine states.
+ *   decide: (command, context) => Event[]     // what happened, as past-tense events
+ *   evolve: (context, event)   => Context     // apply one event — returns a NEW context
+ *
+ * All I/O (cart query, reservations, shipping/tax pricing, the PaymentIntent, the whole
+ * submit-order pipeline) lives in the blocks' `prepare` phases (the submit saga stays a
+ * prepare — the TOCTOU rule protects its atomic check-and-confirm sequence); their
+ * results arrive enriched on the commands. `evolve` owns every
+ * `CheckoutContext`/`CheckoutState` change, including the pricing math
+ * `totalPrice = subtotal − discounts + shipping + tax`. Routing keys on the emitted
+ * events, per state: `ValidationFailed` is terminal in `validating`, while the rejection
+ * events in `collecting` write their error into `state.error` and stay put. Reservation
+ * releases on cancellation are an event-keyed effect carrying the decided reason and the
+ * pre-evolve reservation list.
+ *
+ * Topology matches the mono: `validating` (transitional escape hatch) → `collecting`, a
+ * single prerequisite-accumulation state. The UI step (shipping → payment → review) is
+ * *derived* from which prerequisites are satisfied (see `deriveStep` in `workflows.ts`),
+ * not tracked as machine states.
  */
-import { defineSignal, getExternalWorkflowHandle, log } from '@temporalio/workflow';
+import { defineSignal, getExternalWorkflowHandle, log, workflowInfo } from '@temporalio/workflow';
 import type { Cart } from '../contracts';
 import {
   calculateShipping,
@@ -26,25 +47,126 @@ import {
   renewReservationsForCheckout,
   queryCart,
 } from './activities';
+import type { ReservationInfo } from './activities';
 import type {
   CheckoutState,
   ShippingAddress,
   Order,
-  CheckoutInput,
+  PaymentMethod,
+  QueriedCart,
+  CheckoutCommand,
   CheckoutContext,
   CheckoutStateName,
-  RecomputeSignal,
 } from './types';
-import { decide as checkoutDecide, evolve } from './checkout-decider';
-import type {
-  CheckoutCommand,
-  ValidatingPrepared,
-  ShippingPrepared,
-  SubmitOrderPrepared,
-  RecomputePrepared,
-} from './checkout-decider';
-import { defineDomain, terminal } from '../framework';
-import type { StateRegistry } from '../framework';
+import { defineMachine, terminal, SELF } from '../framework';
+import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
+
+// ==================
+// Commands and events — the machine's whole vocabulary
+// ==================
+
+// ── `prepare` result shapes (shared with the shell) ──────────────────────
+
+/** Result of pulling the live cart + renewing reservations on checkout entry. */
+export interface ValidatingPrepared {
+  success: boolean;
+  reservations: ReservationInfo[];
+  error?: string;
+  /** Live cart contents (queryCart) — applied to the context on success. */
+  cart: QueriedCart;
+}
+
+/**
+ * Result of a recompute nudge: the re-pulled cart, plus re-priced shipping/tax when a
+ * shipping address was already set (otherwise pricing waits for setShipping).
+ */
+export interface RecomputePrepared {
+  cart: QueriedCart;
+  shippingCost?: number;
+  tax?: number;
+}
+
+/** Result of pricing a shipping address (+ creating the PaymentIntent). */
+export interface ShippingPrepared {
+  calculatedShipping: number;
+  calculatedTax: number;
+  clientSecret?: string;
+  paymentIntentError?: string;
+}
+
+/** Result of the submit-order pipeline (payment → reservations → order → email → OMS). */
+export type SubmitOrderPrepared =
+  | { success: true; order: Order; newState: CheckoutState }
+  | {
+      success: false;
+      error: string;
+      /**
+       * The pipeline failed somewhere the charge state is unknowable (after payment,
+       * before the order settled). Tells the `SubmitRejected` fold to RETAIN the
+       * idempotency attempt so a retry replays the same key — the gateway returns the
+       * first result instead of charging again. Absent everywhere the charge is settled:
+       * declined, refunded, or never attempted.
+       */
+      mayHaveCharged?: true;
+    };
+
+/**
+ * The command as the decider sees it: the base `CheckoutCommand` union with the fields
+ * the blocks' `prepare` phases inject, plus the framework's deterministic timestamp
+ * (the collapse ADR-0024 prescribes — one union, with enrichment expressed as
+ * intersections on it rather than a hand-maintained parallel union).
+ */
+export type EnrichedCheckoutCommand = (
+  | (Extract<CheckoutCommand, { type: 'validate' }> & { prepared: ValidatingPrepared })
+  | (Extract<CheckoutCommand, { type: 'setShipping' }> & { prepared: ShippingPrepared })
+  | (Extract<CheckoutCommand, { type: 'submitOrder' }> & { prepared: SubmitOrderPrepared })
+  | (Extract<CheckoutCommand, { type: 'recompute' }> & { prepared: RecomputePrepared })
+  | Exclude<CheckoutCommand, { type: 'validate' | 'setShipping' | 'submitOrder' | 'recompute' }>
+) & { at: string };
+
+/** Past-tense domain events. */
+export type CheckoutEvent =
+  | { type: 'CartLoaded'; cart: QueriedCart; reservations: ReservationInfo[] }
+  | { type: 'ValidationFailed'; error: string }
+  | {
+      type: 'ShippingSet';
+      shippingAddress: ShippingAddress;
+      shipping: number;
+      tax: number;
+      clientSecret?: string;
+    }
+  | {
+      type: 'ShippingFailed';
+      shippingAddress: ShippingAddress;
+      shipping: number;
+      tax: number;
+      error: string;
+    }
+  | { type: 'PaymentSet'; paymentMethod: PaymentMethod }
+  | { type: 'CartChangeAcknowledged'; cartVersion: number }
+  | { type: 'ParentRetargeted'; parentCartWorkflowId: string }
+  /**
+   * Carries the pre-evolve reservations so the release effect can act on them: `evolve`
+   * clears `context.reservations` on this event (so `onTerminal` cannot double-release),
+   * which means the post-evolve context no longer knows what to release — the event does.
+   */
+  | {
+      type: 'Cancelled';
+      reason: 'checkout-cancelled' | 'checkout-timeout';
+      reservations: ReservationInfo[];
+    }
+  | { type: 'OrderSubmitted'; newState: CheckoutState }
+  | { type: 'SubmitRejected'; error: string; mayHaveCharged?: true }
+  | { type: 'Recomputed'; cart: QueriedCart; shipping: number; tax: number };
+
+/** One member of the WIRE command union (pre-enrichment), by its `type` tag. */
+type Wire<K extends CheckoutCommand['type']> = Extract<CheckoutCommand, { type: K }>;
+
+/** One member of the enriched command union, by its `type` tag. */
+type Cmd<K extends EnrichedCheckoutCommand['type']> = Extract<EnrichedCheckoutCommand, { type: K }>;
+
+/** One member of the event union, by its `type` tag. */
+type Ev<K extends CheckoutEvent['type']> = Extract<CheckoutEvent, { type: K }>;
 
 /**
  * Combined signal sent to the parent cart (wire name 'checkoutCompleted'): the
@@ -53,74 +175,107 @@ import type { StateRegistry } from '../framework';
 export const cartInboundSignal = defineSignal<[Cart.CartInboundSignal]>('checkoutCompleted');
 
 // ==================
-// Domain factory — binds the shared type params once
+// Shared evolve entries — the pieces referenced by MORE THAN ONE command block.
+// Everything used by exactly one command lives INLINE in that command's block below
+// (the inlining rule: the block IS the code, not an index of named functions).
 // ==================
 
-const checkout = defineDomain<
-  CheckoutStateName,
-  CheckoutInput,
-  CheckoutContext,
-  CheckoutState,
-  RecomputeSignal
->();
-
-/** Shell adapter — run the pure Decider (decide → evolve) for the next context. */
-function apply(ctx: Readonly<CheckoutContext>, command: CheckoutCommand): CheckoutContext {
-  const state = ctx as CheckoutContext;
-  return checkoutDecide(command, state).reduce(evolve, state);
+/** Emitted by cancelCheckout and by checkoutTimedOut — the decided reason and the
+ *  pre-evolve reservation list ride the event to the release effect. */
+function evolveCancelled(
+  context: Readonly<CheckoutContext>,
+  _event: Ev<'Cancelled'>,
+): CheckoutContext {
+  return { ...context, state: { ...context.state, error: undefined }, reservations: [] };
 }
 
+// ==================
+// Command blocks — ONE exported structure per command, every field that defines the
+// command in one value, with the code INLINED. The `m.state` declarations at the bottom
+// reference these SAME blocks (the framework reads only `guard`/`prepare`; structural
+// typing admits the extra fields), the central `decide`/`evolve` dispatchers are
+// assembled from them, and tests exercise their fields directly.
+// ==================
+
 /**
- * cancelCheckout — release reservations and transition to terminal:cancelled.
- * finalize fires if reservations exist (reads the pre-decision ctx).
+ * A block's evolve — keyed by EVENT TYPE, because evolve's unit is the event, not the
+ * command: one command may emit several event types, and some events are shared across
+ * commands (those reference one shared evolve function instead of inlining twice). The
+ * machine's single `evolve(context, event)` is assembled by merging every block's map.
  */
-const cancelCheckoutEntry = {
-  decide(ctx: Readonly<CheckoutContext>) {
-    const context = apply(ctx, { type: 'cancelCheckout' });
-    return {
-      context,
-      next: terminal('cancelled'),
-      response: context.state,
-      finalize: { hasReservations: ctx.reservations.length > 0 },
-    };
+type EvolveMap = {
+  [E in CheckoutEvent['type']]?: (
+    context: Readonly<CheckoutContext>,
+    event: Ev<E>,
+  ) => CheckoutContext;
+};
+
+/** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
+export interface CommandBlock<K extends CheckoutCommand['type']> {
+  guard?: (context: Readonly<CheckoutContext>, command: Wire<K>) => Rejection | void;
+  prepare?: (context: Readonly<CheckoutContext>, command: Wire<K>) => Promise<object | void>;
+  decide: (command: Cmd<K>, context: Readonly<CheckoutContext>) => CheckoutEvent[];
+  evolve?: EvolveMap;
+}
+
+// ==================
+// Command: validate — the whole story. Pull authoritative cart contents live (no
+// snapshot), then reserve against them. `CartLoaded` advances to `collecting`;
+// `ValidationFailed` is terminal in `validating`.
+// ==================
+
+export const validateBlock: CommandBlock<'validate'> = {
+  prepare: async (context): Promise<{ prepared: ValidatingPrepared }> => {
+    const cart = await queryCart(context.parentCartWorkflowId);
+    const res = await renewReservationsForCheckout(context.cartId, cart.items);
+    return { prepared: { ...res, cart } };
   },
-  async finalize(
-    ctx: Readonly<CheckoutContext>,
-    decision: { finalize?: { hasReservations: boolean } },
-  ) {
-    if (decision.finalize?.hasReservations) {
-      await releaseReservations(ctx.reservations);
-    }
+
+  decide: (command, _context) => {
+    const p = command.prepared;
+    return p.success
+      ? [{ type: 'CartLoaded', cart: p.cart, reservations: p.reservations }]
+      : [{ type: 'ValidationFailed', error: p.error || 'Some items are no longer available' }];
+  },
+
+  evolve: {
+    CartLoaded: (context, event) => {
+      const { cart } = event;
+      return {
+        ...context,
+        items: cart.items,
+        subtotalPrice: cart.subtotalPrice,
+        totalDiscounts: cart.totalDiscounts,
+        appliedCoupons: cart.appliedCoupons,
+        cartVersion: cart.cartVersion,
+        totalPrice: cart.subtotalPrice - cart.totalDiscounts,
+        reservations: event.reservations,
+        // The approved baseline is the version validation actually pulled and priced.
+        // The workflow-input snapshot predates the cart's own CheckoutEntered version
+        // bump, so leaving atStart/acknowledged there marks every FRESH checkout as
+        // "changed" — the R3 false positive the dead banner used to hide (backlog #3).
+        state: {
+          ...context.state,
+          cartVersionAtStart: cart.cartVersion,
+          cartVersionAcknowledged: cart.cartVersion,
+        },
+      };
+    },
+    ValidationFailed: (context, event) => ({
+      ...context,
+      state: { ...context.state, error: event.error },
+    }),
   },
 };
 
 // ==================
-// State: validating (escape hatch — transitional, prepare-only)
-// ==================
-
-const validating = checkout.state('validating', {
-  async prepare(ctx): Promise<ValidatingPrepared> {
-    // Pull authoritative cart contents live (no snapshot), then reserve against them.
-    const cart = await queryCart(ctx.parentCartWorkflowId);
-    const res = await renewReservationsForCheckout(ctx.cartId, cart.items);
-    return { ...res, cart };
-  },
-  decide(ctx, _input, prepared: ValidatingPrepared) {
-    const context = apply(ctx, { type: 'validated', prepared });
-    return {
-      context,
-      next: prepared.success ? ('collecting' as const) : terminal('failed'),
-      response: context.state,
-    };
-  },
-});
-
-// ==================
-// setShipping prepare — computes shipping/tax and creates the PaymentIntent
+// Command: setShipping — the whole story. `prepare` computes shipping/tax and creates
+// the PaymentIntent; the decider turns the prepared result into `ShippingFailed`
+// (intent failure — address stored) or `ShippingSet`.
 // ==================
 
 async function prepareSetShipping(
-  ctx: Readonly<CheckoutContext>,
+  context: Readonly<CheckoutContext>,
   shippingAddress: ShippingAddress,
 ): Promise<ShippingPrepared> {
   const calculatedShipping = await calculateShipping(
@@ -128,14 +283,15 @@ async function prepareSetShipping(
   );
   const calculatedTax = await calculateTax(
     shippingAddress.state,
-    ctx.subtotalPrice - ctx.totalDiscounts,
+    context.subtotalPrice - context.totalDiscounts,
   );
 
-  let clientSecret = ctx.state.clientSecret;
+  let clientSecret = context.state.clientSecret;
   let paymentIntentError: string | undefined;
   try {
-    const totalPrice = ctx.subtotalPrice - ctx.totalDiscounts + calculatedShipping + calculatedTax;
-    const result = await createPaymentIntent(totalPrice, ctx.currency);
+    const totalPrice =
+      context.subtotalPrice - context.totalDiscounts + calculatedShipping + calculatedTax;
+    const result = await createPaymentIntent(totalPrice, context.currency);
     clientSecret = result.clientSecret;
   } catch (e) {
     log.error('Failed to create payment intent', { error: String(e) });
@@ -145,20 +301,186 @@ async function prepareSetShipping(
   return { calculatedShipping, calculatedTax, clientSecret, paymentIntentError };
 }
 
+export const setShippingBlock: CommandBlock<'setShipping'> = {
+  // The saga above is doc-pinned by name; the block's prepare wraps it.
+  prepare: async (context, command) => ({
+    prepared: await prepareSetShipping(context, command.shippingAddress),
+  }),
+
+  decide: (command, context) => {
+    const p = command.prepared;
+    if (p.paymentIntentError) {
+      return [
+        {
+          type: 'ShippingFailed',
+          shippingAddress: command.shippingAddress,
+          shipping: p.calculatedShipping,
+          tax: p.calculatedTax,
+          error: p.paymentIntentError,
+        },
+      ];
+    }
+    return [
+      {
+        type: 'ShippingSet',
+        shippingAddress: command.shippingAddress,
+        shipping: p.calculatedShipping,
+        tax: p.calculatedTax,
+        clientSecret: p.clientSecret ?? context.state.clientSecret,
+      },
+    ];
+  },
+
+  evolve: {
+    ShippingSet: (context, event) => {
+      const state: CheckoutState = {
+        ...context.state,
+        shippingAddress: event.shippingAddress,
+        shippingCost: event.shipping,
+        tax: event.tax,
+        clientSecret: event.clientSecret,
+        error: undefined,
+      };
+      return {
+        ...context,
+        state,
+        shippingCost: event.shipping,
+        totalTax: event.tax,
+        totalPrice: context.subtotalPrice - context.totalDiscounts + event.shipping + event.tax,
+      };
+    },
+
+    ShippingFailed: (context, event) => {
+      const state: CheckoutState = {
+        ...context.state,
+        shippingAddress: event.shippingAddress,
+        shippingCost: event.shipping,
+        tax: event.tax,
+        error: event.error,
+      };
+      return {
+        ...context,
+        state,
+        shippingCost: event.shipping,
+        totalTax: event.tax,
+        totalPrice: context.subtotalPrice - context.totalDiscounts + event.shipping + event.tax,
+      };
+    },
+  },
+};
+
 // ==================
-// submitOrder prepare — the entire payment/order pipeline runs here (I/O only)
+// Command: setPayment — the whole story (no prepare; the client's tokenized method)
 // ==================
 
-async function prepareSubmitOrder(ctx: Readonly<CheckoutContext>): Promise<SubmitOrderPrepared> {
+export const setPaymentBlock: CommandBlock<'setPayment'> = {
+  decide: (command, _context) => [{ type: 'PaymentSet', paymentMethod: command.paymentMethod }],
+
+  evolve: {
+    PaymentSet: (context, event) => ({
+      ...context,
+      state: { ...context.state, paymentMethod: event.paymentMethod, error: undefined },
+    }),
+  },
+};
+
+// ==================
+// Command: acknowledgeCartChange — the whole story (the review page saw the new version)
+// ==================
+
+export const acknowledgeCartChangeBlock: CommandBlock<'acknowledgeCartChange'> = {
+  decide: (command, _context) => [
+    { type: 'CartChangeAcknowledged', cartVersion: command.cartVersion },
+  ],
+
+  evolve: {
+    CartChangeAcknowledged: (context, event) => ({
+      ...context,
+      state: { ...context.state, cartVersionAcknowledged: event.cartVersion },
+    }),
+  },
+};
+
+// ==================
+// Command: retargetParent — the whole story (the parent cart workflow moved — e.g. a
+// continued-as-new parent under a new workflow id)
+// ==================
+
+export const retargetParentBlock: CommandBlock<'retargetParent'> = {
+  decide: (command, _context) => [
+    { type: 'ParentRetargeted', parentCartWorkflowId: command.newParentCartWorkflowId },
+  ],
+
+  evolve: {
+    ParentRetargeted: (context, event) => ({
+      ...context,
+      parentCartWorkflowId: event.parentCartWorkflowId,
+    }),
+  },
+};
+
+// ==================
+// Commands: cancelCheckout / checkoutTimedOut — two blocks, one outcome. Both decide
+// `Cancelled`, carrying WHICH reason for the audit trail plus the pre-evolve reservation
+// list; the release is an event-keyed machine-level effect (see `defineMachine` below).
+// ==================
+
+export const cancelCheckoutBlock: CommandBlock<'cancelCheckout'> = {
+  decide: (_command, context) => [
+    { type: 'Cancelled', reason: 'checkout-cancelled', reservations: context.reservations },
+  ],
+
+  evolve: {
+    Cancelled: evolveCancelled, // shared with checkoutTimedOut
+  },
+};
+
+export const checkoutTimedOutBlock: CommandBlock<'checkoutTimedOut'> = {
+  decide: (_command, context) => [
+    { type: 'Cancelled', reason: 'checkout-timeout', reservations: context.reservations },
+  ],
+
+  evolve: {
+    Cancelled: evolveCancelled,
+  },
+};
+
+// ==================
+// Command: submitOrder — the whole story. Non-mutating saga: the entire payment/order
+// pipeline runs in `prepare`. The parent-cart freeze signals stay HERE deliberately:
+// the freeze must precede the price query, so it cannot be a post-evolve effect. The
+// decider is pure: `OrderSubmitted` routes to terminal('complete'), `SubmitRejected`
+// writes the error and stays.
+// ==================
+
+async function prepareSubmitOrder(
+  context: Readonly<CheckoutContext>,
+): Promise<SubmitOrderPrepared> {
   try {
     const paymentSuccess = await processPayment(
-      ctx.state.paymentMethod!.token,
-      ctx.totalPrice,
-      ctx.currency,
-      ctx.cartId,
+      context.state.paymentMethod!.token,
+      context.totalPrice,
+      context.currency,
+      // Idempotency key: this checkout's own workflow id plus the attempt ordinal — a nonce
+      // naming the ATTEMPT, with the amount a parameter the gateway validates against it (a
+      // replayed key with a different amount is an ERROR, not a new charge). Never derived
+      // from mutable business data.
+      //
+      // Replaces `${cartId}-${totalPrice}` (mono #241 / `f42c3bda`): an amount is not an
+      // identity — a same-total basket swap aliased to one key; the refund path left a
+      // "charged" key that a same-total retry deduped against; and float-formatted money
+      // makes unstable key strings. Deliberate divergence from the mono, ledgered in
+      // docs/reference/mono-sync-2026-08-17.md as a backport candidate.
+      //
+      // The workflow id is used whole, never parsed (the id-parsing lesson), and is unique
+      // per checkout instance; `paymentAttempt` moves only in the `SubmitRejected` fold,
+      // and only when the rejected attempt's charge is settled.
+      `${workflowInfo().workflowId}-pay-${context.paymentAttempt}`,
     );
 
     if (!paymentSuccess) {
+      // Demo divergence from mono: reservations are KEPT for a submit retry (they
+      // expire via the inventory TTL), not released on payment failure.
       return { success: false, error: 'Payment failed. Please try again.' };
     }
 
@@ -166,9 +488,14 @@ async function prepareSubmitOrder(ctx: Readonly<CheckoutContext>): Promise<Submi
     // shopper parked at payment is re-acquired only if the stock is still there. If
     // any item is gone, refund and fail the submit BEFORE the order exists — no
     // order, no fulfillment, no phantom inventory.
-    const { unavailable } = await confirmReservations(ctx.reservations);
+    const { unavailable } = await confirmReservations(context.reservations);
     if (unavailable.length > 0) {
-      await refundPayment(ctx.state.paymentMethod!.token, ctx.totalPrice, ctx.currency, ctx.cartId);
+      await refundPayment(
+        context.state.paymentMethod!.token,
+        context.totalPrice,
+        context.currency,
+        context.cartId,
+      );
       return {
         success: false,
         error:
@@ -178,214 +505,365 @@ async function prepareSubmitOrder(ctx: Readonly<CheckoutContext>): Promise<Submi
     }
 
     const order: Order = await createOrder({
-      cartId: ctx.cartId,
-      items: ctx.items,
-      shippingAddress: ctx.state.shippingAddress!,
-      paymentMethod: ctx.state.paymentMethod!,
-      subtotal: ctx.subtotalPrice,
-      shippingCost: ctx.shippingCost,
-      tax: ctx.totalTax,
-      totalDiscounts: ctx.totalDiscounts,
-      total: ctx.totalPrice,
-      currency: ctx.currency,
+      cartId: context.cartId,
+      items: context.items,
+      shippingAddress: context.state.shippingAddress!,
+      paymentMethod: context.state.paymentMethod!,
+      subtotal: context.subtotalPrice,
+      shippingCost: context.shippingCost,
+      tax: context.totalTax,
+      totalDiscounts: context.totalDiscounts,
+      total: context.totalPrice,
+      currency: context.currency,
     });
 
-    await sendConfirmationEmail(ctx.state.shippingAddress!.email, order.confirmationNumber, order);
+    await sendConfirmationEmail(
+      context.state.shippingAddress!.email,
+      order.confirmationNumber,
+      order,
+    );
 
-    await startOrderManagementWorkflow(order, ctx.state.shippingAddress!.email);
+    await startOrderManagementWorkflow(order, context.state.shippingAddress!.email);
 
-    return { success: true, order, newState: { ...ctx.state, order } };
+    return { success: true, order, newState: { ...context.state, order } };
   } catch (err) {
     log.error('Failed to process order', { error: String(err) });
-    return { success: false, error: 'An error occurred. Please try again.' };
+    // Anywhere in payment → order → email → OMS may have failed, so the charge state is
+    // unknowable here: retain the attempt. A retry replays the same key — first use if
+    // nothing was charged, a no-op replay if it was.
+    return { success: false, error: 'An error occurred. Please try again.', mayHaveCharged: true };
   }
 }
+
+export const submitOrderBlock: CommandBlock<'submitOrder'> = {
+  /**
+   * The payment/order pipeline runs in `prepareSubmitOrder` above (doc-pinned by name);
+   * this wrapper owns the cart freeze/abort orchestration.
+   */
+  prepare: async (context, command): Promise<{ prepared: SubmitOrderPrepared }> => {
+    if (!context.state.shippingAddress || !context.state.paymentMethod) {
+      return { prepared: { success: false, error: 'Shipping and payment required' } };
+    }
+    // Freeze the cart for the duration of the saga: edits are rejected while the
+    // order is being placed, so pricing can't drift mid-pipeline. Best-effort — a
+    // missing parent (already closed) must not block the submit itself. (Demo
+    // divergence: mono signals unconditionally.)
+    const freeze = async (kind: 'submitStarted' | 'submitAborted') => {
+      try {
+        await getExternalWorkflowHandle(context.parentCartWorkflowId).signal(cartInboundSignal, {
+          kind,
+        });
+      } catch (err) {
+        log.warn('Failed to signal cart submit-freeze phase', {
+          parentCartWorkflowId: context.parentCartWorkflowId,
+          kind,
+          error: String(err),
+        });
+      }
+    };
+    await freeze('submitStarted');
+
+    // Re-pull the live cart so the pipeline prices against current contents; the
+    // price-integrity guard catches any edit that slipped in before the freeze.
+    const cart = await queryCart(context.parentCartWorkflowId);
+    if (command.reviewedCartVersion != null && command.reviewedCartVersion !== cart.cartVersion) {
+      await freeze('submitAborted');
+      return { prepared: { success: false, error: 'CART_CHANGED' } };
+    }
+    const totalPrice =
+      cart.subtotalPrice - cart.totalDiscounts + context.shippingCost + context.totalTax;
+    const result = await prepareSubmitOrder({
+      ...context,
+      items: cart.items,
+      subtotalPrice: cart.subtotalPrice,
+      totalDiscounts: cart.totalDiscounts,
+      cartVersion: cart.cartVersion,
+      totalPrice,
+    });
+    if (!result.success) {
+      await freeze('submitAborted');
+    }
+    return { prepared: result };
+  },
+
+  decide: (command, _context) =>
+    command.prepared.success
+      ? [{ type: 'OrderSubmitted', newState: command.prepared.newState }]
+      : [
+          {
+            type: 'SubmitRejected',
+            error: command.prepared.error,
+            mayHaveCharged: command.prepared.mayHaveCharged,
+          },
+        ],
+
+  evolve: {
+    OrderSubmitted: (context, event) => ({ ...context, state: event.newState }),
+
+    SubmitRejected: (context, event) => ({
+      ...context,
+      // The attempt is consumed unless the pipeline failed with a possible charge
+      // outstanding — then the key is retained so a retry replays it (the gateway
+      // returns the first result) instead of billing a second time.
+      paymentAttempt: event.mayHaveCharged ? context.paymentAttempt : context.paymentAttempt + 1,
+      state: { ...context.state, error: event.error },
+    }),
+  },
+};
+
+// ==================
+// Command: recompute — the whole story. The cart changed during checkout (nudge from
+// the parent cart, signal transport mapped to this command): re-pull the cart live,
+// re-price shipping/tax when an address is set, and un-check the payment method so the
+// shopper re-confirms against the new total. All I/O in prepare.
+// ==================
+
+export const recomputeBlock: CommandBlock<'recompute'> = {
+  prepare: async (context): Promise<{ prepared: RecomputePrepared }> => {
+    const cart = await queryCart(context.parentCartWorkflowId);
+    if (!context.state.shippingAddress) {
+      return { prepared: { cart } };
+    }
+    const addr = context.state.shippingAddress;
+    const shippingCost = await calculateShipping(`${addr.city}, ${addr.state} ${addr.postalCode}`);
+    const tax = await calculateTax(addr.state, cart.subtotalPrice - cart.totalDiscounts);
+    return { prepared: { cart, shippingCost, tax } };
+  },
+
+  decide: (command, context) => {
+    const p = command.prepared;
+    return [
+      {
+        type: 'Recomputed',
+        cart: p.cart,
+        shipping: p.shippingCost ?? context.shippingCost,
+        tax: p.tax ?? context.totalTax,
+      },
+    ];
+  },
+
+  evolve: {
+    Recomputed: (context, event) => {
+      const { cart } = event;
+      // Un-check payment on the amount-affecting cart change so the shopper re-confirms.
+      const state: CheckoutState = {
+        ...context.state,
+        paymentMethod: undefined,
+        shippingCost: event.shipping,
+        tax: event.tax,
+        error: undefined,
+      };
+      return {
+        ...context,
+        items: cart.items,
+        subtotalPrice: cart.subtotalPrice,
+        totalDiscounts: cart.totalDiscounts,
+        appliedCoupons: cart.appliedCoupons,
+        cartVersion: cart.cartVersion,
+        shippingCost: event.shipping,
+        totalTax: event.tax,
+        totalPrice: cart.subtotalPrice - cart.totalDiscounts + event.shipping + event.tax,
+        state,
+      };
+    },
+  },
+};
+
+// ==================
+// The central decide / evolve — dispatchers ASSEMBLED from the blocks above, conforming
+// to the framework's `MachineDecider`.
+// ==================
+
+/**
+ * Every command's block, keyed by command type — the machine's whole command surface.
+ * The mapped type pins each key to ITS OWN block, so a mixed-up entry is a type error.
+ */
+const blocks: { [K in CheckoutCommand['type']]: CommandBlock<K> } = {
+  validate: validateBlock,
+  setShipping: setShippingBlock,
+  setPayment: setPaymentBlock,
+  acknowledgeCartChange: acknowledgeCartChangeBlock,
+  retargetParent: retargetParentBlock,
+  cancelCheckout: cancelCheckoutBlock,
+  checkoutTimedOut: checkoutTimedOutBlock,
+  submitOrder: submitOrderBlock,
+  recompute: recomputeBlock,
+};
+
+/** A block's decide, widened for dispatch (the `blocks` mapped type guarantees the match). */
+type AnyDecide = (
+  command: EnrichedCheckoutCommand,
+  context: Readonly<CheckoutContext>,
+) => CheckoutEvent[];
+
+/** An evolve entry, widened for dispatch (the assembled map keys guarantee the match). */
+type AnyEvolveEntry = (context: Readonly<CheckoutContext>, event: CheckoutEvent) => CheckoutContext;
+
+/**
+ * Merge every block's evolve map into the machine's single event → entry table.
+ * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
+ * above) — two blocks inlining different code for one event throws here, at module
+ * load, so shared events cannot silently diverge.
+ */
+function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
+  const merged: EvolveMap = {};
+  for (const block of blockList) {
+    if (!block.evolve) continue;
+    for (const type of Object.keys(block.evolve) as CheckoutEvent['type'][]) {
+      const entry = block.evolve[type];
+      if (!entry) continue;
+      const existing = merged[type];
+      if (existing && existing !== entry) {
+        throw new Error(
+          `checkout evolve assembly: event '${type}' has two different evolve entries — ` +
+            'share one named evolve function between the blocks instead',
+        );
+      }
+      (merged as Record<CheckoutEvent['type'], unknown>)[type] = entry;
+    }
+  }
+  return merged;
+}
+
+const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+
+/**
+ * decide(command, context) → events. Pure. This is a thin dispatcher: each command's
+ * decision code lives inline in its block above.
+ */
+export function decide(
+  command: EnrichedCheckoutCommand,
+  context: Readonly<CheckoutContext>,
+): CheckoutEvent[] {
+  return (blocks[command.type].decide as AnyDecide)(command, context);
+}
+
+/**
+ * evolve(context, event) → context. Pure application of a single event — the ONLY writer
+ * of `CheckoutContext` / `CheckoutState`, and it writes them by returning a NEW context
+ * built by structural sharing. The dispatcher hands the event to the emitting block's
+ * evolve entry (assembled above); an event with no entry leaves the context as-is.
+ */
+export function evolve(context: Readonly<CheckoutContext>, event: CheckoutEvent): CheckoutContext {
+  const entry = evolveByEvent[event.type];
+  return entry ? (entry as AnyEvolveEntry)(context, event) : context;
+}
+
+/**
+ * The assembled decider, conforming to the framework's `MachineDecider` shape (ADR-0024:
+ * `isTerminal` is gone — terminality is the route tables' job; `initialState` remains as
+ * the canonical empty shape for decider unit tests, never consulted at runtime).
+ */
+export const checkoutDecider: MachineDecider<
+  EnrichedCheckoutCommand,
+  CheckoutEvent,
+  CheckoutContext
+> = {
+  decide,
+  evolve,
+  initialState: {
+    cartId: '',
+    parentCartWorkflowId: '',
+    items: [],
+    subtotalPrice: 0,
+    totalDiscounts: 0,
+    currency: 'USD',
+    appliedCoupons: [],
+    isGuest: true,
+    cartVersion: 0,
+    checkoutVersion: 0,
+    state: { step: 'validating', isGuest: true, shippingCost: 0, tax: 0 },
+    reservations: [],
+    shippingCost: 0,
+    totalTax: 0,
+    totalPrice: 0,
+    paymentAttempt: 1,
+  },
+};
+
+// ==================
+// The machine (ADR-0024 decider-native surface) — binds the decider + shared type
+// params once.
+// ==================
+
+const m = defineMachine<
+  CheckoutStateName,
+  CheckoutCommand,
+  CheckoutEvent,
+  CheckoutContext,
+  CheckoutState
+>({
+  decider: checkoutDecider,
+  // Errors land in `state.error` (ShippingFailed, SubmitRejected, …); the caller
+  // receives the state either way — matching the old formatError contract exactly.
+  respond: (context) => context.state,
+  effects: {
+    Cancelled: async (event) => {
+      // Demo divergence from mono: reservations are explicit per-variant holds, so the
+      // release needs the list — carried on the event (decided from pre-evolve state;
+      // `evolve` clears `context.reservations` so `onTerminal` cannot double-release).
+      if (event.reservations.length > 0) {
+        await releaseReservations(event.reservations);
+      }
+    },
+  } satisfies EffectsMap<CheckoutEvent, CheckoutContext>,
+});
+
+// ==================
+// State: validating (escape hatch — transitional; the tick synthesizes `validate`).
+// The commands table references the SAME block the dispatchers are assembled from; the
+// framework reads only its `guard`/`prepare`.
+// ==================
+
+const validating = m.state('validating', {
+  commands: {
+    validate: validateBlock,
+  },
+  route: {
+    CartLoaded: 'collecting',
+    ValidationFailed: terminal('failed'),
+  },
+  transitional: true,
+  onTimeout: () => ({ type: 'validate' }),
+});
 
 // ==================
 // State: collecting — single prerequisite-accumulation state
 // ==================
 
-const collecting = checkout.transitions(
-  'collecting',
-  {
-    setShipping: {
-      async prepare(ctx, event: Extract<CheckoutInput, { type: 'setShipping' }>) {
-        return prepareSetShipping(ctx, event.shippingAddress);
-      },
-      decide(
-        ctx,
-        event: Extract<CheckoutInput, { type: 'setShipping' }>,
-        _meta,
-        prepared: ShippingPrepared,
-      ) {
-        const context = apply(ctx, {
-          type: 'setShipping',
-          shippingAddress: event.shippingAddress,
-          prepared,
-        });
-        if (prepared.paymentIntentError) {
-          return {
-            context,
-            next: 'collecting' as const,
-            response: context.state,
-            error: prepared.paymentIntentError,
-          };
-        }
-        return { context, next: 'collecting' as const, response: context.state };
-      },
-    },
-
-    setPayment: {
-      decide(ctx, event: Extract<CheckoutInput, { type: 'setPayment' }>) {
-        const context = apply(ctx, { type: 'setPayment', paymentMethod: event.paymentMethod });
-        return { context, next: 'collecting' as const, response: context.state };
-      },
-    },
-
-    cancelCheckout: cancelCheckoutEntry,
-
-    acknowledgeCartChange: {
-      decide(ctx, event: Extract<CheckoutInput, { type: 'acknowledgeCartChange' }>) {
-        const context = apply(ctx, {
-          type: 'acknowledgeCartChange',
-          cartVersion: event.cartVersion,
-        });
-        return { context, next: 'collecting' as const, response: context.state };
-      },
-    },
-
-    retargetParent: {
-      decide(ctx, event: Extract<CheckoutInput, { type: 'retargetParent' }>) {
-        const context = apply(ctx, {
-          type: 'retargetParent',
-          newParentCartWorkflowId: event.newParentCartWorkflowId,
-        });
-        return { context, next: 'collecting' as const, response: context.state };
-      },
-    },
-
-    /**
-     * submitOrder — non-mutating saga. The payment/order pipeline + cart freeze/abort
-     * orchestration run in prepare; decide is pure: terminal('complete') on success, else
-     * back to collecting with the error.
-     */
-    submitOrder: {
-      async prepare(
-        ctx,
-        event: Extract<CheckoutInput, { type: 'submitOrder' }>,
-      ): Promise<SubmitOrderPrepared> {
-        if (!ctx.state.shippingAddress || !ctx.state.paymentMethod) {
-          return { success: false, error: 'Shipping and payment required' };
-        }
-        // Freeze the cart for the duration of the saga: edits are rejected while the
-        // order is being placed, so pricing can't drift mid-pipeline. Best-effort — a
-        // missing parent (already closed) must not block the submit itself.
-        const freeze = async (kind: 'submitStarted' | 'submitAborted') => {
-          try {
-            await getExternalWorkflowHandle(ctx.parentCartWorkflowId).signal(cartInboundSignal, {
-              kind,
-            });
-          } catch (err) {
-            log.warn('Failed to signal cart submit-freeze phase', {
-              parentCartWorkflowId: ctx.parentCartWorkflowId,
-              kind,
-              error: String(err),
-            });
-          }
-        };
-        await freeze('submitStarted');
-
-        // Re-pull the live cart so the pipeline prices against current contents; the
-        // price-integrity guard catches any edit that slipped in before the freeze.
-        const cart = await queryCart(ctx.parentCartWorkflowId);
-        if (event.reviewedCartVersion != null && event.reviewedCartVersion !== cart.cartVersion) {
-          await freeze('submitAborted');
-          return { success: false, error: 'CART_CHANGED' };
-        }
-        const totalPrice =
-          cart.subtotalPrice - cart.totalDiscounts + ctx.shippingCost + ctx.totalTax;
-        const result = await prepareSubmitOrder({
-          ...ctx,
-          items: cart.items,
-          subtotalPrice: cart.subtotalPrice,
-          totalDiscounts: cart.totalDiscounts,
-          cartVersion: cart.cartVersion,
-          totalPrice,
-        });
-        if (!result.success) {
-          await freeze('submitAborted');
-        }
-        return result;
-      },
-      decide(ctx, _event, _meta, prepared: SubmitOrderPrepared) {
-        const context = apply(ctx, { type: 'submitOrder', prepared });
-        if (!prepared.success) {
-          return {
-            context,
-            next: 'collecting' as const,
-            error: prepared.error,
-            response: context.state,
-          };
-        }
-        return { context, next: terminal('complete'), response: context.state };
-      },
-    },
+const collecting = m.state('collecting', {
+  commands: {
+    setShipping: setShippingBlock,
+    setPayment: setPaymentBlock,
+    cancelCheckout: cancelCheckoutBlock,
+    acknowledgeCartChange: acknowledgeCartChangeBlock,
+    retargetParent: retargetParentBlock,
+    checkoutTimedOut: checkoutTimedOutBlock,
+    submitOrder: submitOrderBlock,
+    recompute: recomputeBlock,
   },
-  {
-    onTimeout: {
-      decide(ctx) {
-        const context = apply(ctx, { type: 'cancelCheckout' });
-        return {
-          context,
-          next: terminal('cancelled'),
-          response: context.state,
-          finalize: { hasReservations: ctx.reservations.length > 0 },
-        };
-      },
-      async finalize(ctx, decision) {
-        if (decision.finalize?.hasReservations) {
-          await releaseReservations(ctx.reservations);
-        }
-      },
-    },
-
-    /**
-     * recompute — the cart changed during checkout (nudge from the parent cart). Re-pull the
-     * cart live, re-price shipping/tax when an address is set, and un-check the payment method
-     * so the shopper re-confirms against the new total. All I/O in prepare.
-     */
-    onSignal: {
-      async prepare(ctx, _signal: RecomputeSignal): Promise<RecomputePrepared> {
-        const cart = await queryCart(ctx.parentCartWorkflowId);
-        if (!ctx.state.shippingAddress) {
-          return { cart };
-        }
-        const addr = ctx.state.shippingAddress;
-        const shippingCost = await calculateShipping(
-          `${addr.city}, ${addr.state} ${addr.postalCode}`,
-        );
-        const tax = await calculateTax(addr.state, cart.subtotalPrice - cart.totalDiscounts);
-        return { cart, shippingCost, tax };
-      },
-      decide(ctx, _signal: RecomputeSignal, _meta, prepared: RecomputePrepared) {
-        const context = apply(ctx, { type: 'recompute', prepared });
-        return { context, next: 'collecting' as const, response: context.state };
-      },
-    },
+  route: {
+    Cancelled: terminal('cancelled'),
+    OrderSubmitted: terminal('complete'),
+    // ShippingFailed / SubmitRejected write their error into `state.error` and stay
+    // put — the caller reads it off the response.
+    '*': SELF,
   },
-);
+  timeout: '1 hour',
+  onTimeout: () => ({ type: 'checkoutTimedOut' }),
+});
 
 // ==================
-// Registry
+// Registry — table of contents. timeout/transitional ride the state defs above.
 // ==================
 
 export const CHECKOUT_STATES: StateRegistry<
   CheckoutStateName,
-  CheckoutInput,
+  CheckoutCommand,
   CheckoutContext,
   CheckoutState,
-  RecomputeSignal
+  CheckoutCommand
 > = {
-  validating: { ...validating, transitional: true },
-  collecting: { ...collecting, timeout: '1 hour' },
+  validating,
+  collecting,
 };

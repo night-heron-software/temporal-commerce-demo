@@ -8,7 +8,8 @@ import {
   type CartSearchStatus,
 } from '../admin-cart-actions';
 import type { CartDetails } from '@/app/shop/cart-actions';
-import EntityIds from '@/components/EntityIds';
+import EntityIds, { IdChip } from '@/components/EntityIds';
+import { temporalWorkflowsByTypeUrl, temporalWorkflowUrl } from '@/lib/temporal-links';
 
 export default function AdminCartsPage() {
   const [carts, setCarts] = useState<CartSummary[]>([]);
@@ -107,7 +108,7 @@ export default function AdminCartsPage() {
           </button>
         </div>
         <a
-          href="http://localhost:8233/namespaces/default/workflows?query=WorkflowType%3D%22cartWorkflow%22"
+          href={temporalWorkflowsByTypeUrl('cartWorkflow')}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm text-cyan-600 dark:text-cyan-400 hover:underline"
@@ -224,11 +225,9 @@ export default function AdminCartsPage() {
                   {expandedCart === cart.cartId ? '▼' : '▶'}
                 </span>
 
-                {/* Cart ID */}
+                {/* Cart ID — full + copyable (F3: no abbreviated uuids in admin) */}
                 <div className="min-w-0 flex-1">
-                  <code className="text-sm font-mono text-zinc-800 dark:text-zinc-200">
-                    {cart.cartId.substring(0, 8)}…
-                  </code>
+                  <IdChip label="cart:" value={cart.cartId} />
                   {cart.userId && (
                     <span className="ml-2 text-xs text-zinc-400">👤 {cart.userId}</span>
                   )}
@@ -267,7 +266,7 @@ export default function AdminCartsPage() {
 
                 {/* Temporal link */}
                 <a
-                  href={`http://localhost:8233/namespaces/default/workflows/${cart.workflowId}`}
+                  href={temporalWorkflowUrl(cart.workflowId)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline flex-shrink-0"
@@ -314,9 +313,13 @@ export default function AdminCartsPage() {
                                 className="border-t border-zinc-200 dark:border-zinc-700"
                               >
                                 <td className="py-2">
-                                  <code className="text-xs font-mono text-zinc-600 dark:text-zinc-400">
-                                    {item.variantId.substring(0, 8)}…
-                                  </code>
+                                  {item.productTitle && (
+                                    <div className="text-xs text-zinc-900 dark:text-zinc-100">
+                                      {item.productTitle}
+                                      {item.variantTitle ? ` — ${item.variantTitle}` : ''}
+                                    </div>
+                                  )}
+                                  <IdChip label="variant:" value={item.variantId} />
                                 </td>
                                 <td className="py-2 text-right tabular-nums text-zinc-900 dark:text-zinc-100">
                                   {item.quantity}
@@ -379,7 +382,7 @@ export default function AdminCartsPage() {
                       {/* Workflow link */}
                       <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700 flex items-center gap-4 text-sm">
                         <a
-                          href={`http://localhost:8233/namespaces/default/workflows/${cart.workflowId}`}
+                          href={temporalWorkflowUrl(cart.workflowId)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1"
@@ -388,7 +391,7 @@ export default function AdminCartsPage() {
                         </a>
                         {cart.checkout?.workflowId && (
                           <a
-                            href={`http://localhost:8233/namespaces/default/workflows/${cart.checkout.workflowId}`}
+                            href={temporalWorkflowUrl(cart.checkout.workflowId)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1"

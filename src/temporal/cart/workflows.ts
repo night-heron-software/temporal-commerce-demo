@@ -1,9 +1,9 @@
-import { defineSignal, getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
+import { getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
 import { releaseCartItem, indexCart } from './activities';
 import { buildCartDocument } from './document-builder';
 import type {
+  CartCommand,
   CartDetails,
-  CartEvent,
   CartUpdateResponse,
   CartInboundSignal,
   CartStateName,
@@ -19,7 +19,12 @@ import {
   getUserIdQuery,
 } from './definitions';
 
-import { runStateMachine, StateMachineConfig, deriveDisplayStatus } from '../framework';
+import {
+  runStateMachine,
+  StateMachineConfig,
+  SignalRegistration,
+  deriveDisplayStatus,
+} from '../framework';
 import { ES_INDICES } from '../contracts/elasticsearch';
 
 import { CART_STATES } from './states';
@@ -36,11 +41,6 @@ export {
 
 const CONTINUE_AS_NEW_THRESHOLD = 100;
 
-// Outbound nudge to the checkout child when the cart changes during checkout.
-// Defined locally with the same name the checkout workflow listens on.
-const recomputeSignal = defineSignal<[{ cartVersion: number }]>('recompute');
-const ITEM_EDIT_EVENTS = ['addItem', 'updateQuantity', 'removeItem', 'applyCoupon'];
-
 interface CartWorkflowInput {
   cartId: string;
   initialCart?: CartDetails;
@@ -50,19 +50,6 @@ interface CartWorkflowInput {
   checkoutInProgress?: boolean;
   checkoutVersion?: number;
   submitting?: boolean;
-}
-
-/** Bump version/timestamps on a cart and sync the ES projection. `at` is the driver-supplied
- * deterministic transition time (never read the clock in state-machine hooks). */
-async function flushCart(cart: CartDetails, at: string): Promise<CartDetails> {
-  const updated: CartDetails = {
-    ...cart,
-    cartVersion: (cart.cartVersion || 0) + 1,
-    updatedAt: at,
-  };
-
-  await indexCart(buildCartDocument(updated, updated.createdAt));
-  return updated;
 }
 
 export async function cartWorkflow(input: CartWorkflowInput): Promise<CartDetails> {
@@ -111,12 +98,26 @@ export async function cartWorkflow(input: CartWorkflowInput): Promise<CartDetail
   setHandler(getUserIdQuery, () => workflowContext.cart.userId);
 
   // ── State Machine Run ──
+  // ADR-0024: the checkout child's inbound signal is transport — the registration maps
+  // its discriminated payload to COMMANDS, the machine's single input vocabulary.
+  const signals: SignalRegistration<CartCommand>[] = [
+    {
+      definition: checkoutCompletedSignal,
+      toSignal: (payload: CartInboundSignal): CartCommand =>
+        payload.kind === 'completed'
+          ? { type: 'checkoutCompleted', result: payload.result }
+          : payload.kind === 'submitStarted'
+            ? { type: 'submitStarted' }
+            : { type: 'submitAborted' },
+    },
+  ];
+
   const config: StateMachineConfig<
     CartStateName,
-    CartEvent,
+    CartCommand,
     CartWorkflowContext,
     CartUpdateResponse,
-    CartInboundSignal
+    CartCommand
   > = {
     states: CART_STATES,
     initialState: inputCheckoutInProgress ? 'checkout' : 'active',
@@ -124,24 +125,11 @@ export async function cartWorkflow(input: CartWorkflowInput): Promise<CartDetail
       workflowContext = newCtx;
       currentStatus = deriveDisplayStatus<CartDetails['status']>(state);
     },
-    onTransition: async (from, to, event, currentCtx, at) => {
-      const flushedCart = await flushCart(currentCtx.cart, at);
-      workflowContext.cart = flushedCart;
-
-      // Cart edited mid-checkout → nudge the checkout child to recompute. The nudge is
-      // a trigger only (carries the new cartVersion); checkout re-pulls via queryCart.
-      // Emptying the cart routes to terminal (not 'checkout'), where onTerminal cancels
-      // the child instead — so no nudge there.
-      const isItemEdit =
-        typeof event === 'object' && event !== null && ITEM_EDIT_EVENTS.includes(event.type);
-      if (to === 'checkout' && currentCtx.checkoutWorkflowId && isItemEdit) {
-        try {
-          const handle = getExternalWorkflowHandle(currentCtx.checkoutWorkflowId);
-          await handle.signal(recomputeSignal, { cartVersion: flushedCart.cartVersion });
-        } catch (e) {
-          log.warn('Failed to send recompute nudge to checkout child', { error: String(e) });
-        }
-      }
+    onTransition: async (_from, _to, _event, currentCtx) => {
+      // Projection only: evolve already stamped version/timestamps, and the mid-checkout
+      // recompute nudge is an event-keyed EFFECT in states.ts. Rejected inputs never
+      // reach this hook (ADR-0024), so a refused edit no longer bumps or projects.
+      await indexCart(buildCartDocument(currentCtx.cart, currentCtx.cart.createdAt));
     },
     continueAsNewThreshold: CONTINUE_AS_NEW_THRESHOLD,
     serializeForContinueAsNew: (currentCtx, currentState) => {
@@ -198,11 +186,11 @@ export async function cartWorkflow(input: CartWorkflowInput): Promise<CartDetail
 
   workflowContext = await runStateMachine<
     CartStateName,
-    CartEvent,
+    CartCommand,
     CartWorkflowContext,
     CartUpdateResponse,
-    CartInboundSignal
-  >(config, workflowContext, cartUpdate, checkoutCompletedSignal);
+    CartCommand
+  >(config, workflowContext, cartUpdate, signals);
 
   return workflowContext.cart;
 }

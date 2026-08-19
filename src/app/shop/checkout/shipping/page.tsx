@@ -78,7 +78,7 @@ function generateTestAddress(): Cart.ShippingAddress {
 
 export default function ShippingPage() {
   const router = useRouter();
-  const { cart, cartId, refreshCart } = useCart();
+  const { cart, cartId, resolved, refreshCart } = useCart();
   const { shopper, savedAddress, signIn, signOut, saveAddress } = useShopper();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -234,6 +234,27 @@ export default function ShippingPage() {
     // Clear form except keep what they've typed
     setInitialized(false);
   };
+
+  // "No cart" is a distinct state from "still looking" (#12): without the split this spun
+  // forever whenever the cart was terminal or the cookie was gone.
+  if (resolved && !cart) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8">
+        <div className="max-w-md text-center">
+          <h1 className="text-2xl font-semibold mb-2">No cart in progress</h1>
+          <p className="text-[var(--heron-slate)] dark:text-[var(--heron-slate-light)] mb-6">
+            Add something to your cart to check out.
+          </p>
+          <Link
+            href="/shop"
+            className="px-4 py-2 rounded-lg bg-[var(--heron-forest)] text-[var(--heron-cream)] hover:opacity-90"
+          >
+            Continue shopping
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (!cart) {
     return (

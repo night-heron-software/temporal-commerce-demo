@@ -3,23 +3,21 @@ import { Fulfillment, Fulfillers } from '../contracts';
 import { buildWorkflowId, DEMO_STORE_ID } from '../contracts/constants';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import type { FulfillmentFulfillerOrderState, FulfillmentLineItemState } from './types';
+import { childStatusSignal } from './definitions';
 import {
-  sendShippedEmail,
-  sendDeliveredEmail,
-  indexShipment,
   fulfillInventoryReservations,
   releaseInventoryReservations,
   getFeatureFlag,
 } from './activities';
 
-import { runStateMachine, StateMachineConfig, SignalRegistration, isTerminal } from '../framework';
+import { runStateMachine, StateMachineConfig, SignalRegistration } from '../framework';
 import { buildFulfillerOrderStates } from './fulfiller-states';
+import type { FulfillerOrderStateName, FulfillerOrderCommand } from './fulfiller-states';
+import type { FulfillerOrderWorkflowContext } from './fulfiller-states';
 
-export type FulfillerOrderStateName = 'received' | 'submitting' | 'in_production' | 'shipped';
-
-export type FulfillerOrderSignal =
-  | { kind: 'fulfillerStatus'; update: Fulfillers.FulfillerStatusUpdate }
-  | { kind: 'cancel' };
+export type { FulfillerOrderWorkflowContext } from './fulfiller-states';
+export { FULFILLER_ORDER_STATES } from './fulfiller-states';
+export type { FulfillerOrderStateName, FulfillerOrderCommand } from './fulfiller-states';
 
 export interface FulfillerOrderWorkflowInput {
   orderId: string;
@@ -30,18 +28,6 @@ export interface FulfillerOrderWorkflowInput {
   shippingAddress: Fulfillment.ShippingAddress;
   shippingMethod?: 'standard' | 'express' | 'economy';
   fulfillerOrder: FulfillmentFulfillerOrderState;
-}
-
-export interface FulfillerOrderWorkflowContext {
-  orderId: string;
-  cartId: string;
-  customerId: string;
-  customerEmail?: string;
-  confirmationNumber?: string;
-  shippingAddress: Fulfillment.ShippingAddress;
-  shippingMethod?: 'standard' | 'express' | 'economy';
-  so: FulfillmentFulfillerOrderState;
-  manualMode: boolean;
 }
 
 // Signals and Queries defined locally for the child workflow
@@ -71,7 +57,7 @@ async function notifyParent(so: FulfillmentFulfillerOrderState, orderId: string)
   try {
     const parentWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'fulfillment', orderId);
     const parentHandle = wf.getExternalWorkflowHandle(parentWorkflowId);
-    await parentHandle.signal('childStatusUpdate', so);
+    await parentHandle.signal(childStatusSignal, so);
   } catch (err) {
     if (isParentGoneSignalError(err)) {
       // Expected terminal race (see isParentGoneSignalError) — info, not error.
@@ -107,17 +93,15 @@ export async function fulfillerOrderWorkflow(
 
   wf.setHandler(getFulfillerOrderStateQuery, () => context.so);
 
-  const signals: SignalRegistration<FulfillerOrderSignal>[] = [
+  // ADR-0024: signals are transport — mapped to `type`-keyed COMMANDS at registration.
+  const signals: SignalRegistration<FulfillerOrderCommand>[] = [
     {
       definition: childFulfillerStatusSignal,
-      toSignal: (update: Fulfillers.FulfillerStatusUpdate) => ({
-        kind: 'fulfillerStatus' as const,
-        update,
-      }),
+      toSignal: (update) => ({ type: 'fulfillerStatus' as const, update }),
     },
     {
       definition: childCancelSignal,
-      toSignal: () => ({ kind: 'cancel' as const }),
+      toSignal: () => ({ type: 'cancel' as const }),
     },
   ];
 
@@ -136,59 +120,23 @@ export async function fulfillerOrderWorkflow(
 
   const config: StateMachineConfig<
     FulfillerOrderStateName,
-    never,
+    FulfillerOrderCommand,
     FulfillerOrderWorkflowContext,
     void,
-    FulfillerOrderSignal
+    FulfillerOrderCommand
   > = {
     states: buildFulfillerOrderStates({ processingDelayMs, shippingDelayMs, deliveryDelayMs }),
     initialState: 'received',
-    onContextUpdate: (newCtx: FulfillerOrderWorkflowContext) => {
+    onContextUpdate: (newCtx) => {
       Object.assign(context, newCtx);
     },
-    onTransition: async (
-      from: FulfillerOrderStateName,
-      to: FulfillerOrderStateName | `__terminal:${string}`,
-      event: 'timeout' | 'signal' | 'automatic',
-      currentCtx: FulfillerOrderWorkflowContext,
-    ) => {
+    // Shipment indexing + customer emails are event-keyed effects in fulfiller-states.ts.
+    // Notifying the parent is genuinely per-transition (it aggregates whatever changed),
+    // so it stays here.
+    onTransition: async (_from, _to, _event, currentCtx) => {
       await notifyParent(currentCtx.so, currentCtx.orderId);
-
-      if (to === 'shipped') {
-        const trackingNumber = currentCtx.so.trackingNumber || '';
-        const carrier = currentCtx.so.carrier || '';
-        const trackingUrl = currentCtx.so.trackingUrl;
-
-        if (currentCtx.so.shipments?.length) {
-          const shipment = currentCtx.so.shipments[currentCtx.so.shipments.length - 1];
-          await indexShipment({
-            shipmentId: shipment.shipmentId,
-            orderId: currentCtx.orderId,
-            correlationId: currentCtx.cartId,
-            carrier: shipment.carrier,
-            trackingNumber: shipment.trackingNumber,
-            trackingUrl: shipment.trackingUrl,
-            itemCount: shipment.items.length,
-            shippedAt: shipment.shippedAt,
-          });
-        }
-
-        if (currentCtx.customerEmail) {
-          const confirmNumber = currentCtx.confirmationNumber || currentCtx.orderId;
-          await sendShippedEmail(currentCtx.customerEmail, currentCtx.orderId, confirmNumber, {
-            carrier,
-            trackingNumber,
-            trackingUrl,
-          });
-        }
-      } else if (isTerminal(to, 'delivered')) {
-        if (currentCtx.customerEmail) {
-          const confirmNumber = currentCtx.confirmationNumber || currentCtx.orderId;
-          await sendDeliveredEmail(currentCtx.customerEmail, currentCtx.orderId, confirmNumber);
-        }
-      }
     },
-    onCancellation: async (cancelCtx: FulfillerOrderWorkflowContext) => {
+    onCancellation: async (cancelCtx) => {
       cancelCtx.so.status = 'cancelled';
       cancelCtx.so.items.forEach((i: FulfillmentLineItemState) => (i.status = 'cancelled'));
       try {
@@ -201,7 +149,7 @@ export async function fulfillerOrderWorkflow(
       }
       await notifyParent(cancelCtx.so, cancelCtx.orderId);
     },
-    onTerminal: async (finalCtx: FulfillerOrderWorkflowContext) => {
+    onTerminal: async (finalCtx) => {
       if (finalCtx.so.status === 'delivered') {
         try {
           await fulfillInventoryReservations(
@@ -238,10 +186,10 @@ export async function fulfillerOrderWorkflow(
 
   await runStateMachine<
     FulfillerOrderStateName,
-    never,
+    FulfillerOrderCommand,
     FulfillerOrderWorkflowContext,
     void,
-    FulfillerOrderSignal
+    FulfillerOrderCommand
   >(config, context, [], signals);
 
   return context.so;

@@ -1,375 +1,1067 @@
 /**
- * Cart states — the shell around the pure cart Decider (aligned with nightheron-mono).
+ * The cart machine, co-located in one file (ADR-0024 decider-native surface,
+ * aligned with nightheron-mono's CommandBlock convention).
  *
- * The cart stays editable in BOTH `active` and `checkout`: the item-edit handlers are
- * genuinely shared (each edit keeps the cart in whatever state it is already in,
- * expressed as `next: SELF`). While the checkout child is placing the order
- * (`ctx.submitting`, set by the submit-freeze signals) edits are rejected. A cart edit
- * during checkout triggers a `recompute` nudge to the checkout child — sent from the
- * workflow's onTransition hook, not from here.
+ * Everything about the machine lives here, in reading order: the enriched command union
+ * and the past-tense event union; the pure cart helpers (totals, add, checkout input);
+ * the shared guard and the evolve entries shared by several commands; then ONE
+ * `CommandBlock` PER COMMAND — a single exported structure holding the command's whole
+ * story, code inlined: its `guard` (pure rejection), its `prepare` (the only I/O), its
+ * `decide` case, and the `evolve` entries for the events it emits; then the central
+ * `decide`/`evolve`, ASSEMBLED from the blocks; and finally the machine assembly:
+ * effects, the `m.state` declarations (whose commands tables reference the SAME
+ * blocks), and the registry.
  *
- * `decide` (cart-decider.ts) emits facts; `evolve` folds them — the ONLY writer of cart
- * contents / status / checkout link / submit flag. Every side effect (inventory
- * reservations, the checkout child, id generation) stays in the shell `prepare` handlers.
+ *   decide: (command, context) => Event[]     // what happened, as past-tense events
+ *   evolve: (context, event)   => Context     // apply one event — returns a NEW context
+ *
+ * Both functions are pure and infrastructure-free — no I/O, no clock, no `uuid4`, no Temporal.
+ * External data a decision needs (a generated line-item id, the started checkout child's id, the
+ * deterministic timestamp) arrives ON the command: the framework enriches each accepted command
+ * with the handler's `prepare` result and `at` before it reaches `decide` — exactly Chassaing's
+ * rule for keeping the core pure and replay-safe.
+ *
+ * Purity is structural, not conventional: every state-writing function takes a `Readonly<...>`
+ * parameter and returns a NEW value built by structural sharing. Nothing mutates a live
+ * context, so the old blanket deep-copy barrier (`copyCart`/`copyCtx`) is gone entirely.
+ *
+ * `State` is the whole `CartWorkflowContext` (cart + checkout link + submit flag), so `evolve`
+ * applies link/version/submit changes as well as cart-content changes. Every event carries `at`,
+ * and `evolve` stamps `updatedAt`/bumps `cartVersion` on each event — the version/timestamp
+ * lifecycle lives HERE, not in a workflow hook.
+ *
+ * The framework owns the pipeline: each accepted command runs guard → prepare → decide →
+ * evolve, and routing keys on the EMITTED EVENTS — the shell never re-derives what the
+ * decider said (emptying the cart routes on `CartAbandoned`, not on a re-checked
+ * `items.length === 0`). A command a state does not list is REJECTED: typed error to the
+ * caller, no transition, no recording, no projection.
+ *
+ * Non-goal (ADR-0003, reaffirmed by ADR-0024): emitted events are transient in-memory values
+ * applied within the same call — never persisted. Temporal's history remains the sole durable log.
  */
-import { log, startChild, ParentClosePolicy, uuid4 } from '@temporalio/workflow';
+
+import {
+  log,
+  startChild,
+  getExternalWorkflowHandle,
+  defineSignal,
+  ParentClosePolicy,
+  uuid4,
+  ApplicationFailure,
+} from '@temporalio/workflow';
 import { reserveCartItem, releaseCartItem } from './activities';
-import { buildCheckoutInput } from './cart-logic';
-import { decide as cartDecide, evolve } from './cart-decider';
-import type { CartCommand } from './cart-decider';
 import type {
-  CartEvent,
-  CartUpdateResponse,
-  CartInboundSignal,
-  CheckoutWorkflowResult,
-  CheckoutWorkflowInput,
+  CartCommand,
+  CartDetails,
+  CartItem,
   CartStateName,
+  CartUpdateResponse,
   CartWorkflowContext,
+  CheckoutState,
+  CheckoutWorkflowInput,
+  CheckoutWorkflowResult,
 } from './types';
-import { defineDomain, terminal, SELF, workflowCorrelationId } from '../framework';
-import type { StateRegistry, TransitionMap } from '../framework';
+import { defineMachine, reject, terminal, SELF, workflowCorrelationId } from '../framework';
+import type {
+  EffectsMap,
+  EventRoute,
+  MachineDecider,
+  Rejection,
+  Self,
+  StateRegistry,
+} from '../framework';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
 
 // ==================
-// Domain factory — binds the shared type params once
+// Commands and events — the machine's whole vocabulary
 // ==================
 
-const cart = defineDomain<
-  CartStateName,
-  CartEvent,
-  CartWorkflowContext,
-  CartUpdateResponse,
-  CartInboundSignal
->();
+/**
+ * The command as the decider sees it: the base `CartCommand` union with the fields the
+ * blocks' `prepare` phases inject (the collapse ADR-0024 prescribes — one union, with
+ * enrichment expressed as intersections on it rather than a hand-maintained parallel union).
+ */
+export type EnrichedCartCommand = (
+  | (Extract<CartCommand, { type: 'addItem' }> & { lineItemId: string })
+  | (Extract<CartCommand, { type: 'beginCheckout' }> & { checkoutWorkflowId?: string })
+  | Exclude<CartCommand, { type: 'addItem' | 'beginCheckout' }>
+) & { at: string };
 
-type CartTransitions = TransitionMap<
-  CartStateName,
-  CartWorkflowContext,
-  CartUpdateResponse,
-  CartEvent
->;
+/** Past-tense domain events. Each carries the timestamp at which it happened. */
+export type CartEvent =
+  | {
+      type: 'ItemAdded';
+      variantId: string;
+      quantity: number;
+      price: number;
+      properties?: Record<string, unknown>;
+      lineItemId: string;
+      at: string;
+      // Display snapshot resolved at add-to-cart (backlog #1); absent when resolution failed.
+      productId?: string;
+      productTitle?: string;
+      variantTitle?: string;
+      optionLabels?: string[];
+      thumbnailUrl?: string;
+    }
+  | { type: 'ItemQuantityChanged'; lineItemId: string; quantity: number; at: string }
+  | { type: 'ItemRemoved'; lineItemId: string; at: string }
+  | { type: 'CouponApplied'; code: string; at: string }
+  | { type: 'UserLinked'; email: string; userId: string; at: string }
+  | { type: 'CheckoutEntered'; checkoutWorkflowId: string; checkoutVersion: number; at: string }
+  | { type: 'CheckoutDisowned'; at: string }
+  | { type: 'CartAbandoned'; at: string }
+  | { type: 'CartCompleted'; finalState: CheckoutState; at: string }
+  | { type: 'CheckoutFailed'; error: string; at: string }
+  | { type: 'SubmitFreezeStarted'; at: string }
+  | { type: 'SubmitFreezeCleared'; at: string };
+
+/** One member of the WIRE command union (pre-enrichment), by its `type` tag. */
+type Wire<K extends CartCommand['type']> = Extract<CartCommand, { type: K }>;
+
+/** One member of the ENRICHED command union (wire + prepared data + `at`), by its `type` tag. */
+type Enriched<K extends EnrichedCartCommand['type']> = Extract<EnrichedCartCommand, { type: K }>;
+
+/** One member of the event union, by its `type` tag. */
+type Ev<K extends CartEvent['type']> = Extract<CartEvent, { type: K }>;
 
 // ==================
-// Shell adapter — runs the pure Decider behind the driver.
+// Pure cart helpers — no I/O, no Temporal imports, and no side effects at all: each
+// takes a `Readonly` cart and returns a NEW cart built by structural sharing. All ID
+// generation is the caller's responsibility. (Formerly `cart-logic.ts`; merged here by
+// the co-location sweep.)
 // ==================
 
-function apply(ctx: Readonly<CartWorkflowContext>, command: CartCommand): CartWorkflowContext {
-  const state = ctx as CartWorkflowContext;
-  return cartDecide(command, state).reduce(evolve, state);
+/**
+ * Pure: return the cart with subtotal / discounts / tax / total recalculated from its
+ * items and coupons. (Demo model: plain numbers, flat SAVE20 = 20%, tax = 8%.)
+ */
+export function recalculateTotals(cart: Readonly<CartDetails>): CartDetails {
+  const subtotalPrice = cart.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const totalDiscounts = cart.appliedCoupons.includes('SAVE20') ? subtotalPrice * 0.2 : 0;
+  const totalTax = (subtotalPrice - totalDiscounts) * 0.08;
+  const totalPrice = subtotalPrice - totalDiscounts + cart.shippingCost + totalTax;
+  return { ...cart, subtotalPrice, totalDiscounts, totalTax, totalPrice };
 }
 
 /**
- * Reject a cart edit while the checkout child is placing the order. Shared by both
- * `active` and `checkout`, so it stays in the CURRENT state (`SELF`) — in `active` the
- * `ctx.submitting` guard is inert, so this path is unreachable there.
+ * Pure: return a new cart with the item added, merging by variantId (quantity sums
+ * rather than duplicating the line), totals recalculated. Caller must provide
+ * lineItemId (e.g. from uuid4() in the workflow sandbox).
  */
-function rejectWhileSubmitting(ctx: Readonly<CartWorkflowContext>) {
+export function addItem(cart: Readonly<CartDetails>, item: CartItem): CartDetails {
+  const existing = cart.items.find((i) => i.variantId === item.variantId);
+  // Merge keeps the existing line's identity (lineItemId, price) and bumps quantity;
+  // `{ ...item, ...i }` additionally backfills display-snapshot fields a pre-snapshot
+  // line is missing (existing keys win, absent keys fall through to the incoming item).
+  const items = existing
+    ? cart.items.map((i) =>
+        i.variantId === item.variantId
+          ? { ...item, ...i, quantity: i.quantity + item.quantity }
+          : i,
+      )
+    : [...cart.items, { ...item }];
+  return recalculateTotals({ ...cart, items });
+}
+
+/**
+ * Pure: build the checkout child workflow's input from the current cart. No item/price
+ * snapshot — the checkout pulls cart contents live via queryCart at `validating`.
+ */
+export function buildCheckoutInput(
+  cart: Readonly<CartDetails>,
+  parentCartWorkflowId: string,
+): Omit<CheckoutWorkflowInput, 'checkoutVersion'> {
   return {
-    context: ctx as CartWorkflowContext,
-    next: SELF,
-    error: 'Order is being placed — please wait',
+    cartId: cart.cartId,
+    parentCartWorkflowId,
+    currency: cart.currency,
+    isGuest: !cart.userId,
+    cartVersion: cart.cartVersion,
   };
 }
 
+/** Pure: the cart as it enters checkout — status flipped, checkout fields initialized. */
+function withCheckoutFields(cart: Readonly<CartDetails>): CartDetails {
+  return {
+    ...cart,
+    status: 'checkout',
+    checkout: {
+      step: 'validating',
+      isGuest: !cart.userId,
+      shippingCost: 0,
+      tax: 0,
+    },
+  };
+}
+
+/** Pure: would removing this line leave the cart empty? */
+function emptiesCart(cart: Readonly<CartDetails>, lineItemId: string): boolean {
+  return cart.items.filter((i) => i.lineItemId !== lineItemId).length === 0;
+}
+
 // ==================
-// Shared transition entries
+// Shared guard + shared evolve entries — the pieces referenced by MORE THAN ONE command
+// block. Everything used by exactly one command lives INLINE in that command's block
+// below (the inlining rule: the block IS the code, not an index of named functions).
+// ==================
+
+/**
+ * Reject a cart edit while the checkout child is placing the order. Shared by both
+ * states: in `active` a submit is never in progress, so the guard is inert there; in
+ * `checkout` it holds the cart still for the saga. Guards run BEFORE `prepare`, so no
+ * reservation write can happen on a rejected edit — the old mirrored prepare/decide checks
+ * are unnecessary by construction.
+ */
+function notWhileSubmitting(context: Readonly<CartWorkflowContext>): Rejection | undefined {
+  return context.submitting ? reject('Order is being placed — please wait') : undefined;
+}
+
+/** Emitted by removeItem and by updateQuantity-to-zero. */
+function evolveItemRemoved(
+  context: Readonly<CartWorkflowContext>,
+  event: Ev<'ItemRemoved'>,
+): CartWorkflowContext {
+  return {
+    ...context,
+    cart: recalculateTotals({
+      ...context.cart,
+      items: context.cart.items.filter((i) => i.lineItemId !== event.lineItemId),
+    }),
+  };
+}
+
+/** Emitted by updateQuantity-to-zero, removeItem-of-the-last-line, and expireCart. */
+function evolveCartAbandoned(
+  context: Readonly<CartWorkflowContext>,
+  _event: Ev<'CartAbandoned'>,
+): CartWorkflowContext {
+  return { ...context, cart: { ...context.cart, status: 'abandoned' } };
+}
+
+// ==================
+// Command blocks — ONE exported structure per command, every field that defines the
+// command in one value, with the code INLINED. The `m.state` declarations at the bottom
+// reference these SAME blocks (the framework reads only `guard`/`prepare`; structural
+// typing admits the extra fields), the central `decide`/`evolve` dispatchers are
+// assembled from them, and tests exercise their fields directly.
+// ==================
+
+/**
+ * A block's evolve — keyed by EVENT TYPE, because evolve's unit is the event, not the
+ * command: one command may emit several event types, and some events are shared across
+ * commands (those reference one shared evolve function instead of inlining twice). The
+ * machine's single `evolve(context, event)` is assembled by merging every block's map.
+ */
+type EvolveMap = {
+  [E in CartEvent['type']]?: (
+    context: Readonly<CartWorkflowContext>,
+    event: Ev<E>,
+  ) => CartWorkflowContext;
+};
+
+/** Where an event may take the machine: a state name, a terminal, or an explicit stay. */
+type RouteTarget = CartStateName | `__terminal:${string}` | Self;
+
+/**
+ * A block's routes — keyed by EVENT TYPE, like its evolve map (ADR-0026, ported from mono #253).
+ * An event's destination is a machine-global fact (audited: no event in any machine routes to two
+ * different targets by state), so the block that emits an event declares where it goes, and each
+ * state's route table is DERIVED from its commands via `deriveRoutes` below. Absence means
+ * "stays" (the unrouted/`'*'` behavior); an explicit `SELF` is allowed where staying put is
+ * itself worth stating.
+ */
+type RouteMap = { [E in CartEvent['type']]?: RouteTarget };
+
+/** One command's whole story: refusal, I/O, decision, destination, and the evolve for what it emits. */
+export interface CommandBlock<K extends CartCommand['type']> {
+  guard?: (context: Readonly<CartWorkflowContext>, command: Wire<K>) => Rejection | void;
+  prepare?: (context: Readonly<CartWorkflowContext>, command: Wire<K>) => Promise<object | void>;
+  decide: (command: Enriched<K>, context: Readonly<CartWorkflowContext>) => CartEvent[];
+  routes?: RouteMap;
+  evolve?: EvolveMap;
+}
+
+// ==================
+// Command: addItem — the whole story, in one value
 //
-// The cart owns reservation writes (in `prepare`). A failed reservation is reported as a
-// prepared error (never thrown) so decide can reject the edit and keep the cart
-// unchanged. Emptying the cart routes to `terminal('abandoned')` (the decider emits
-// `CartAbandoned`); the cart's onTerminal then cancels any checkout child.
+// The cart stays editable in BOTH `active` and `checkout` — both states' commands
+// tables reference the same edit blocks (guarded by `notWhileSubmitting`), and each
+// state's route table decides where the resulting events lead. The cart owns
+// reservation writes (in `prepare`); a prepare throw is a rejection. Demo divergence
+// from mono: reservations are per-variant release-then-re-reserve (no sku resolution,
+// no ADR-0022 absolute holds), so a failed re-reserve compensates by restoring the old
+// quantity before throwing.
 // ==================
 
-function itemEditEntries(): Pick<
-  CartTransitions,
-  'addItem' | 'updateQuantity' | 'removeItem' | 'applyCoupon'
-> {
-  return {
-    addItem: {
-      async prepare(ctx, event) {
-        const lineItemId = uuid4();
-        if (ctx.submitting) return { lineItemId, reserveError: undefined };
-        const existing = ctx.cart.items.find((i) => i.variantId === event.variantId);
-        const oldQty = existing ? existing.quantity : 0;
-        const newQty = oldQty + event.quantity;
+export const addItemBlock: CommandBlock<'addItem'> = {
+  guard: notWhileSubmitting, // shared guard — referenced, not duplicated
 
-        // Release existing reservation before re-reserving at the new quantity
-        if (oldQty > 0) await releaseCartItem(ctx.cart.cartId, event.variantId);
-        const reservationId = await reserveCartItem(ctx.cart.cartId, event.variantId, newQty);
+  // I/O phase — a throw is a rejection.
+  prepare: async (context, command) => {
+    const lineItemId = uuid4();
+    const existing = context.cart.items.find((i) => i.variantId === command.variantId);
+    const oldQty = existing ? existing.quantity : 0;
+    const newQty = oldQty + command.quantity;
 
-        if (!reservationId) {
-          // Reservation failed — re-reserve at the old quantity if we released
-          if (oldQty > 0) await reserveCartItem(ctx.cart.cartId, event.variantId, oldQty);
-          return {
-            lineItemId,
-            reserveError: `Insufficient inventory for variant ${event.variantId}`,
-          };
-        }
-        return { lineItemId, reserveError: undefined };
-      },
-      decide(ctx, event, _meta, prepared) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        if (prepared.reserveError) {
-          return { context: ctx as CartWorkflowContext, next: SELF, error: prepared.reserveError };
-        }
-        const context = apply(ctx, {
-          type: 'addItem',
-          variantId: event.variantId,
-          quantity: event.quantity,
-          price: event.price,
-          properties: event.properties,
-          lineItemId: prepared.lineItemId,
-        });
-        return { context, next: SELF, response: context.cart };
-      },
+    // Release existing reservation before re-reserving at the new quantity
+    if (oldQty > 0) await releaseCartItem(context.cart.cartId, command.variantId);
+    const reservationId = await reserveCartItem(context.cart.cartId, command.variantId, newQty);
+
+    if (!reservationId) {
+      // Reservation failed — re-reserve at the old quantity if we released
+      if (oldQty > 0) await reserveCartItem(context.cart.cartId, command.variantId, oldQty);
+      throw ApplicationFailure.nonRetryable(
+        `Insufficient inventory for variant ${command.variantId}`,
+        'OutOfStockError',
+      );
+    }
+    return { lineItemId };
+  },
+
+  // Pure decision — the enriched command (wire fields + prepared { lineItemId } + at).
+  decide: (command, _context) => [
+    {
+      type: 'ItemAdded',
+      variantId: command.variantId,
+      quantity: command.quantity,
+      price: command.price,
+      properties: command.properties,
+      lineItemId: command.lineItemId,
+      at: command.at,
+      productId: command.productId,
+      productTitle: command.productTitle,
+      variantTitle: command.variantTitle,
+      optionLabels: command.optionLabels,
+      thumbnailUrl: command.thumbnailUrl,
     },
+  ],
 
-    updateQuantity: {
-      async prepare(ctx, event) {
-        if (ctx.submitting) return { reserveError: undefined };
-        const item = ctx.cart.items.find((i) => i.lineItemId === event.lineItemId);
-        if (!item) return { reserveError: undefined };
-        const variantId = item.variantId;
-        if (event.quantity <= 0) {
-          await releaseCartItem(ctx.cart.cartId, variantId);
-          return { reserveError: undefined };
-        }
-        await releaseCartItem(ctx.cart.cartId, variantId);
-        const reservationId = await reserveCartItem(ctx.cart.cartId, variantId, event.quantity);
-        if (!reservationId) {
-          // Re-reserve at the old quantity
-          await reserveCartItem(ctx.cart.cartId, variantId, item.quantity);
-          return {
-            reserveError: `Insufficient inventory to update quantity for variant ${variantId}`,
-          };
-        }
-        return { reserveError: undefined };
-      },
-      decide(ctx, event, _meta, prepared) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        if (prepared.reserveError) {
-          return { context: ctx as CartWorkflowContext, next: SELF, error: prepared.reserveError };
-        }
-        const context = apply(ctx, {
-          type: 'updateQuantity',
-          lineItemId: event.lineItemId,
-          quantity: event.quantity,
-        });
-        if (context.cart.items.length === 0) {
-          return { context, next: terminal('abandoned'), response: context.cart };
-        }
-        return { context, next: SELF, response: context.cart };
-      },
-    },
-
-    removeItem: {
-      async prepare(ctx, event) {
-        if (ctx.submitting) return;
-        const removed = ctx.cart.items.find((i) => i.lineItemId === event.lineItemId);
-        if (removed) await releaseCartItem(ctx.cart.cartId, removed.variantId);
-      },
-      decide(ctx, event) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        const context = apply(ctx, { type: 'removeItem', lineItemId: event.lineItemId });
-        if (context.cart.items.length === 0) {
-          return { context, next: terminal('abandoned'), response: context.cart };
-        }
-        return { context, next: SELF, response: context.cart };
-      },
-    },
-
-    applyCoupon: {
-      decide(ctx, event) {
-        if (ctx.submitting) return rejectWhileSubmitting(ctx);
-        const context = apply(ctx, { type: 'applyCoupon', code: event.code });
-        return { context, next: SELF, response: context.cart };
-      },
-    },
-  };
-}
-
-/** linkUser — identical in both states; stays put (`SELF`). */
-const linkUserHandler: CartTransitions['linkUser'] = {
-  decide(ctx, event) {
-    const context = apply(ctx, { type: 'linkUser', email: event.email, userId: event.userId });
-    return { context, next: SELF, response: context.cart };
+  // The evolve for the event this command emits: the shared pure helper returns a NEW
+  // cart; the entry returns a NEW context.
+  evolve: {
+    ItemAdded: (context, event) => ({
+      ...context,
+      cart: addItem(context.cart, {
+        lineItemId: event.lineItemId,
+        variantId: event.variantId,
+        quantity: event.quantity,
+        price: event.price,
+        properties: event.properties,
+        // Only carry the snapshot keys that resolved — an explicit `undefined` key on the
+        // stored line would defeat addItem's backfill merge for pre-snapshot lines.
+        ...(event.productId !== undefined && { productId: event.productId }),
+        ...(event.productTitle !== undefined && { productTitle: event.productTitle }),
+        ...(event.variantTitle !== undefined && { variantTitle: event.variantTitle }),
+        ...(event.optionLabels !== undefined && { optionLabels: event.optionLabels }),
+        ...(event.thumbnailUrl !== undefined && { thumbnailUrl: event.thumbnailUrl }),
+      }),
+    }),
   },
 };
 
 // ==================
-// State: active
+// Command: updateQuantity — the whole story
 // ==================
 
-const active = cart.transitions(
-  'active',
-  {
-    ...itemEditEntries(),
-    linkUser: linkUserHandler,
+export const updateQuantityBlock: CommandBlock<'updateQuantity'> = {
+  guard: notWhileSubmitting,
 
-    beginCheckout: {
-      async prepare(ctx) {
-        if (ctx.cart.items.length === 0) {
-          return { empty: true as const };
-        }
+  prepare: async (context, command) => {
+    const item = context.cart.items.find((i) => i.lineItemId === command.lineItemId);
+    if (!item) return;
+    const variantId = item.variantId;
+    if (command.quantity <= 0) {
+      await releaseCartItem(context.cart.cartId, variantId);
+      return;
+    }
+    await releaseCartItem(context.cart.cartId, variantId);
+    const reservationId = await reserveCartItem(context.cart.cartId, variantId, command.quantity);
+    if (!reservationId) {
+      // Re-reserve at the old quantity
+      await reserveCartItem(context.cart.cartId, variantId, item.quantity);
+      throw ApplicationFailure.nonRetryable(
+        `Insufficient inventory to update quantity for variant ${variantId}`,
+        'OutOfStockError',
+      );
+    }
+  },
 
-        const parentCartWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', ctx.cart.cartId);
-        // A fresh checkout id per attempt, tagged with the journey's correlationId so the
-        // whole journey is queryable (ADR-0011). The value is read from this cart
-        // workflow's own CorrelationId Search Attribute (minted at cart creation);
-        // legacy carts started before tagging fall back to the cartId.
-        const checkoutStart = buildWorkflowStartOptions({
-          storeId: DEMO_STORE_ID,
-          domain: 'checkout',
-          entityId: uuid4(),
-          correlationId: workflowCorrelationId() ?? ctx.cart.cartId,
-          cartId: ctx.cart.cartId,
-        });
-        const newCheckoutWorkflowId = checkoutStart.workflowId;
-        const newCheckoutVersion = ctx.checkoutVersion + 1;
+  decide: (command, context) => {
+    const { cart } = context;
+    const at = command.at;
+    const item = cart.items.find((i) => i.lineItemId === command.lineItemId);
+    if (!item) return [];
+    if (command.quantity <= 0) {
+      return emptiesCart(cart, command.lineItemId)
+        ? [
+            { type: 'ItemRemoved', lineItemId: command.lineItemId, at },
+            { type: 'CartAbandoned', at },
+          ]
+        : [{ type: 'ItemRemoved', lineItemId: command.lineItemId, at }];
+    }
+    return [
+      {
+        type: 'ItemQuantityChanged',
+        lineItemId: command.lineItemId,
+        quantity: command.quantity,
+        at,
+      },
+    ];
+  },
 
-        await startChild<(input: CheckoutWorkflowInput) => Promise<CheckoutWorkflowResult>>(
-          'checkoutWorkflow',
-          {
-            ...checkoutStart,
-            taskQueue: 'checkout-queue',
-            parentClosePolicy: ParentClosePolicy.PARENT_CLOSE_POLICY_REQUEST_CANCEL,
-            args: [
-              {
-                ...buildCheckoutInput(ctx.cart, parentCartWorkflowId),
-                checkoutVersion: newCheckoutVersion,
-              },
-            ],
-            workflowExecutionTimeout: '2 hours',
+  routes: { CartAbandoned: terminal('abandoned') },
+  evolve: {
+    // Substitute the one line, then re-total; an unknown line leaves the context unchanged.
+    ItemQuantityChanged: (context, event) => {
+      const item = context.cart.items.find((i) => i.lineItemId === event.lineItemId);
+      if (!item) return context;
+      return {
+        ...context,
+        cart: recalculateTotals({
+          ...context.cart,
+          items: context.cart.items.map((i) =>
+            i.lineItemId === event.lineItemId ? { ...i, quantity: event.quantity } : i,
+          ),
+        }),
+      };
+    },
+    ItemRemoved: evolveItemRemoved, // shared with removeItem
+    CartAbandoned: evolveCartAbandoned, // shared with removeItem/expireCart
+  },
+};
+
+// ==================
+// Command: removeItem — the whole story. Emits `ItemRemoved` (+ `CartAbandoned` when the
+// removal empties the cart) — the same events updateQuantity-to-zero emits, so both
+// blocks reference the same shared evolve entries.
+// ==================
+
+export const removeItemBlock: CommandBlock<'removeItem'> = {
+  guard: notWhileSubmitting,
+
+  prepare: async (context, command) => {
+    const removed = context.cart.items.find((i) => i.lineItemId === command.lineItemId);
+    if (removed) await releaseCartItem(context.cart.cartId, removed.variantId);
+  },
+
+  decide: (command, context) => {
+    const at = command.at;
+    return emptiesCart(context.cart, command.lineItemId)
+      ? [
+          { type: 'ItemRemoved', lineItemId: command.lineItemId, at },
+          { type: 'CartAbandoned', at },
+        ]
+      : [{ type: 'ItemRemoved', lineItemId: command.lineItemId, at }];
+  },
+
+  routes: { CartAbandoned: terminal('abandoned') },
+  evolve: {
+    ItemRemoved: evolveItemRemoved,
+    CartAbandoned: evolveCartAbandoned,
+  },
+};
+
+// ==================
+// Command: applyCoupon — the whole story (no prepare; a duplicate coupon emits nothing)
+// ==================
+
+export const applyCouponBlock: CommandBlock<'applyCoupon'> = {
+  guard: notWhileSubmitting,
+
+  decide: (command, context) =>
+    context.cart.appliedCoupons.includes(command.code)
+      ? []
+      : [{ type: 'CouponApplied', code: command.code, at: command.at }],
+
+  evolve: {
+    CouponApplied: (context, event) =>
+      context.cart.appliedCoupons.includes(event.code)
+        ? context
+        : {
+            ...context,
+            cart: recalculateTotals({
+              ...context.cart,
+              appliedCoupons: [...context.cart.appliedCoupons, event.code],
+            }),
           },
+  },
+};
+
+// ==================
+// Command: linkUser — the whole story (unguarded: linking a user is always safe).
+// Demo divergence: carries `email` + `userId` (mono: `userId` only).
+// ==================
+
+export const linkUserBlock: CommandBlock<'linkUser'> = {
+  decide: (command, _context) => [
+    { type: 'UserLinked', email: command.email, userId: command.userId, at: command.at },
+  ],
+
+  evolve: {
+    UserLinked: (context, event) => ({
+      ...context,
+      // Identity bookkeeping, not a content change — classified `false` in
+      // CONTENT_EVENTS, so the dispatcher never bumps and this fold has nothing to
+      // undo. (Run -008 F-3: uncompensated, this bumped v1→v2 at the address step and
+      // false-positived the cart-changed banner on every guest checkout.)
+      cart: { ...context.cart, email: event.email, userId: event.userId },
+    }),
+  },
+};
+
+// ==================
+// Command: beginCheckout — the whole story
+// ==================
+
+export const beginCheckoutBlock: CommandBlock<'beginCheckout'> = {
+  // Purely (context, command)-derivable, so it lives in guard — and because guards run
+  // before prepare, the checkout child is never started for an empty cart.
+  guard: (context) =>
+    context.cart.items.length === 0 ? reject('Cannot checkout with empty cart') : undefined,
+
+  prepare: async (context) => {
+    const parentCartWorkflowId = buildWorkflowId(DEMO_STORE_ID, 'cart', context.cart.cartId);
+    const newCheckoutVersion = context.checkoutVersion + 1;
+
+    // A fresh checkout id per attempt, tagged with the cart's correlation id so the
+    // whole journey is queryable (ADR-0011). Read back from this workflow's own
+    // CorrelationId Search Attribute (minted at cart creation); legacy carts started
+    // before tagging fall back to the cartId.
+    const checkoutStart = buildWorkflowStartOptions({
+      storeId: DEMO_STORE_ID,
+      domain: 'checkout',
+      entityId: uuid4(),
+      correlationId: workflowCorrelationId() ?? context.cart.cartId,
+      cartId: context.cart.cartId,
+    });
+    const checkoutWorkflowId = checkoutStart.workflowId;
+
+    await startChild<(input: CheckoutWorkflowInput) => Promise<CheckoutWorkflowResult>>(
+      'checkoutWorkflow',
+      {
+        ...checkoutStart,
+        taskQueue: 'checkout-queue',
+        parentClosePolicy: ParentClosePolicy.REQUEST_CANCEL,
+        args: [
+          {
+            ...buildCheckoutInput(context.cart, parentCartWorkflowId),
+            checkoutVersion: newCheckoutVersion,
+          },
+        ],
+        workflowExecutionTimeout: '2 hours',
+      },
+    );
+
+    log.info('Started checkout child workflow', {
+      cartId: context.cart.cartId,
+      checkoutWorkflowId,
+    });
+
+    return { checkoutWorkflowId };
+  },
+
+  decide: (command, context) => {
+    // In `checkout`, beginCheckout is an idempotent no-op: that state's handler is a bare
+    // `{}` (deliberately NOT this block), so no child id arrives and no event is emitted
+    // (the caller still gets the current cart back).
+    if (!command.checkoutWorkflowId || context.cart.status === 'checkout') return [];
+    return [
+      {
+        type: 'CheckoutEntered',
+        checkoutWorkflowId: command.checkoutWorkflowId,
+        checkoutVersion: context.checkoutVersion + 1,
+        at: command.at,
+      },
+    ];
+  },
+
+  routes: { CheckoutEntered: 'checkout' },
+  evolve: {
+    CheckoutEntered: (context, event) => ({
+      ...context,
+      // Entering checkout is NOT a content change — classified `false` in CONTENT_EVENTS,
+      // so the dispatcher never bumps. Otherwise the checkout child — whose input snapshots
+      // the PRE-command version and whose `validating` re-pull can race this very evolve —
+      // baselines one behind and the cart-changed banner false-positives on a fresh
+      // checkout (found live during R6's journey verification). Content edits still bump,
+      // so a pulled-vs-input difference means a REAL edit.
+      cart: withCheckoutFields(context.cart),
+      checkoutWorkflowId: event.checkoutWorkflowId,
+      checkoutVersion: event.checkoutVersion,
+    }),
+  },
+};
+
+// ==================
+// Command: expireCart — the whole story (synthesized by the active state's 30-day timer)
+// ==================
+
+export const expireCartBlock: CommandBlock<'expireCart'> = {
+  decide: (command, _context) => [{ type: 'CartAbandoned', at: command.at }],
+
+  routes: { CartAbandoned: terminal('abandoned') },
+  evolve: {
+    CartAbandoned: evolveCartAbandoned,
+  },
+};
+
+// ==================
+// Command: checkoutTimedOut — the whole story
+// ==================
+
+export const checkoutTimedOutBlock: CommandBlock<'checkoutTimedOut'> = {
+  // Checkout timed out — protect the cart (disown, not abandon).
+  decide: (command, context) =>
+    context.cart.status === 'checkout' ? [{ type: 'CheckoutDisowned', at: command.at }] : [],
+
+  routes: { CheckoutDisowned: 'active' },
+  evolve: {
+    CheckoutDisowned: (context, _event) => ({
+      ...context,
+      cart: { ...context.cart, checkout: undefined, status: 'active' },
+      checkoutWorkflowId: null,
+    }),
+  },
+};
+
+// ==================
+// Commands: submitStarted / submitAborted — the submit freeze, signal-mapped from the
+// checkout child
+// ==================
+
+export const submitStartedBlock: CommandBlock<'submitStarted'> = {
+  decide: (command, _context) => [{ type: 'SubmitFreezeStarted', at: command.at }],
+
+  evolve: {
+    SubmitFreezeStarted: (context, _event) => ({ ...context, submitting: true }),
+  },
+};
+
+export const submitAbortedBlock: CommandBlock<'submitAborted'> = {
+  decide: (command, _context) => [{ type: 'SubmitFreezeCleared', at: command.at }],
+
+  evolve: {
+    SubmitFreezeCleared: (context, _event) => ({ ...context, submitting: false }),
+  },
+};
+
+// ==================
+// Command: checkoutCompleted — the whole story (the checkout child's combined result
+// signal; a stale checkoutVersion is ignored)
+// ==================
+
+export const checkoutCompletedBlock: CommandBlock<'checkoutCompleted'> = {
+  decide: (command, context) => {
+    const at = command.at;
+    const r = command.result;
+    // Stale signal from a superseded checkout attempt — no events, machine stays put.
+    if (r.checkoutVersion !== undefined && r.checkoutVersion !== context.checkoutVersion) {
+      return [];
+    }
+    return r.success && r.order
+      ? [{ type: 'CartCompleted', finalState: r.finalState, at }]
+      : [{ type: 'CheckoutFailed', error: r.error || 'Checkout failed', at }];
+  },
+
+  routes: { CartCompleted: terminal('completed'), CheckoutFailed: 'active' },
+  evolve: {
+    // Aliasing the event's finalState into `checkout` is not a live hazard: events are
+    // transient per ADR-0003, never persisted or shared.
+    CartCompleted: (context, event) => ({
+      ...context,
+      cart: {
+        ...context.cart,
+        status: 'completed',
+        checkout: event.finalState,
+        shippingCost: event.finalState.shippingCost,
+        totalTax: event.finalState.tax,
+        totalPrice:
+          context.cart.subtotalPrice -
+          context.cart.totalDiscounts +
+          event.finalState.shippingCost +
+          event.finalState.tax,
+      },
+      // The checkout child already closed (it sent this completion) — clear the link so
+      // terminal cleanup doesn't request-cancel a finished workflow. (Demo divergence:
+      // mono keeps the link; the demo's onTerminal cancel would otherwise warn.)
+      checkoutWorkflowId: null,
+    }),
+
+    CheckoutFailed: (context, event) => ({
+      ...context,
+      cart: {
+        ...context.cart,
+        status: 'active',
+        checkout: {
+          step: 'failed',
+          isGuest: !context.cart.userId,
+          shippingCost: 0,
+          tax: 0,
+          error: event.error,
+        },
+      },
+      checkoutWorkflowId: null,
+    }),
+  },
+};
+
+// ==================
+// The central decide / evolve — dispatchers ASSEMBLED from the blocks above, conforming
+// to the framework's `MachineDecider`.
+// ==================
+
+/**
+ * Every command's block, keyed by command type — the machine's whole command surface.
+ * The mapped type pins each key to ITS OWN block, so a mixed-up entry is a type error.
+ */
+const blocks: { [K in CartCommand['type']]: CommandBlock<K> } = {
+  addItem: addItemBlock,
+  updateQuantity: updateQuantityBlock,
+  removeItem: removeItemBlock,
+  applyCoupon: applyCouponBlock,
+  linkUser: linkUserBlock,
+  beginCheckout: beginCheckoutBlock,
+  expireCart: expireCartBlock,
+  checkoutTimedOut: checkoutTimedOutBlock,
+  submitStarted: submitStartedBlock,
+  submitAborted: submitAbortedBlock,
+  checkoutCompleted: checkoutCompletedBlock,
+};
+
+/** A block's decide, widened for dispatch (the `blocks` mapped type guarantees the match). */
+type AnyDecide = (
+  command: EnrichedCartCommand,
+  context: Readonly<CartWorkflowContext>,
+) => CartEvent[];
+
+/** An evolve entry, widened for dispatch (the assembled map keys guarantee the match). */
+type AnyEvolveEntry = (
+  context: Readonly<CartWorkflowContext>,
+  event: CartEvent,
+) => CartWorkflowContext;
+
+/**
+ * Merge every block's evolve map into the machine's single event → entry table.
+ * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
+ * above) — two blocks inlining different code for one event throws here, at module
+ * load, so shared events cannot silently diverge.
+ */
+/**
+ * Derive a state's route table from its commands' declared routes (ADR-0026, ported from mono
+ * #253 / `91e08773`), plus optional extras. Three laws, enforced at MODULE LOAD so a violation
+ * cannot reach a worker:
+ *
+ *   1. one event, one destination — two blocks in one state disagreeing about where an event
+ *      goes is a design contradiction, not a merge;
+ *   2. extras may only weaken to SELF — a state can refuse to move, never redirect an event
+ *      somewhere its block did not declare;
+ *   3. a state with commands must not derive an empty table — the symptom of a handler-override
+ *      literal that dropped its block's routes.
+ */
+export function deriveRoutes(
+  commands: Record<string, { routes?: RouteMap }>,
+  extras?: RouteMap & { '*'?: Self },
+): EventRoute<CartStateName, CartEvent> {
+  const merged: Record<string, RouteTarget> = {};
+  for (const [commandType, block] of Object.entries(commands)) {
+    for (const [eventType, target] of Object.entries(block.routes ?? {}) as [
+      string,
+      RouteTarget,
+    ][]) {
+      const existing = merged[eventType];
+      if (existing !== undefined && existing !== target) {
+        throw new Error(
+          `cart route assembly: event '${eventType}' has two destinations in one state ` +
+            `('${String(existing)}' vs '${String(target)}' via '${commandType}') — ` +
+            'an event has ONE machine-global destination; fix the blocks',
         );
+      }
+      merged[eventType] = target;
+    }
+  }
+  for (const [eventType, target] of Object.entries(extras ?? {}) as [string, RouteTarget][]) {
+    if (eventType !== '*' && target !== SELF) {
+      throw new Error(
+        `cart route extras: '${eventType}' may only weaken to SELF — ` +
+          'a state can refuse to move, never redirect; change the block instead',
+      );
+    }
+    merged[eventType] = target;
+  }
+  if (Object.keys(merged).length === 0 && Object.keys(commands).length > 0) {
+    throw new Error(
+      'cart route assembly: a state with commands derived an empty route table — ' +
+        "a handler-override literal probably dropped its block's routes",
+    );
+  }
+  return merged as EventRoute<CartStateName, CartEvent>;
+}
 
-        log.info('Started checkout child workflow', {
-          cartId: ctx.cart.cartId,
-          checkoutWorkflowId: newCheckoutWorkflowId,
-        });
+function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
+  const merged: EvolveMap = {};
+  for (const block of blockList) {
+    if (!block.evolve) continue;
+    for (const type of Object.keys(block.evolve) as CartEvent['type'][]) {
+      const entry = block.evolve[type];
+      if (!entry) continue;
+      const existing = merged[type];
+      if (existing && existing !== entry) {
+        throw new Error(
+          `cart evolve assembly: event '${type}' has two different evolve entries — ` +
+            'share one named evolve function between the blocks instead',
+        );
+      }
+      (merged as Record<CartEvent['type'], unknown>)[type] = entry;
+    }
+  }
+  return merged;
+}
 
-        return { empty: false as const, newCheckoutWorkflowId };
-      },
-      decide(ctx, _event, _meta, prepared) {
-        if (prepared.empty) {
-          return {
-            context: ctx as CartWorkflowContext,
-            next: 'active' as const,
-            error: 'Cannot checkout with empty cart',
-          };
-        }
-        const context = apply(ctx, {
-          type: 'beginCheckout',
-          checkoutWorkflowId: prepared.newCheckoutWorkflowId,
-        });
-        return { context, next: 'checkout' as const, response: context.cart };
-      },
+const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+
+/**
+ * decide(command, context) → events.
+ *
+ * Pure: emits the events implied by the command in the current state, and nothing else. It never
+ * mutates and never reads a clock or generates ids (those arrive on the command). Rejection
+ * (submit-freeze, empty-cart checkout, out-of-stock) lives in the blocks' `guard`/`prepare`;
+ * abandonment — a genuine domain decision — is decided by emitting `CartAbandoned` when the
+ * change empties the cart, and routing keys on that event. This is a thin dispatcher: each
+ * command's decision code lives inline in its block above.
+ */
+export function decide(
+  command: EnrichedCartCommand,
+  context: Readonly<CartWorkflowContext>,
+): CartEvent[] {
+  return (blocks[command.type].decide as AnyDecide)(command, context);
+}
+
+/**
+ * Does this event change what the shopper is buying?
+ *
+ * `cartVersion` is the freshness token the CHECKOUT child baselines against, and the
+ * cart-changed banner fires on `live > acknowledged`. So the version must move for content
+ * changes and stay put for everything else — orchestration bookkeeping (entering checkout,
+ * linking a user, freezing for submit) is not an edit, and a version that moves without one
+ * tells the shopper their cart changed when it did not.
+ *
+ * Declared here, once, and EXHAUSTIVELY: a new `CartEvent` with no entry is a compile-time
+ * hole, not a live false-positive banner. That is the point of the table — this defect class
+ * recurred three times while the policy was "bump everything, subtract in the fold" (R6 found
+ * it in `CheckoutEntered`; validation run `-008` found it again in `UserLinked` (F-3) and in
+ * the submit-freeze pair (F-4)). Each fold that compensated by hand has had its `-1` removed;
+ * classification lives here now.
+ *
+ * `updatedAt` is stamped on EVERY event regardless — "when did this workflow last do
+ * anything" is a different question from "what version of the contents is this".
+ */
+const CONTENT_EVENTS: Record<CartEvent['type'], boolean> = {
+  // Real edits to the priced contents.
+  ItemAdded: true,
+  ItemQuantityChanged: true,
+  ItemRemoved: true,
+  CouponApplied: true,
+  // Lifecycle events that empty or close the cart — the contents genuinely change, and the
+  // cart is terminal afterwards, so nothing is left to false-positive.
+  CartAbandoned: true,
+  CartCompleted: true,
+  // Bookkeeping: identity, the checkout link, the submit freeze, and the failure that hands
+  // the cart back to the shopper. None of them touch items, quantities, coupons, or pricing.
+  UserLinked: false,
+  CheckoutEntered: false,
+  CheckoutDisowned: false,
+  CheckoutFailed: false,
+  SubmitFreezeStarted: false,
+  SubmitFreezeCleared: false,
+};
+
+/**
+ * evolve(context, event) → context.
+ *
+ * Pure application of a single event — the ONLY function that writes cart contents, `status`,
+ * the checkout link/version, the submit flag, `updatedAt`, or `cartVersion` — and it writes
+ * them by returning a NEW context. The dispatcher stamps `updatedAt` from the event's `at` and
+ * bumps `cartVersion` for CONTENT events only (see `CONTENT_EVENTS`; versions are freshness
+ * tokens — monotonicity is what consumers compare, so a two-content-event command bumping
+ * twice is fine), then hands the stamped context to the emitting block's evolve entry, which
+ * builds its result by structural sharing. No deep copy, no mutation anywhere.
+ */
+export function evolve(
+  context: Readonly<CartWorkflowContext>,
+  event: CartEvent,
+): CartWorkflowContext {
+  const bump = CONTENT_EVENTS[event.type] ? 1 : 0;
+
+  // A failed-checkout mirror describes ONE past attempt, not the cart's standing condition,
+  // so anything the cart does afterwards clears it. `CheckoutFailed` is the event that sets
+  // it, so it is the one event exempt here.
+  //
+  // Uncleared, the mirror latches: the web tier asks "did this command fail?" by reading the
+  // result (`domainErrorOf` checks `checkout.error` / `checkout.step`), so every later action
+  // inherited the old failure. Validation run -008 logged
+  // `command: removeItem, ok: false, domainError: "Checkout failed"` for a removeItem that
+  // SUCCEEDED — it emptied the cart and recorded its transition (F-9 / backlog #14). That is
+  // the mirror image of the defect `926a323` fixed, which stopped `ok: true` being logged
+  // over a real refusal; false failure erodes the signal exactly as false success does.
+  const staleFailure = event.type !== 'CheckoutFailed' && context.cart.checkout?.step === 'failed';
+
+  const stamped: CartWorkflowContext = {
+    ...context,
+    cart: {
+      ...context.cart,
+      updatedAt: event.at,
+      cartVersion: (context.cart.cartVersion || 0) + bump,
+      ...(staleFailure ? { checkout: undefined } : {}),
     },
+  };
+  const entry = evolveByEvent[event.type];
+  return entry ? (entry as AnyEvolveEntry)(stamped, event) : stamped;
+}
+
+/**
+ * The assembled decider, conforming to the framework's `MachineDecider` shape (ADR-0024:
+ * `isTerminal` is gone — terminality is the route tables' job; `initialState` remains as
+ * the canonical empty shape for decider unit tests, never consulted at runtime).
+ */
+export const cartDecider: MachineDecider<EnrichedCartCommand, CartEvent, CartWorkflowContext> = {
+  decide,
+  evolve,
+  initialState: {
+    cart: {
+      cartId: '',
+      items: [],
+      subtotalPrice: 0,
+      totalDiscounts: 0,
+      totalTax: 0,
+      totalPrice: 0,
+      shippingCost: 0,
+      currency: 'USD',
+      appliedCoupons: [],
+      cartVersion: 0,
+      status: 'active',
+      createdAt: '',
+      updatedAt: '',
+    },
+    checkoutWorkflowId: null,
+    checkoutVersion: 0,
   },
-  {
-    onTimeout: {
-      decide(ctx) {
-        // Idle timeout: abandon cart
-        const context = evolve(ctx as CartWorkflowContext, { type: 'CartAbandoned' });
-        return { context, next: terminal('abandoned') };
-      },
-    },
-    onSignal: {
-      decide(ctx) {
-        // Ignore signals (stale checkout completions / freeze phases) in active state
-        return { context: ctx as CartWorkflowContext, next: 'active' as const };
-      },
-    },
-  },
-);
+};
 
 // ==================
-// State: checkout
-//
-// Shares the editable item handlers with `active` but keeps state in `checkout`; a cart
-// edit here triggers a `recompute` nudge to the checkout child (sent from the workflow's
-// onTransition hook). The combined inbound signal drives the submit freeze + completion.
+// The machine (ADR-0024 decider-native surface)
 // ==================
 
-const checkout = cart.transitions(
-  'checkout',
-  {
-    ...itemEditEntries(),
-    linkUser: linkUserHandler,
-
-    beginCheckout: {
-      decide(ctx) {
-        return {
-          context: ctx as CartWorkflowContext,
-          next: 'checkout' as const,
-          response: ctx.cart,
-        };
-      },
-    },
-  },
-  {
-    onTimeout: {
-      decide(ctx) {
-        // Checkout timed out — return to active state (preserve the cart, not abandon).
-        log.warn('Checkout completion signal timed out, protecting cart', {
-          cartId: ctx.cart.cartId,
-        });
-        const context = evolve(ctx as CartWorkflowContext, { type: 'CheckoutDisowned' });
-        return { context, next: 'active' as const };
-      },
-    },
-    onSignal: {
-      decide(ctx, signal) {
-        // Combined inbound signal: submit-freeze phases keep us in `checkout`;
-        // `completed` drives the completion logic.
-        if (signal.kind === 'submitStarted') {
-          const context = apply(ctx, { type: 'submitStarted' });
-          return { context, next: 'checkout' as const };
-        }
-        if (signal.kind === 'submitAborted') {
-          const context = apply(ctx, { type: 'submitAborted' });
-          return { context, next: 'checkout' as const };
-        }
-
-        // Ignore stale signals from a previous checkout attempt.
-        const result = signal.result;
-        if (
-          result.checkoutVersion !== undefined &&
-          result.checkoutVersion !== ctx.checkoutVersion
-        ) {
-          log.warn('Ignoring stale checkout signal', {
-            cartId: ctx.cart.cartId,
-            expected: ctx.checkoutVersion,
-            received: result.checkoutVersion,
-          });
-          return { context: ctx as CartWorkflowContext, next: 'checkout' as const };
-        }
-
-        const context = apply(ctx, { type: 'checkoutCompleted', result });
-        if (context.cart.status === 'completed') {
-          return { context, next: terminal('completed') };
-        }
-        log.info('Checkout cancelled/failed, returning to active with error', {
-          cartId: ctx.cart.cartId,
-          error: result.error,
-        });
-        return { context, next: 'active' as const };
-      },
-    },
-  },
-);
+const m = defineMachine<
+  CartStateName,
+  CartCommand,
+  CartEvent,
+  CartWorkflowContext,
+  CartUpdateResponse
+>({
+  decider: cartDecider,
+  respond: (context) => context.cart,
+});
 
 // ==================
-// Registry
+// Outbound nudge to the checkout child when the cart changes mid-checkout —
+// an EFFECT keyed by the item-edit events, replacing the old hand-maintained
+// ITEM_EDIT_EVENTS list in workflows.ts. The nudge carries the post-evolve cartVersion
+// (evolve already bumped it); checkout re-pulls the cart live via queryCart.
+// ==================
+
+const recomputeSignal = defineSignal<[{ cartVersion: number }]>('recompute');
+
+async function nudgeCheckout(
+  _event: CartEvent,
+  context: Readonly<CartWorkflowContext>,
+): Promise<void> {
+  if (!context.checkoutWorkflowId) return;
+  try {
+    const handle = getExternalWorkflowHandle(context.checkoutWorkflowId);
+    await handle.signal(recomputeSignal, { cartVersion: context.cart.cartVersion });
+  } catch (e) {
+    log.warn('Failed to send recompute nudge to checkout child', { error: String(e) });
+  }
+}
+
+const itemEditNudges: EffectsMap<CartEvent, CartWorkflowContext> = {
+  ItemAdded: nudgeCheckout,
+  ItemQuantityChanged: nudgeCheckout,
+  ItemRemoved: nudgeCheckout,
+  CouponApplied: nudgeCheckout,
+};
+
+// ==================
+// State: active — the commands tables reference the SAME blocks the dispatchers are
+// assembled from; the framework reads only their `guard`/`prepare`.
+// ==================
+
+const activeCommands = {
+  addItem: addItemBlock,
+  updateQuantity: updateQuantityBlock,
+  removeItem: removeItemBlock,
+  applyCoupon: applyCouponBlock,
+  linkUser: linkUserBlock,
+  expireCart: expireCartBlock,
+  beginCheckout: beginCheckoutBlock,
+};
+
+const active = m.state('active', {
+  commands: activeCommands,
+  // Derived, not hand-written (ADR-0026): each block declares where its events lead, and this
+  // table is their union. Proof-of-no-op at port time: the derived table equals the old literal
+  // exactly — CheckoutEntered→checkout, CartAbandoned→terminal('abandoned'), '*'→SELF.
+  route: deriveRoutes(activeCommands, { '*': SELF }),
+  timeout: '30 days',
+  onTimeout: () => ({ type: 'expireCart' }),
+});
+
+// ==================
+// State: checkout — the cart stays editable (same blocks); edits nudge the checkout
+// child via the item-edit effects. The submit freeze and the completion result arrive
+// as signal-mapped commands.
+// ==================
+
+const checkoutCommands = {
+  addItem: addItemBlock,
+  updateQuantity: updateQuantityBlock,
+  removeItem: removeItemBlock,
+  applyCoupon: applyCouponBlock,
+  linkUser: linkUserBlock,
+  // Idempotent no-op mid-checkout: deliberately NOT the beginCheckout block — no
+  // guard, no prepare → no child id → the decider emits nothing; the caller still
+  // gets the current cart back. It declares no routes, so CheckoutEntered is naturally
+  // ABSENT from this state's derived table — visible by absence, which is the point.
+  beginCheckout: {},
+  submitStarted: submitStartedBlock,
+  submitAborted: submitAbortedBlock,
+  checkoutCompleted: checkoutCompletedBlock,
+  checkoutTimedOut: checkoutTimedOutBlock,
+};
+
+const checkout = m.state('checkout', {
+  commands: checkoutCommands,
+  // Derived (ADR-0026); equals the old literal exactly — CheckoutDisowned→active,
+  // CheckoutFailed→active, CartCompleted→terminal('completed'),
+  // CartAbandoned→terminal('abandoned'), '*'→SELF.
+  route: deriveRoutes(checkoutCommands, { '*': SELF }),
+  effects: itemEditNudges,
+  timeout: '1 hour',
+  onTimeout: () => ({ type: 'checkoutTimedOut' }),
+});
+
+// ==================
+// Registry — table of contents. timeout/transitional ride the state defs above.
 // ==================
 
 export const CART_STATES: StateRegistry<
   CartStateName,
-  CartEvent,
+  CartCommand,
   CartWorkflowContext,
   CartUpdateResponse,
-  CartInboundSignal
+  CartCommand
 > = {
-  active: { ...active, timeout: '30 days' },
-  checkout: { ...checkout, timeout: '1 hour' },
+  active,
+  checkout,
 };

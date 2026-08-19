@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { temporalUiUrl } from '@/lib/temporal-links';
 
 function PatternGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -150,7 +151,7 @@ export default function AdminDashboardPage() {
 
         {/* Temporal UI */}
         <a
-          href="http://localhost:8233"
+          href={temporalUiUrl()}
           target="_blank"
           rel="noopener noreferrer"
           className="group p-6 bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-cyan-400 dark:hover:border-cyan-500 transition-all hover:shadow-lg"

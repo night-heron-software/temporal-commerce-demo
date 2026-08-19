@@ -10,7 +10,7 @@ import type {
   FulfillmentLineItemState,
   FulfillerStatusUpdate,
   FulfillmentStateName,
-  FulfillmentSignal,
+  FulfillmentCommand,
 } from './types';
 import {
   getStatusQuery,
@@ -181,18 +181,18 @@ export async function fulfillmentWorkflow(
   // Wire Query
   wf.setHandler(getStatusQuery, () => state);
 
-  // Wire Signals
-  const signals: SignalRegistration<FulfillmentSignal>[] = [
+  // Wire Signals — ADR-0024: transport mapped to `type`-keyed COMMANDS at registration.
+  const signals: SignalRegistration<FulfillmentCommand>[] = [
     {
       definition: childStatusSignal,
       toSignal: (update: FulfillmentFulfillerOrderState) => ({
-        kind: 'childStatus' as const,
+        type: 'childStatus' as const,
         update,
       }),
     },
     {
       definition: cancelSignal,
-      toSignal: () => ({ kind: 'cancel' as const }),
+      toSignal: () => ({ type: 'cancel' as const }),
     },
   ];
 
@@ -209,10 +209,10 @@ export async function fulfillmentWorkflow(
   // Wire State Machine Config
   const config: StateMachineConfig<
     FulfillmentStateName,
-    never,
+    FulfillmentCommand,
     FulfillmentWorkflowState,
     FulfillmentResult,
-    FulfillmentSignal
+    FulfillmentCommand
   > = {
     states: FULFILLMENT_STATES,
     initialState: 'received',
@@ -285,12 +285,7 @@ export async function fulfillmentWorkflow(
 
       return { context: startCtx, nextState: 'in_production' };
     },
-    onTransition: async (
-      from: FulfillmentStateName,
-      to: FulfillmentStateName | `__terminal:${string}`,
-      eventDesc: 'timeout' | 'signal' | 'automatic',
-      currentCtx: FulfillmentWorkflowState,
-    ) => {
+    onTransition: async (from, to, eventDesc, currentCtx) => {
       await syncProjections(currentCtx);
       for (const so of currentCtx.fulfillerOrders) {
         await signalParentOMSWorkflow(currentCtx, so);
@@ -336,10 +331,10 @@ export async function fulfillmentWorkflow(
 
   await runStateMachine<
     FulfillmentStateName,
-    never,
+    FulfillmentCommand,
     FulfillmentWorkflowState,
     FulfillmentResult,
-    FulfillmentSignal
+    FulfillmentCommand
   >(config, state, [], signals);
 
   return buildResult(state);

@@ -3,6 +3,7 @@
  * Mock payment, console email, real Cassandra-backed inventory
  */
 
+import { ApplicationFailure } from '@temporalio/common';
 import { Cart } from '../contracts';
 import { reservationClosedDoc } from '../contracts/inventory';
 type CartItem = Cart.CartItem;
@@ -101,16 +102,68 @@ export async function verifyPayment(paymentIntentId: string): Promise<boolean> {
 }
 
 /**
- * Process payment — always mock for demo
+ * Keys already charged in mock mode, each remembering the amount it charged — the gateway
+ * model, where the key names the attempt and the amount is validated against it. Bounded so
+ * a long-lived dev worker cannot grow it without limit; eviction is oldest-first (Map
+ * preserves insertion order) and only matters after thousands of distinct attempts, by which
+ * point re-charging a long-abandoned one is not the failure anyone is looking for.
+ */
+const MOCK_CHARGED_KEYS = new Map<string, number>();
+const MOCK_CHARGED_KEYS_MAX = 5000;
+
+function rememberMockCharge(key: string, amount: number): void {
+  if (MOCK_CHARGED_KEYS.size >= MOCK_CHARGED_KEYS_MAX) {
+    const oldest = MOCK_CHARGED_KEYS.keys().next().value;
+    if (oldest !== undefined) MOCK_CHARGED_KEYS.delete(oldest);
+  }
+  MOCK_CHARGED_KEYS.set(key, amount);
+}
+
+/**
+ * Process payment — always mock for demo.
+ *
+ * The idempotency key genuinely deduplicates (lineage: mono #241 / `f42c3bda`; the demo's
+ * pre-fix mock accepted the key as `_idempotencyKey` and DISCARDED it, so mock mode could not
+ * reproduce a double-charge even in principle — the mono's validation run 013 found a
+ * triple-charge P0 invisible to every mock-mode run for exactly that reason. A mock that
+ * cannot exhibit the failure it stands in for is a mock that hides it.)
+ *
+ * The key is a nonce naming the attempt (`${workflowId}-pay-${attempt}`), and the amount is
+ * VALIDATED against it: replaying a known key with the same amount returns the first result
+ * without charging again; replaying it with a different amount throws non-retryably — the
+ * gateway model (Stripe rejects a reused key whose request differs). Amount drift on a retry
+ * is a bug to surface, never a silent second charge.
+ *
+ * Limits, stated rather than discovered later: the store is per-process and in-memory, so it
+ * is lost on worker restart and not shared across workers. Acceptable for a dev stand-in —
+ * the point is that a repeated or conflicting charge for one attempt is observable locally.
  */
 export async function processPayment(
   token: string,
   amount: number,
   currency: string,
-  _idempotencyKey?: string,
+  idempotencyKey?: string,
 ): Promise<boolean> {
   log.info(`[Activity] Processing MOCK payment: ${amount} ${currency} with token ${token}`);
   await new Promise((resolve) => setTimeout(resolve, 500)); // Simulate processing
+
+  if (idempotencyKey) {
+    const chargedAmount = MOCK_CHARGED_KEYS.get(idempotencyKey);
+    if (chargedAmount !== undefined) {
+      if (chargedAmount !== amount) {
+        throw ApplicationFailure.nonRetryable(
+          `Idempotency key ${idempotencyKey} was already charged ${chargedAmount} — ` +
+            `refusing to replay it for a different amount (${amount}). A new charge needs a new attempt.`,
+          'IDEMPOTENCY_KEY_AMOUNT_MISMATCH',
+        );
+      }
+      log.warn(
+        `[Activity] MOCK payment already charged for key ${idempotencyKey} — returning the first result, not charging again`,
+      );
+      return true;
+    }
+    rememberMockCharge(idempotencyKey, amount);
+  }
   return true;
 }
 
