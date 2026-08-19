@@ -501,18 +501,11 @@ export const linkUserBlock: CommandBlock<'linkUser'> = {
   evolve: {
     UserLinked: (context, event) => ({
       ...context,
-      // Linking a user is identity bookkeeping, NOT a content change: restore the
-      // version the dispatcher's generic freshness bump adds, exactly as the
-      // CheckoutEntered fold does. This fold was the one the CheckoutEntered fix
-      // missed — found live in run -008 (F-3): the guest email attach at the address
-      // step bumped v1→v2 with no content change, and the cart-changed banner
-      // false-positived at review on every guest checkout.
-      cart: {
-        ...context.cart,
-        email: event.email,
-        userId: event.userId,
-        cartVersion: context.cart.cartVersion - 1,
-      },
+      // Identity bookkeeping, not a content change — classified `false` in
+      // CONTENT_EVENTS, so the dispatcher never bumps and this fold has nothing to
+      // undo. (Run -008 F-3: uncompensated, this bumped v1→v2 at the address step and
+      // false-positived the cart-changed banner on every guest checkout.)
+      cart: { ...context.cart, email: event.email, userId: event.userId },
     }),
   },
 };
@@ -587,14 +580,13 @@ export const beginCheckoutBlock: CommandBlock<'beginCheckout'> = {
   evolve: {
     CheckoutEntered: (context, event) => ({
       ...context,
-      // Entering checkout is NOT a content change: restore the version the dispatcher's
-      // generic freshness bump added. Otherwise the checkout child — whose input
-      // snapshots the PRE-command version and whose `validating` re-pull can race this
-      // very evolve — baselines one behind and the cart-changed banner false-positives
-      // on a fresh checkout (found live during R6's journey verification; the R3
-      // re-baseline narrowed the window, this closes it). Content edits still bump, so
-      // a pulled-vs-input difference now means a REAL edit.
-      cart: { ...withCheckoutFields(context.cart), cartVersion: context.cart.cartVersion - 1 },
+      // Entering checkout is NOT a content change — classified `false` in CONTENT_EVENTS,
+      // so the dispatcher never bumps. Otherwise the checkout child — whose input snapshots
+      // the PRE-command version and whose `validating` re-pull can race this very evolve —
+      // baselines one behind and the cart-changed banner false-positives on a fresh
+      // checkout (found live during R6's journey verification). Content edits still bump,
+      // so a pulled-vs-input difference means a REAL edit.
+      cart: withCheckoutFields(context.cart),
       checkoutWorkflowId: event.checkoutWorkflowId,
       checkoutVersion: event.checkoutVersion,
     }),
@@ -846,26 +838,66 @@ export function decide(
 }
 
 /**
+ * Does this event change what the shopper is buying?
+ *
+ * `cartVersion` is the freshness token the CHECKOUT child baselines against, and the
+ * cart-changed banner fires on `live > acknowledged`. So the version must move for content
+ * changes and stay put for everything else — orchestration bookkeeping (entering checkout,
+ * linking a user, freezing for submit) is not an edit, and a version that moves without one
+ * tells the shopper their cart changed when it did not.
+ *
+ * Declared here, once, and EXHAUSTIVELY: a new `CartEvent` with no entry is a compile-time
+ * hole, not a live false-positive banner. That is the point of the table — this defect class
+ * recurred three times while the policy was "bump everything, subtract in the fold" (R6 found
+ * it in `CheckoutEntered`; validation run `-008` found it again in `UserLinked` (F-3) and in
+ * the submit-freeze pair (F-4)). Each fold that compensated by hand has had its `-1` removed;
+ * classification lives here now.
+ *
+ * `updatedAt` is stamped on EVERY event regardless — "when did this workflow last do
+ * anything" is a different question from "what version of the contents is this".
+ */
+const CONTENT_EVENTS: Record<CartEvent['type'], boolean> = {
+  // Real edits to the priced contents.
+  ItemAdded: true,
+  ItemQuantityChanged: true,
+  ItemRemoved: true,
+  CouponApplied: true,
+  // Lifecycle events that empty or close the cart — the contents genuinely change, and the
+  // cart is terminal afterwards, so nothing is left to false-positive.
+  CartAbandoned: true,
+  CartCompleted: true,
+  // Bookkeeping: identity, the checkout link, the submit freeze, and the failure that hands
+  // the cart back to the shopper. None of them touch items, quantities, coupons, or pricing.
+  UserLinked: false,
+  CheckoutEntered: false,
+  CheckoutDisowned: false,
+  CheckoutFailed: false,
+  SubmitFreezeStarted: false,
+  SubmitFreezeCleared: false,
+};
+
+/**
  * evolve(context, event) → context.
  *
  * Pure application of a single event — the ONLY function that writes cart contents, `status`,
  * the checkout link/version, the submit flag, `updatedAt`, or `cartVersion` — and it writes
  * them by returning a NEW context. The dispatcher stamps `updatedAt` from the event's `at` and
- * bumps `cartVersion` on every event (versions are freshness tokens — monotonicity is what
- * consumers compare, so a two-event command bumping twice is fine), then hands the stamped
- * context to the emitting block's evolve entry, which builds its result by structural sharing.
- * No deep copy, no mutation anywhere.
+ * bumps `cartVersion` for CONTENT events only (see `CONTENT_EVENTS`; versions are freshness
+ * tokens — monotonicity is what consumers compare, so a two-content-event command bumping
+ * twice is fine), then hands the stamped context to the emitting block's evolve entry, which
+ * builds its result by structural sharing. No deep copy, no mutation anywhere.
  */
 export function evolve(
   context: Readonly<CartWorkflowContext>,
   event: CartEvent,
 ): CartWorkflowContext {
+  const bump = CONTENT_EVENTS[event.type] ? 1 : 0;
   const stamped: CartWorkflowContext = {
     ...context,
     cart: {
       ...context.cart,
       updatedAt: event.at,
-      cartVersion: (context.cart.cartVersion || 0) + 1,
+      cartVersion: (context.cart.cartVersion || 0) + bump,
     },
   };
   const entry = evolveByEvent[event.type];

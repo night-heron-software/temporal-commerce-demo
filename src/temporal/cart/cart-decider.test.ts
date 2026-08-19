@@ -478,6 +478,67 @@ describe('evolve never mutates its input — every CartEvent type', () => {
   });
 });
 
+// ── cartVersion moves for CONTENT changes and NOTHING else. The banner fires on
+// `live > acknowledged`, so a version that moves without an edit tells the shopper their cart
+// changed when it did not. This defect class recurred three times under the old
+// "bump everything, subtract in the fold" policy: R6 (CheckoutEntered), run -008 F-3
+// (UserLinked), run -008 F-4 (the submit-freeze pair). Driving the SAME exhaustive
+// eventSamples table means a new event cannot be added without landing on one side here.
+describe('cartVersion bumps for content events only', () => {
+  const CONTENT: CartEvent['type'][] = [
+    'ItemAdded',
+    'ItemQuantityChanged',
+    'ItemRemoved',
+    'CouponApplied',
+    'CartAbandoned',
+    'CartCompleted',
+  ];
+  const BOOKKEEPING: CartEvent['type'][] = [
+    'UserLinked',
+    'CheckoutEntered',
+    'CheckoutDisowned',
+    'CheckoutFailed',
+    'SubmitFreezeStarted',
+    'SubmitFreezeCleared',
+  ];
+
+  it('every event in the union is classified exactly once', () => {
+    expect([...CONTENT, ...BOOKKEEPING].sort()).toEqual(Object.keys(eventSamples).sort());
+  });
+
+  it.each(CONTENT)('%s bumps the version', (type) => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const next = evolve(s, eventSamples[type]);
+    expect(next.cart.cartVersion).toBe(s.cart.cartVersion + 1);
+  });
+
+  it.each(BOOKKEEPING)('%s leaves the version alone', (type) => {
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const next = evolve(s, eventSamples[type]);
+    expect(next.cart.cartVersion).toBe(s.cart.cartVersion);
+  });
+
+  it('stamps updatedAt on bookkeeping events even though the version holds', () => {
+    // "When did this workflow last act" is a different question from "what version of the
+    // contents is this" — the freeze pair must still move the timestamp.
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const next = evolve(s, { type: 'SubmitFreezeStarted', at: '2026-08-18T12:00:00.000Z' });
+    expect(next.cart.updatedAt).toBe('2026-08-18T12:00:00.000Z');
+    expect(next.cart.cartVersion).toBe(s.cart.cartVersion);
+  });
+
+  it('a full submit-freeze cycle is version-neutral (F-4)', () => {
+    // The exact live sequence that produced the false banner: a CART_CHANGED bounce signals
+    // submitStarted then submitAborted. Content never changed, so neither must the version.
+    const s = makeCtx({ checkoutWorkflowId: 'c-0' });
+    const after = [eventSamples.SubmitFreezeStarted, eventSamples.SubmitFreezeCleared].reduce(
+      evolve,
+      s,
+    );
+    expect(after.cart.cartVersion).toBe(s.cart.cartVersion);
+  });
+});
+
 // ── Per-command blocks: each command is packaged as ONE exported structure (guard /
 // prepare / decide / evolve), so its pure fields are exercised directly here (prepare is
 // I/O and is covered through the machine in states.test.ts with mocked activities).
