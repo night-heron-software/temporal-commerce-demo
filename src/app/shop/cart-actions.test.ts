@@ -19,6 +19,8 @@ const workflow = vi.hoisted(() => ({
 // addItemToCart resolves the R1 display snapshot via Elasticsearch — mocked so the
 // suite stays runnable with zero containers (a real client hangs past the test timeout).
 const resolveVariantDisplay = vi.hoisted(() => vi.fn());
+// The signed-in shopper lookup (two Cassandra reads) — mocked so the suite stays container-free.
+const getSignedInShopper = vi.hoisted(() => vi.fn());
 interface StartOp {
   workflowType: string;
   options: Record<string, unknown>;
@@ -33,6 +35,7 @@ vi.mock('@/lib/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 vi.mock('@/lib/variant-display', () => ({ resolveVariantDisplay }));
+vi.mock('@/lib/shopper-session', () => ({ getSignedInShopper }));
 // cart-actions dynamically imports WithStartWorkflowOperation for the lazy-create path.
 vi.mock('@temporalio/client', () => ({
   // Capture the constructed instances so tests can assert both the options the
@@ -122,6 +125,71 @@ describe('getCart', () => {
     expect(await getCart(CART_ID)).toEqual(details);
     expect(handles[CART_WF_ID].query).toHaveBeenCalledWith(Cart.getCartQuery);
     expect(await getCart(CART_ID)).toBeNull();
+  });
+});
+
+// ── A cart created AFTER sign-in must still belong to the shopper (#11 / run -008 F-5) ──
+// Linking used to live only in the login route, which links whatever cart exists AT sign-in,
+// so a cart minted later stayed a guest cart: order history still worked (it queries by the
+// address email) but cart RECOVERY at the next sign-in silently failed, because that query
+// matches the cart doc's `email`.
+describe('addItemToCart — shopper linking (#11)', () => {
+  const details = (over: Record<string, unknown> = {}) => ({
+    cartId: CART_ID,
+    status: 'active',
+    ...over,
+  });
+
+  it('links the signed-in shopper to a cart that has no user yet', async () => {
+    const handles = installHandles();
+    workflow.executeUpdateWithStart.mockResolvedValue(details());
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockResolvedValue(
+      details({ userId: 'shopper-1', email: 'ada@example.com' }),
+    );
+    getSignedInShopper.mockResolvedValue({ id: 'shopper-1', email: 'ada@example.com' });
+
+    const result = await addItemToCart(CART_ID, 'var-1', 1, 1999);
+
+    expect(handles[CART_WF_ID].executeUpdate).toHaveBeenCalledWith(Cart.cartUpdate, {
+      args: [{ type: 'linkUser', email: 'ada@example.com', userId: 'shopper-1' }],
+    });
+    expect(result).toMatchObject({ userId: 'shopper-1', email: 'ada@example.com' });
+  });
+
+  it('leaves a genuine guest cart alone', async () => {
+    const handles = installHandles();
+    workflow.executeUpdateWithStart.mockResolvedValue(details());
+    workflow.getHandle(CART_WF_ID);
+    getSignedInShopper.mockResolvedValue(null);
+
+    await addItemToCart(CART_ID, 'var-1', 1, 1999);
+
+    expect(handles[CART_WF_ID].executeUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does not re-link an already-linked cart — and does not even look up the session', async () => {
+    // The lookup is two Cassandra reads; short-circuiting before it keeps every subsequent
+    // add-to-cart as cheap as it was.
+    const handles = installHandles();
+    workflow.executeUpdateWithStart.mockResolvedValue(details({ userId: 'shopper-1' }));
+    workflow.getHandle(CART_WF_ID);
+
+    await addItemToCart(CART_ID, 'var-1', 1, 1999);
+
+    expect(getSignedInShopper).not.toHaveBeenCalled();
+    expect(handles[CART_WF_ID].executeUpdate).not.toHaveBeenCalled();
+  });
+
+  it('still returns the added cart when linking fails — the item is not lost', async () => {
+    const handles = installHandles();
+    const added = details();
+    workflow.executeUpdateWithStart.mockResolvedValue(added);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockRejectedValue(workflowNotFound());
+    getSignedInShopper.mockResolvedValue({ id: 'shopper-1', email: 'ada@example.com' });
+
+    expect(await addItemToCart(CART_ID, 'var-1', 1, 1999)).toEqual(added);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   DEMO_STORE_ID,
 } from '@/temporal/contracts/constants';
 import { domainErrorOf, domainMessageOf } from './cart-actions-outcome';
+import { getSignedInShopper } from '@/lib/shopper-session';
 
 const log = createLogger('cart-actions');
 
@@ -286,12 +287,46 @@ export async function addItemToCart(
   price: number,
 ): Promise<Cart.CartDetails | null> {
   const display = await resolveVariantDisplay(variantId);
-  return executeCartUpdate(
+  const cart = await executeCartUpdate<Cart.CartDetails, [Cart.CartCommand]>(
     cartId,
     Cart.cartUpdate,
     [{ type: 'addItem' as const, variantId, quantity, price, ...(display ?? {}) }],
     { createIfMissing: true },
   );
+  return linkShopperIfNeeded(cartId, cart);
+}
+
+/**
+ * Attach the signed-in shopper to a cart that does not have one yet (backlog #11).
+ *
+ * Linking used to happen in ONE place — the login route — which links whatever cart exists at
+ * sign-in. A cart created AFTER login (the normal case once a prior cart completes) therefore
+ * stayed a guest cart forever: no email, no userId, `isGuest: true` for an authenticated
+ * shopper. Order history still worked, because it queries by the address email — what broke
+ * silently was cart RECOVERY at the next sign-in, which matches on the cart doc's `email`
+ * (`api/auth/shopper/login/route.ts`, `term: { email }` + `status: active`).
+ *
+ * Same `linkUser` command the login route dispatches, so there is one linking mechanism, not
+ * two. Cheap by construction: an already-linked cart short-circuits BEFORE the session lookup,
+ * so the two extra reads happen only on the first add to a new cart.
+ *
+ * A cart already linked to a DIFFERENT shopper is left alone — switching accounts is the login
+ * route's job (it recovers that shopper's own active cart, or links the guest one).
+ */
+async function linkShopperIfNeeded(
+  cartId: string,
+  cart: Cart.CartDetails | null,
+): Promise<Cart.CartDetails | null> {
+  if (!cart || cart.userId) return cart;
+
+  const shopper = await getSignedInShopper();
+  if (!shopper) return cart; // a genuine guest cart
+
+  const linked = await executeCartUpdate(cartId, Cart.cartUpdate, [
+    { type: 'linkUser' as const, email: shopper.email, userId: shopper.id },
+  ]);
+  // Linking is best-effort: it must never cost the shopper the item they just added.
+  return (linked as Cart.CartDetails | null) ?? cart;
 }
 
 export async function removeFromCart(
