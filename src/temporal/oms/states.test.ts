@@ -70,7 +70,8 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
     cartId: 'cart-1',
     correlationId: 'corr-1',
     customerEmail: 'a@b.c',
-    items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 10 }],
+    // CENTS (backlog #13): 1000 is $10.00 — these fixtures carried dollars.
+    items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 1, price: 1000 }],
     shippingAddress: {
       firstName: 'A',
       lastName: 'B',
@@ -82,11 +83,11 @@ function makeOrder(overrides: Partial<Order> = {}): Order {
       email: 'a@b.c',
     },
     paymentMethod: { type: 'mock', token: 'tok_1' },
-    subtotal: 10,
-    shippingCost: 5,
-    tax: 0.8,
+    subtotal: 1000,
+    shippingCost: 500,
+    tax: 80,
     totalDiscounts: 0,
-    total: 15.8,
+    total: 1580,
     currency: 'USD',
     status: 'paid',
     createdAt: '2026-01-01T00:00:00Z',
@@ -484,7 +485,7 @@ describe('delivered — feedback, refunds, returns', () => {
     const out = await OMS_STATES.delivered.fn(deliveredCtx(), ev({ type: 'refundOrder' }));
     expect(out.next).toBe(terminal('refunded'));
     expect(out.context.refunds).toHaveLength(1);
-    expect(out.context.refunds?.[0]).toMatchObject({ refundAmount: 10, taxAmount: 0.8 });
+    expect(out.context.refunds?.[0]).toMatchObject({ refundAmount: 1000, taxAmount: 80 });
     expect(sendOrderStatusEmail).toHaveBeenCalledWith('a@b.c', 'o-1', 'refunded', {});
   });
 

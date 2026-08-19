@@ -52,12 +52,15 @@ function makeState(overrides: Partial<OrderState> = {}): OrderState {
       orderId: 'o-1',
       cartId: 'c-1',
       customerEmail: 'a@b.c',
+      // CENTS (backlog #13): 1000 is $10.00. These fixtures carried dollars, which is why
+      // the old expectations could read `taxAmount: 2.5` — a fractional cent — without
+      // anyone noticing the unit was wrong.
       items: [
-        { lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 10 },
-        { lineItemId: 'li-2', variantId: 'v2', quantity: 1, price: 5 },
+        { lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 1000 },
+        { lineItemId: 'li-2', variantId: 'v2', quantity: 1, price: 500 },
       ],
-      subtotal: 25,
-      tax: 2.5,
+      subtotal: 2500,
+      tax: 250,
     } as OrderState['order'],
     status: 'processing',
     statusHistory: [{ status: 'pending_assignment', timestamp: 't0', updatedBy: 'system' }],
@@ -97,8 +100,8 @@ function refundRecord(over: Partial<RefundRecord> = {}): RefundRecord {
     refundId: 'refund-1',
     timestamp: AT,
     lines: [],
-    refundAmount: 25,
-    taxAmount: 2.5,
+    refundAmount: 2500,
+    taxAmount: 250,
     ...over,
   };
 }
@@ -172,7 +175,7 @@ describe('oms decide() — intake', () => {
       status: 'pending',
       items: [{ assignmentId: 'asg-1', variantId: 'v1', quantity: 2 }],
     });
-    expect(e.fulfillmentInputs[0].items[0]).toMatchObject({ sku: 'SKU-1', unitPrice: 10 });
+    expect(e.fulfillmentInputs[0].items[0]).toMatchObject({ sku: 'SKU-1', unitPrice: 1000 });
     // decide does not mutate — the assignment updates are evolve's job
     expect(s.assignments[0].fulfillerOrderId).toBeUndefined();
   });
@@ -233,7 +236,7 @@ describe('oms decide() — lifecycle events emitted', () => {
     const e = events[0] as Extract<OrderEvent, { type: 'Refunded' }>;
     expect(e.type).toBe('Refunded');
     expect(e.fullyRefunded).toBe(true);
-    expect(e.record).toMatchObject({ refundAmount: 25, taxAmount: 2.5, timestamp: AT });
+    expect(e.record).toMatchObject({ refundAmount: 2500, taxAmount: 250, timestamp: AT });
     expect(events[1]).toEqual({ type: 'OrderRefunded', at: AT });
   });
 
@@ -246,7 +249,62 @@ describe('oms decide() — lifecycle events emitted', () => {
     expect(events[0]).toMatchObject({
       type: 'Refunded',
       fullyRefunded: false,
-      record: { refundAmount: 10, taxAmount: 1 }, // 2.5 * (10/25)
+      record: { refundAmount: 1000, taxAmount: 100 }, // 250 * (1000/2500), whole cents
+    });
+  });
+
+  // ── Refund money is WHOLE CENTS, and successive refunds still sum to the tax charged.
+  // Backlog #13 / validation run -008, which observed a live `taxAmount: 187.5` — half a
+  // cent, unpayable by any real PSP. Independent rounding cannot give both properties: two
+  // half refunds of a 375 tax would each round 187.5 up and refund 376, a cent more than was
+  // charged. The fix pro-rates CUMULATIVELY and subtracts what was already refunded.
+  describe('refund money is whole cents and sums exactly (#13)', () => {
+    // The live shape from run -008: one line, 2 × 2999, tax 375 — a tax that does not
+    // divide evenly, which is what makes the property observable.
+    const oddTaxState = () =>
+      makeState({
+        order: {
+          orderId: 'o-1',
+          cartId: 'c-1',
+          customerEmail: 'a@b.c',
+          items: [{ lineItemId: 'li-1', variantId: 'v1', quantity: 2, price: 2999 }],
+          subtotal: 5998,
+          tax: 375,
+        } as OrderState['order'],
+      });
+
+    it('a partial refund of an odd tax lands on a whole cent', () => {
+      const [e] = decide(
+        { type: 'refundOrder', lines: [{ lineItemId: 'li-1', quantity: 1 }], at: AT },
+        oddTaxState(),
+      ) as [Extract<OrderEvent, { type: 'Refunded' }>];
+      expect(e.record.taxAmount).toBe(188); // round(375 × 2999/5998) — not 187.5
+      expect(Number.isInteger(e.record.taxAmount)).toBe(true);
+      expect(Number.isInteger(e.record.refundAmount)).toBe(true);
+    });
+
+    it('two halves sum to exactly the tax charged — no over-refund', () => {
+      const first = apply(oddTaxState(), {
+        type: 'refundOrder',
+        lines: [{ lineItemId: 'li-1', quantity: 1 }],
+        at: AT,
+      });
+      const second = apply(first, {
+        type: 'refundOrder',
+        lines: [{ lineItemId: 'li-1', quantity: 1 }],
+        at: AT,
+      });
+      const taxes = second.refunds!.map((r) => r.taxAmount);
+      expect(taxes).toEqual([188, 187]); // the second absorbs the remainder
+      expect(taxes.reduce((a, b) => a + b, 0)).toBe(375); // exactly the tax charged
+      expect(second.refunds!.reduce((a, r) => a + r.refundAmount, 0)).toBe(5998);
+    });
+
+    it('a full refund in one move takes the whole tax', () => {
+      const [e] = decide({ type: 'refundOrder', at: AT }, oddTaxState()) as [
+        Extract<OrderEvent, { type: 'Refunded' }>,
+      ];
+      expect(e.record).toMatchObject({ refundAmount: 5998, taxAmount: 375 });
     });
   });
 
@@ -279,7 +337,7 @@ describe('oms decide() — lifecycle events emitted', () => {
     const events = decide({ type: 'confirmReturn', at: AT }, s);
     expect(events[0]).toMatchObject({
       type: 'ReturnConfirmed',
-      record: { refundAmount: 20, reason: 'wrong size' },
+      record: { refundAmount: 2000, reason: 'wrong size' },
     });
   });
 
@@ -376,8 +434,8 @@ describe('refund folds (decide → evolve)', () => {
     });
     expect(state.status).toBe('delivered');
     expect(state.refunds).toHaveLength(1);
-    expect(state.refunds![0].refundAmount).toBe(10);
-    expect(state.refunds![0].taxAmount).toBe(1); // 2.5 * (10/25)
+    expect(state.refunds![0].refundAmount).toBe(1000);
+    expect(state.refunds![0].taxAmount).toBe(100); // 250 * (1000/2500)
   });
 
   it('full refund (omitted lines) marks the order refunded', () => {
@@ -387,7 +445,7 @@ describe('refund folds (decide → evolve)', () => {
       at: AT,
     });
     expect(state.status).toBe('refunded');
-    expect(state.refunds![0].refundAmount).toBe(25);
+    expect(state.refunds![0].refundAmount).toBe(2500);
   });
 
   it('cumulative partials flip to refunded when everything is covered', () => {
@@ -416,7 +474,7 @@ describe('refund folds (decide → evolve)', () => {
     const returned = apply(requested, { type: 'confirmReturn', at: AT });
     expect(returned.status).toBe('returned');
     expect(returned.returnRequest).toBeUndefined();
-    expect(returned.refunds![0].refundAmount).toBe(20);
+    expect(returned.refunds![0].refundAmount).toBe(2000);
   });
 });
 

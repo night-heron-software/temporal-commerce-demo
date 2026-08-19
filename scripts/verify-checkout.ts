@@ -11,6 +11,14 @@ import { WithStartWorkflowOperation } from '@temporalio/client';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Money is integer CENTS everywhere in this app — 1599 is $15.99. Seeding dollars here is
+ * what backlog #13 was: the order mixed units and this script could not tell, because it
+ * asserted workflow progression and never an amount.
+ */
+const UNIT_PRICE_CENTS = 1599;
+const UNITS = 2;
+
 async function run() {
   console.log('🛍️ Starting E2E Verification Check...\n');
 
@@ -52,7 +60,12 @@ async function run() {
 
     await client.workflow.executeUpdateWithStart(Cart.cartUpdate, {
       startWorkflowOperation: startOp,
-      args: [{ type: 'addItem' as const, variantId, quantity: 2, price: 15.99 }],
+      // CENTS, not dollars — 1599 is $15.99. The app's money contract is integer cents
+      // end to end (the UI divides by 100 at render). This seeded `15.99` until
+      // validation run -008 (backlog #13): the order came out with a dollar subtotal added
+      // to the cents shipping constant, totalling 1032.98, and rendered as $10.33 — while
+      // this script still reported ZERO Errors, because it asserted no amounts.
+      args: [{ type: 'addItem' as const, variantId, quantity: UNITS, price: UNIT_PRICE_CENTS }],
     });
     console.log(`✅ Cart Created: ${cartId}. Item added!\n`);
 
@@ -141,6 +154,50 @@ async function run() {
     }
     if (!isComplete) throw new Error('Order submission did not complete.');
     console.log(`✅ Order Submitted successfully! Order ID: ${orderId}\n`);
+
+    // ── Money assertion (backlog #13) ────────────────────────────────────────────────
+    // A gate that only watches workflows advance cannot see the class of bug it is best
+    // placed to catch. Run -008 minted an order whose total was 1032.98 — a dollar subtotal
+    // summed with a cents shipping constant — while this script printed ZERO Errors. These
+    // checks fail on that order.
+    console.log(`   🔸 Verifying order money (integer cents)...`);
+    const omsWfIdForMoney = buildWorkflowId(DEMO_STORE_ID, 'order', orderId);
+    const { order: placed } = await client.workflow
+      .getHandle(omsWfIdForMoney)
+      .query(OMS.getOrderStateQuery);
+    const expectedSubtotal = UNIT_PRICE_CENTS * UNITS;
+    const money = {
+      subtotal: placed.subtotal,
+      tax: placed.tax,
+      shippingCost: placed.shippingCost,
+      totalDiscounts: placed.totalDiscounts ?? 0,
+      total: placed.total,
+    };
+    for (const [field, value] of Object.entries(money)) {
+      if (!Number.isInteger(value)) {
+        throw new Error(
+          `Order money must be integer cents: ${field}=${value} is not an integer ` +
+            `(a fractional cent cannot be charged). Money: ${JSON.stringify(money)}`,
+        );
+      }
+    }
+    if (money.subtotal !== expectedSubtotal) {
+      throw new Error(
+        `Subtotal ${money.subtotal} != price × quantity (${UNIT_PRICE_CENTS} × ${UNITS} = ` +
+          `${expectedSubtotal}). A dollars-vs-cents mismatch looks exactly like this.`,
+      );
+    }
+    const expectedTotal = money.subtotal - money.totalDiscounts + money.shippingCost + money.tax;
+    if (money.total !== expectedTotal) {
+      throw new Error(
+        `Total ${money.total} != subtotal − discounts + shipping + tax (${expectedTotal}). ` +
+          `Money: ${JSON.stringify(money)}`,
+      );
+    }
+    console.log(
+      `✅ Money checks out: subtotal ${money.subtotal} + shipping ${money.shippingCost} + ` +
+        `tax ${money.tax} = ${money.total} cents\n`,
+    );
 
     // 7. Track OMS & Fulfillment Workflow
     console.log(`[3] Tracking Fulfillment via Temporal...`);

@@ -154,9 +154,20 @@ type Ev<K extends OrderEvent['type']> = Extract<OrderEvent, { type: K }>;
 // Refund math (pure)
 // ==================
 
-/** Round to cents-precision to keep pro-rated tax stable across applications. */
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+/**
+ * **Money in this system is integer CENTS** — `total: 7372` is $73.72. Every amount on an
+ * order (`price`, `subtotal`, `tax`, `shippingCost`, `total`) and every refund amount is a
+ * whole number of cents; the UI divides by 100 at the render boundary
+ * (`src/app/admin/orders/page.tsx`). Nothing may produce a fractional cent: it cannot be
+ * charged or refunded by any real PSP.
+ *
+ * This helper replaced a `round2` that computed `Math.round(n * 100) / 100` — two decimal
+ * places, which is right for DOLLARS and wrong for cents (it rounds to a hundredth of a cent
+ * and leaves 187.5 untouched). Validation run `-008` caught a live refund carrying
+ * `taxAmount: 187.5`, half a cent (backlog #13).
+ */
+function roundCents(n: number): number {
+  return Math.round(n);
 }
 
 /** Per-line quantities already refunded on this order. */
@@ -243,16 +254,30 @@ function computeRefundRecord(
     refundAmount += item.price * l.quantity;
   }
 
-  // Pro-rate order tax by the refunded retail share of the subtotal.
-  const taxAmount =
-    context.order.subtotal > 0
-      ? round2(context.order.tax * (refundAmount / context.order.subtotal))
-      : 0;
-
   const refundedAfter: Record<string, number> = { ...alreadyRefunded };
   for (const l of lines) {
     refundedAfter[l.lineItemId] = (refundedAfter[l.lineItemId] ?? 0) + l.quantity;
   }
+
+  // Pro-rate order tax by the refunded retail share of the subtotal — computed CUMULATIVELY,
+  // then less the tax already refunded, so each record is a whole number of cents AND the
+  // records still sum to exactly the tax charged.
+  //
+  // Rounding each record independently does not have that property: two half refunds of a 375
+  // tax would each round 187.5 up to 188 and refund 376 — a cent more than was charged. Here
+  // the first record takes round(375 × 2999/5998) = 188 and the second takes
+  // round(375 × 5998/5998) − 188 = 187. A full refund always lands on the charged tax exactly,
+  // because its cumulative share is 1.
+  const refundedSubtotalAfter = context.order.items.reduce(
+    (sum, item) => sum + item.price * (refundedAfter[item.lineItemId] ?? 0),
+    0,
+  );
+  const taxRefundedSoFar = (context.refunds ?? []).reduce((sum, r) => sum + r.taxAmount, 0);
+  const cumulativeTax =
+    context.order.subtotal > 0
+      ? roundCents(context.order.tax * (refundedSubtotalAfter / context.order.subtotal))
+      : 0;
+  const taxAmount = cumulativeTax - taxRefundedSoFar;
   const fullyRefunded = context.order.items.every(
     (item) => (refundedAfter[item.lineItemId] ?? 0) >= item.quantity,
   );
@@ -262,7 +287,9 @@ function computeRefundRecord(
     timestamp: at,
     reason,
     lines: lines.map((l) => ({ lineItemId: l.lineItemId, quantity: l.quantity })),
-    refundAmount: round2(refundAmount),
+    // Integral already (cents × whole quantities); rounded defensively so no arithmetic
+    // upstream can leak a fraction into a payable amount.
+    refundAmount: roundCents(refundAmount),
     taxAmount,
   };
 
