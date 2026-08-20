@@ -277,8 +277,18 @@ export async function runStateMachine<
         }
       }
 
+      // An input that changed NOTHING. Two shapes, one meaning: a rejection (a guard
+      // refused it) and an idle tick (the timer elapsed and `onTimeout` synthesized no
+      // command). Neither is a transition, so neither may fire effects or be recorded —
+      // and both predicates below must agree, which is why this is computed once. They
+      // did not agree before: recording skipped idle ticks while `onTransition` ran for
+      // them, so a parked fulfiller order notified its parent every 15 s, the parent
+      // re-signalled OMS, and OMS recorded a self-hop row plus a history event per tick
+      // (backlog #18, run -009 F-3).
+      const nothingHappened = output.rejected === true || output.idle === true;
+
       // 7. Trigger onTransition Hook
-      if (config.onTransition && !output.rejected) {
+      if (config.onTransition && !nothingHappened) {
         try {
           await config.onTransition(
             previousStateName,
@@ -312,13 +322,9 @@ export async function runStateMachine<
       }
 
       // 7c. Record the transition (ADR-0010) — on a real state change, or any command
-      // (update/signal) so context mutations within a state are captured too. Idle timeout
-      // ticks that change nothing are skipped.
-      if (
-        recorder &&
-        !output.rejected &&
-        (output.next !== previousStateName || input.kind !== 'timeout')
-      ) {
+      // (update/signal/timeout-synthesized) so context mutations within a state are captured
+      // too. Only genuine no-ops are skipped, via the same predicate the hook uses.
+      if (recorder && !nothingHappened) {
         recorder.record({
           from: previousStateName,
           to: output.next,

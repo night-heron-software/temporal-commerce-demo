@@ -239,6 +239,82 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
     ]);
   });
 
+  // ── An idle tick is not a transition (#18 / run -009 F-3) ────────────────────────────
+  // `onTimeout` returning null means the timer elapsed and there was nothing to do. The
+  // driver used to skip RECORDING such a tick while still firing `onTransition`, so effect
+  // hooks ran for a no-op: a parked fulfiller order notified its parent every 15 s, the
+  // parent re-signalled OMS, and OMS recorded a self-hop row plus a workflow history event
+  // per tick — unbounded growth while parked.
+  it('an idle tick fires no onTransition and records nothing', async () => {
+    const seen: string[] = [];
+    let ticks = 0;
+    const config: StateMachineConfig<RState, never, Ctx, void> = {
+      states: {
+        a: {
+          timeout: '1 second',
+          // Three idle ticks (nothing synthesized — the state reports `idle` and stays
+          // put), then terminate so the loop ends. Only the final, real transition may
+          // fire the hook or be recorded.
+          fn: async (ctx: Ctx) => {
+            ticks += 1;
+            return ticks > 3
+              ? { context: ctx, next: '__terminal:done' }
+              : { context: ctx, next: 'a', idle: true };
+          },
+        },
+      } as Any,
+      initialState: 'a',
+      onTransition: async (from: string, to: string) => {
+        seen.push(`${from}->${to}`);
+      },
+    };
+
+    await runStateMachine(config, { count: 0 }, [], []);
+
+    // Three no-ops produced NOTHING: no hook calls and no rows beyond the start row and
+    // the genuine terminal transition. Pre-fix the hook fired four times.
+    expect(seen).toEqual(['a->__terminal:done']);
+    expect(persistedBatches.flat().map((r) => [r.fromState, r.toState])).toEqual([
+      ['', 'a'],
+      ['a', '__terminal:done'],
+    ]);
+  });
+
+  // The other half, and the reason this is a FLAG rather than an inference: a timeout that
+  // DOES synthesize a command may route back to SELF while mutating context. That is a real
+  // transition — its effects must run and it must be recorded. Inferring "same state +
+  // timeout input ⇒ nothing happened" silently swallowed exactly this case.
+  it('a timeout-driven SELF transition that changes context still fires and records', async () => {
+    const seen: string[] = [];
+    let ticks = 0;
+    const config: StateMachineConfig<RState, never, Ctx, void> = {
+      states: {
+        a: {
+          timeout: '1 second',
+          fn: async (ctx: Ctx) => {
+            ticks += 1;
+            return ticks >= 2
+              ? { context: ctx, next: '__terminal:done' }
+              : { context: { count: ctx.count + 1 }, next: 'a' }; // self-hop, context moved
+          },
+        },
+      } as Any,
+      initialState: 'a',
+      onTransition: async (from: string, to: string) => {
+        seen.push(`${from}->${to}`);
+      },
+    };
+
+    await runStateMachine(config, { count: 0 }, [], []);
+
+    expect(seen).toEqual(['a->a', 'a->__terminal:done']);
+    expect(persistedBatches.flat().map((r) => [r.fromState, r.toState, r.triggerKind])).toEqual([
+      ['', 'a', 'start'],
+      ['a', 'a', 'timeout'],
+      ['a', '__terminal:done', 'timeout'],
+    ]);
+  });
+
   it('is a no-op when disabled', async () => {
     const config: StateMachineConfig<RState, never, Ctx, void> = {
       states: {
