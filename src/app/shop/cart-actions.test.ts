@@ -354,6 +354,64 @@ describe('submitOrder', () => {
     });
   });
 
+  // ── The checkout must react to auth state (#16 / run -009 F-1) ─────────────────────
+  // The cart cookie is the journey's credential and sign-out does not touch it, so a
+  // signed-out browser could place an order attributed to the linked shopper. The gate keys
+  // on the CART'S linkage, not on the presence of a session — a guest cart checking out
+  // sessionless is the feature, and breaking it would be the real regression.
+  describe('identity gate (#16)', () => {
+    const linkedCart = { cartId: CART_ID, userId: 'shopper-1', email: 'a@b.c', items: [] };
+
+    const arrange = (cart: unknown) => {
+      const handles = installHandles();
+      cookieStore.set('cartId', CART_ID);
+      workflow.getHandle(CART_WF_ID);
+      handles[CART_WF_ID].query.mockImplementation((q: { name?: string } | string) => {
+        const name = typeof q === 'string' ? q : q?.name;
+        return name === 'getCheckoutWorkflowId' ? 'ck-1' : cart;
+      });
+      workflow.getHandle('ck-1');
+      handles['ck-1'].query.mockResolvedValue({ step: 'review' });
+      return handles;
+    };
+
+    it('refuses the submit when the shopper signed out of a linked cart', async () => {
+      const handles = arrange(linkedCart);
+      getSignedInShopper.mockResolvedValue(null);
+
+      expect(await submitOrder(CART_ID, 1)).toMatchObject({ error: 'SIGNED_OUT' });
+      expect(handles['ck-1'].executeUpdate).not.toHaveBeenCalled();
+    });
+
+    it('refuses when a DIFFERENT shopper is signed in', async () => {
+      const handles = arrange(linkedCart);
+      getSignedInShopper.mockResolvedValue({ id: 'shopper-2', email: 'x@y.z' });
+
+      expect(await submitOrder(CART_ID, 1)).toMatchObject({ error: 'SIGNED_IN_AS_OTHER' });
+      expect(handles['ck-1'].executeUpdate).not.toHaveBeenCalled();
+    });
+
+    it('lets the matching shopper through', async () => {
+      const handles = arrange(linkedCart);
+      getSignedInShopper.mockResolvedValue({ id: 'shopper-1', email: 'a@b.c' });
+      handles['ck-1'].executeUpdate.mockResolvedValueOnce({ step: 'complete' });
+
+      expect(await submitOrder(CART_ID, 1)).toEqual({ step: 'complete' });
+      expect(handles['ck-1'].executeUpdate).toHaveBeenCalled();
+    });
+
+    // Guest checkout is the feature, not the bug. If this ever goes red, the gate has been
+    // written against the SESSION instead of against the cart's linkage.
+    it('lets a genuine guest cart check out with no session at all', async () => {
+      const handles = arrange({ cartId: CART_ID, items: [] });
+      getSignedInShopper.mockResolvedValue(null);
+      handles['ck-1'].executeUpdate.mockResolvedValueOnce({ step: 'complete' });
+
+      expect(await submitOrder(CART_ID, 1)).toEqual({ step: 'complete' });
+      expect(handles['ck-1'].executeUpdate).toHaveBeenCalled();
+    });
+  });
+
   // A CART_CHANGED bounce is a RETURNED state, not a throw, so the cookie must survive it —
   // the shopper still has a cart and is expected to retry against the refreshed totals.
   it('keeps the cart cookie when the submit bounces on CART_CHANGED', async () => {

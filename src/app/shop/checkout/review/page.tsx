@@ -1,6 +1,7 @@
 'use client';
 
 import { useCart } from '@/context/CartContext';
+import { useShopper } from '@/context/ShopperContext';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { submitOrder, cancelCheckout, getCheckoutState } from '@/app/shop/cart-actions';
@@ -9,9 +10,29 @@ import { CartChangedBanner } from '@/components/CartChangedBanner';
 import { cartLineLabel } from '@/app/shop/cart-line-display';
 import type { Cart } from '@/temporal/contracts';
 
+/**
+ * Machine codes that carry no wording of their own, because until recently they could not
+ * reach a shopper: `CART_CHANGED` had no UI path to fire from (#17), and the identity refusals
+ * did not exist (#16). Everything NOT in this table is already a domain sentence and renders
+ * verbatim (`926a323`).
+ */
+const SHOPPER_SENTENCES: Record<string, string> = {
+  CART_CHANGED:
+    'Your cart changed while you were reviewing. We refreshed the totals — please check them and place your order again.',
+  SIGNED_OUT:
+    'You have been signed out, and this cart belongs to a signed-in shopper. Sign back in to place the order.',
+  SIGNED_IN_AS_OTHER:
+    'This cart belongs to a different account. Sign in as that shopper to place the order, or cancel checkout and start a new cart.',
+};
+
 export default function ReviewPage() {
   const router = useRouter();
   const { cart, cartId, resolved, refreshCart, clearCart } = useCart();
+  // `loading` matters as much as `shopper` here: until the session lookup resolves, `shopper`
+  // is null for a signed-IN visitor too, and treating "not yet known" as "signed out" would
+  // flash a sign-in wall at every shopper on every render. Same distinction #12 drew between
+  // `loading` and `resolved` for the cart.
+  const { shopper, loading: shopperLoading } = useShopper();
   const [checkoutState, setCheckoutState] = useState<Cart.CheckoutState | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -78,11 +99,7 @@ export default function ReviewPage() {
         // CART_CHANGED is a machine code, not a sentence, and until #17 it could never reach a
         // shopper — the UI never armed the guard. Now that it can, give it words. Everything
         // else is already a domain sentence and renders verbatim (926a323).
-        setError(
-          finalState.error === 'CART_CHANGED'
-            ? 'Your cart changed while you were reviewing. We refreshed the totals — please check them and place your order again.'
-            : finalState.error,
-        );
+        setError(SHOPPER_SENTENCES[finalState.error] ?? finalState.error);
         setIsSubmitting(false);
         refreshCart();
       } else {
@@ -147,6 +164,12 @@ export default function ReviewPage() {
       </div>
     );
   }
+
+  // The cart is LINKED and nobody who can claim it is here. Guest carts (no `userId`) are
+  // deliberately exempt — sessionless checkout is a feature, not the defect (#16). Held back
+  // until the session lookup resolves so a signed-in shopper never sees this flash.
+  const identityBlocked =
+    !shopperLoading && !!cart.userId && (!shopper || shopper.id !== cart.userId);
 
   const shipping = checkoutState.shippingAddress;
   const payment = checkoutState.paymentMethod;
@@ -262,14 +285,25 @@ export default function ReviewPage() {
 
         {/* Actions */}
         <div className="space-y-3">
+          {identityBlocked && (
+            <div className="rounded-xl border border-[var(--warning)] bg-[var(--warning)]/10 p-4 text-sm">
+              <p className="font-semibold">You are signed out</p>
+              <p className="mt-1">
+                This cart belongs to {cart.email ?? 'a signed-in shopper'}. Sign back in to place
+                the order, or cancel checkout and start a guest cart.
+              </p>
+            </div>
+          )}
           <button
             onClick={handlePlaceOrder}
-            disabled={isSubmitting || isCancelling}
+            disabled={isSubmitting || isCancelling || identityBlocked}
             className="w-full bg-[var(--success)] hover:bg-[var(--success)]/90 text-white py-4 rounded-xl font-semibold transition-colors disabled:opacity-50"
           >
             {isSubmitting
               ? 'Processing...'
-              : `Place Order — $${(cart.totalPrice / 100).toFixed(2)}`}
+              : identityBlocked
+                ? 'Sign in to place this order'
+                : `Place Order — $${(cart.totalPrice / 100).toFixed(2)}`}
           </button>
 
           <button

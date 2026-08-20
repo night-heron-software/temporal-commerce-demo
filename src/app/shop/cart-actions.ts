@@ -422,12 +422,48 @@ export async function setPaymentMethod(
  * never fire from the one surface it protects, and an order placed against an unacknowledged
  * cart change looked identical to a clean one.
  */
+/**
+ * Does the visitor still hold the identity this cart was placed under?
+ *
+ * The cart cookie is the journey's credential, and sign-out does not touch it — so a
+ * signed-out browser could place an order that landed attributed to the linked shopper
+ * (backlog #16, run -009 F-1). GUEST CHECKOUT IS NOT THE BUG: a cart with no `userId` is a
+ * genuine guest cart and must check out without a session, which is why the gate keys on the
+ * cart's own linkage rather than on the presence of a session.
+ *
+ * Post-#11 (`fc37ba9`) every cart created while signed in is linked at the creation seam, so
+ * this covers essentially all signed-in journeys.
+ *
+ * Returns null when the submit may proceed, or the reason it may not. Signing in as a
+ * DIFFERENT shopper is refused for the same reason as signing out: the order would be
+ * attributed to someone who is not at the keyboard.
+ */
+async function checkoutIdentityRefusal(
+  cartId: string,
+): Promise<'SIGNED_OUT' | 'SIGNED_IN_AS_OTHER' | null> {
+  const cart = await getCart(cartId);
+  if (!cart?.userId) return null; // genuine guest cart — sessionless checkout is the feature
+  const shopper = await getSignedInShopper();
+  if (!shopper) return 'SIGNED_OUT';
+  return shopper.id === cart.userId ? null : 'SIGNED_IN_AS_OTHER';
+}
+
 export async function submitOrder(
   cartId: string,
   reviewedCartVersion?: number,
 ): Promise<Cart.CheckoutState | null> {
   const checkoutWfId = await getCheckoutWorkflowId(cartId);
   if (!checkoutWfId) return null;
+
+  // The credential boundary is HERE, in the action — not in the button. A hidden or disabled
+  // Place Order is a courtesy; this is the check that actually holds, and it runs before the
+  // update reaches the workflow so no payment or order write is attempted (#16).
+  const refusal = await checkoutIdentityRefusal(cartId);
+  if (refusal) {
+    log.warn({ correlationId: cartId, cartId, refusal }, 'checkout refused: identity mismatch');
+    const current = await getCheckoutState(cartId);
+    return { ...(current ?? ({} as Cart.CheckoutState)), error: refusal };
+  }
   const state = (await executeCheckoutUpdate(checkoutWfId, Checkout.submitOrderUpdate, [
     { reviewedCartVersion },
   ])) as Cart.CheckoutState | null;
