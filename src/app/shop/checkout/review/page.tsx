@@ -58,18 +58,31 @@ export default function ReviewPage() {
   }, [resolved, cart, router]);
 
   const handlePlaceOrder = async () => {
-    if (!cartId) return;
+    // `cart` is required as well as `cartId`: the submit is guarded by the version this page
+    // rendered, and there is no version without the cart it came from.
+    if (!cartId || !cart) return;
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const finalState = await submitOrder(cartId);
+      // Submit against the version THIS PAGE RENDERED (#17). `cart` is the object the summary
+      // below is drawn from, so `cart.cartVersion` is by construction what the shopper reviewed.
+      // Re-reading it inside the action would compare the live cart to itself and the guard
+      // could never fire.
+      const finalState = await submitOrder(cartId, cart.cartVersion);
 
       if (finalState?.step === 'complete' && finalState.order) {
         clearCart();
         router.push(`/shop/checkout/confirmation?order=${finalState.order.confirmationNumber}`);
       } else if (finalState?.error) {
-        setError(finalState.error);
+        // CART_CHANGED is a machine code, not a sentence, and until #17 it could never reach a
+        // shopper — the UI never armed the guard. Now that it can, give it words. Everything
+        // else is already a domain sentence and renders verbatim (926a323).
+        setError(
+          finalState.error === 'CART_CHANGED'
+            ? 'Your cart changed while you were reviewing. We refreshed the totals — please check them and place your order again.'
+            : finalState.error,
+        );
         setIsSubmitting(false);
         refreshCart();
       } else {

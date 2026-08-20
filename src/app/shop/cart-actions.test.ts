@@ -330,8 +330,45 @@ describe('submitOrder', () => {
     expect(await submitOrder(CART_ID)).toEqual({ step: 'complete' });
     expect(cookieStore.deleted).toEqual(['cartId']);
     expect(handles['ck-1'].executeUpdate).toHaveBeenCalledWith(Checkout.submitOrderUpdate, {
-      args: [{}],
+      args: [{ reviewedCartVersion: undefined }],
     });
+  });
+
+  // ── The UI submit must carry the version it rendered (#17 / run -009 F-2) ──────────
+  // The checkout machine's price-integrity guard reads `reviewedCartVersion` and bounces
+  // CART_CHANGED when the live cart has moved on. It was proven by CLI and dead in practice:
+  // this action sent `{}`, so the guard could never fire from the surface it protects. Run
+  // -009 placed an order against an unacknowledged cart change through exactly that hole.
+  it('forwards the reviewed cart version into the update input', async () => {
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].query.mockResolvedValue('ck-1');
+    workflow.getHandle('ck-1');
+    handles['ck-1'].executeUpdate.mockResolvedValueOnce({ step: 'complete' });
+
+    await submitOrder(CART_ID, 7);
+
+    expect(handles['ck-1'].executeUpdate).toHaveBeenCalledWith(Checkout.submitOrderUpdate, {
+      args: [{ reviewedCartVersion: 7 }],
+    });
+  });
+
+  // A CART_CHANGED bounce is a RETURNED state, not a throw, so the cookie must survive it —
+  // the shopper still has a cart and is expected to retry against the refreshed totals.
+  it('keeps the cart cookie when the submit bounces on CART_CHANGED', async () => {
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].query.mockResolvedValue('ck-1');
+    workflow.getHandle('ck-1');
+    handles['ck-1'].executeUpdate.mockResolvedValueOnce({
+      step: 'review',
+      error: 'CART_CHANGED',
+    });
+
+    expect(await submitOrder(CART_ID, 2)).toEqual({ step: 'review', error: 'CART_CHANGED' });
+    expect(cookieStore.deleted).toEqual([]);
   });
 
   // ── The cookie must not outlive its cart (#10 / run -008 F-2) ──────────────────────

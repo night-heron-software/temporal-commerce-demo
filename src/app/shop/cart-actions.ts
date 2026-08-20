@@ -407,11 +407,29 @@ export async function setPaymentMethod(
   ]) as Promise<Cart.CheckoutState | null>;
 }
 
-export async function submitOrder(cartId: string): Promise<Cart.CheckoutState | null> {
+/**
+ * Place the order.
+ *
+ * `reviewedCartVersion` is the cartVersion the SHOPPER'S REVIEW WAS RENDERED FROM, and passing
+ * it is what arms the checkout machine's price-integrity guard: if the live cart has moved on,
+ * `submitOrderBlock` returns `CART_CHANGED` before any payment or order write. Callers must pass
+ * the version they actually rendered — reading it fresh here would compare the live cart against
+ * itself and guarantee a match, which is the guard defeating itself.
+ *
+ * It is optional only because the machine treats it as optional (`!= null`), and omitting it is a
+ * deliberate "submit whatever is current" — used by scripts, not by the shopper path. Backlog #17
+ * (run -009 F-2) was exactly this: the review page omitted it, so the guard existed but could
+ * never fire from the one surface it protects, and an order placed against an unacknowledged
+ * cart change looked identical to a clean one.
+ */
+export async function submitOrder(
+  cartId: string,
+  reviewedCartVersion?: number,
+): Promise<Cart.CheckoutState | null> {
   const checkoutWfId = await getCheckoutWorkflowId(cartId);
   if (!checkoutWfId) return null;
   const state = (await executeCheckoutUpdate(checkoutWfId, Checkout.submitOrderUpdate, [
-    {},
+    { reviewedCartVersion },
   ])) as Cart.CheckoutState | null;
 
   if (state?.step === 'complete') {
