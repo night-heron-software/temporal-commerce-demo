@@ -58,6 +58,19 @@ export interface StateOutput<TState extends string, TContext, TResponse> {
    * interceptor; absent for raw states.
    */
   activities?: { prepare: ActivityCall[]; finalize: ActivityCall[] };
+  /**
+   * NOTHING HAPPENED: the state's timer elapsed and `onTimeout` synthesized no command
+   * (returned null), so no command ran, no context changed, and the state is unchanged.
+   * The driver skips `onTransition` AND transition recording — an idle tick is not a
+   * transition, exactly as a rejection is not one.
+   *
+   * Set only by the machine compiler's timeout arm. It is a FACT reported by the state
+   * function, deliberately not inferred by the driver from "same state + timeout input":
+   * a timeout that DOES synthesize a command may legitimately route back to SELF while
+   * mutating context (`'*': SELF` is a common route), and that is a real transition whose
+   * effects must run. Inferring conflated the two (backlog #18).
+   */
+  idle?: boolean;
 }
 
 export type StateFunction<TState extends string, TEvent, TContext, TResponse, TSignal = never> = (

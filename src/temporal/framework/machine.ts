@@ -316,7 +316,10 @@ function compileMachineState<
     if (input.kind === 'timeout') {
       const synthesized = def.onTimeout ? def.onTimeout(ctx) : null;
       if (synthesized === null || synthesized === undefined) {
-        return { context: ctx as TContext, next: self }; // idle tick — driver skips recording
+        // Idle tick: nothing to do. Flagged so the driver skips BOTH recording and the
+        // onTransition hook — a no-op that fires effects is how a parked manual-mode order
+        // came to re-signal its unchanged status every 15 s (backlog #18).
+        return { context: ctx as TContext, next: self, idle: true };
       }
       command = synthesized;
     } else {
