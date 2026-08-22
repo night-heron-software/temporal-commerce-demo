@@ -69,7 +69,6 @@ import type {
   EvolveMap as FrameworkEvolveMap,
   MachineDecider,
   Rejection,
-  Self,
   StateRegistry,
 } from '../framework';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
@@ -258,8 +257,6 @@ function evolveCartAbandoned(
 type EvolveMap = FrameworkEvolveMap<CartEvent, CartWorkflowContext>;
 
 /** Where an event may take the machine: a state name, a terminal, or an explicit stay. */
-type RouteTarget = CartStateName | `__terminal:${string}` | Self;
-
 /** One command's whole story: refusal, I/O, decision, destination, and the evolve for what it emits. */
 export type CommandBlock<K extends CartCommand['type']> = FrameworkCommandBlock<
   CartWorkflowContext,

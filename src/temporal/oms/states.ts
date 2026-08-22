@@ -1249,36 +1249,36 @@ const aggregateCommands = {
   fulfillmentStatus: fulfillmentStatusBlock,
 };
 const deliveredCommands = {
-    submitFeedback: submitFeedbackBlock,
-    // The updateStatus block with TWO phases replaced: this state's refundability guard
-    // (demo divergence: `guardDeliveredUpdateStatus`) and an `enrich` that normalizes a
-    // 'refunded' status into a real `refundOrder` command. Everything else — decide,
-    // evolve — is the block's, which is what the spread says.
-    //
-    // Ported from mono #270 (`f0648dc0`). This was a bare `{ guard, enrich }` literal whose
-    // own comment said it was "spelled as a literal so the diagram generator resolves the
-    // guard" — a workaround for one generator limitation that created a worse one: emissions
-    // derive from the handler's evolve map, the literal carried none, and the generated
-    // diagram rendered this command as "(no events — idempotent no-op)" when it can force
-    // many statuses. A bare literal is now reserved for its honest meaning — "deliberately
-    // NOT the block", as cart's `beginCheckout: {}` uses it.
-    //
-    // Accepted imprecision: the render lists `OrderRefunded` under this command, which
-    // `enrich` actually diverts to `refundOrder`. The outcome is right; only the mechanism
-    // is indirect. Naming one edge by its effect beats silently omitting the rest.
-    updateStatus: {
-      ...updateStatusBlock,
-      guard: guardDeliveredUpdateStatus,
-      // Params are annotated because this table is now a hoisted const (ADR-0026 needs one
-      // literal shared by `commands` and `deriveRoutes`), so it no longer gets its types
-      // contextually from the `m.state` call.
-      enrich: (command: Wire<'updateStatus'>, _prepared: unknown, meta: InputMeta) =>
-        command.status === 'refunded'
-          ? { type: 'refundOrder' as const, reason: command.note, at: meta.timestamp }
-          : { ...command, at: meta.timestamp },
-    },
-    refundOrder: refundOrderBlock,
-    requestReturn: requestReturnBlock,
+  submitFeedback: submitFeedbackBlock,
+  // The updateStatus block with TWO phases replaced: this state's refundability guard
+  // (demo divergence: `guardDeliveredUpdateStatus`) and an `enrich` that normalizes a
+  // 'refunded' status into a real `refundOrder` command. Everything else — decide,
+  // evolve — is the block's, which is what the spread says.
+  //
+  // Ported from mono #270 (`f0648dc0`). This was a bare `{ guard, enrich }` literal whose
+  // own comment said it was "spelled as a literal so the diagram generator resolves the
+  // guard" — a workaround for one generator limitation that created a worse one: emissions
+  // derive from the handler's evolve map, the literal carried none, and the generated
+  // diagram rendered this command as "(no events — idempotent no-op)" when it can force
+  // many statuses. A bare literal is now reserved for its honest meaning — "deliberately
+  // NOT the block", as cart's `beginCheckout: {}` uses it.
+  //
+  // Accepted imprecision: the render lists `OrderRefunded` under this command, which
+  // `enrich` actually diverts to `refundOrder`. The outcome is right; only the mechanism
+  // is indirect. Naming one edge by its effect beats silently omitting the rest.
+  updateStatus: {
+    ...updateStatusBlock,
+    guard: guardDeliveredUpdateStatus,
+    // Params are annotated because this table is now a hoisted const (ADR-0026 needs one
+    // literal shared by `commands` and `deriveRoutes`), so it no longer gets its types
+    // contextually from the `m.state` call.
+    enrich: (command: Wire<'updateStatus'>, _prepared: unknown, meta: InputMeta) =>
+      command.status === 'refunded'
+        ? { type: 'refundOrder' as const, reason: command.note, at: meta.timestamp }
+        : { ...command, at: meta.timestamp },
+  },
+  refundOrder: refundOrderBlock,
+  requestReturn: requestReturnBlock,
 };
 
 const returnRequestedCommands = {

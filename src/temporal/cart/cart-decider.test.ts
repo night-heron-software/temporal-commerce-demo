@@ -735,7 +735,8 @@ describe('deriveRoutes — the three laws', () => {
     // exactly what the deleted literal said. Kept permanently here (the mono deleted its
     // transitional equivalents at the flip; this one doubles as the port record).
     expect(
-      deriveRoutes('cart', 
+      deriveRoutes(
+        'cart',
         {
           addItem: addItemBlock,
           updateQuantity: updateQuantityBlock,
@@ -753,7 +754,8 @@ describe('deriveRoutes — the three laws', () => {
       '*': '__self',
     });
     expect(
-      deriveRoutes('cart', 
+      deriveRoutes(
+        'cart',
         {
           addItem: addItemBlock,
           updateQuantity: updateQuantityBlock,
