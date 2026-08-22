@@ -34,8 +34,14 @@ import type {
   FulfillmentFulfillerOrderState,
 } from './types';
 import type { FulfillmentResult } from './definitions';
+import { assembleEvolve } from '../framework';
 import { defineMachine, terminal, SELF } from '../framework';
-import type { MachineDecider, Rejection, StateRegistry } from '../framework';
+import type {
+  CommandBlock as FrameworkCommandBlock,
+  EvolveMap as FrameworkEvolveMap,
+  MachineDecider,
+  StateRegistry,
+} from '../framework';
 
 // ==================
 // Commands and events — the machine's whole vocabulary
@@ -62,8 +68,6 @@ type Timestamped<K extends FulfillmentCommand['type']> = Extract<
 >;
 
 /** One member of the event union, by its `type` tag. */
-type Ev<K extends FulfillmentEvent['type']> = Extract<FulfillmentEvent, { type: K }>;
-
 // ==================
 // Pure aggregation helpers — no I/O, no side effects. `aggregateStatus` is exported for
 // direct unit testing (`fulfillment-decider.test.ts`).
@@ -100,26 +104,17 @@ export function aggregateStatus(
  * command: one command may emit several event types. The machine's single
  * `evolve(context, event)` is assembled by merging every block's map.
  */
-type EvolveMap = {
-  [E in FulfillmentEvent['type']]?: (
-    context: Readonly<FulfillmentWorkflowState>,
-    event: Ev<E>,
-  ) => FulfillmentWorkflowState;
-};
+type EvolveMap = FrameworkEvolveMap<FulfillmentEvent, FulfillmentWorkflowState>;
 
 /** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
-export interface CommandBlock<K extends FulfillmentCommand['type']> {
-  guard?: (context: Readonly<FulfillmentWorkflowState>, command: Wire<K>) => Rejection | void;
-  prepare?: (
-    context: Readonly<FulfillmentWorkflowState>,
-    command: Wire<K>,
-  ) => Promise<object | void>;
-  decide: (
-    command: Timestamped<K>,
-    context: Readonly<FulfillmentWorkflowState>,
-  ) => FulfillmentEvent[];
-  evolve?: EvolveMap;
-}
+export type CommandBlock<K extends FulfillmentCommand['type']> = FrameworkCommandBlock<
+  FulfillmentWorkflowState,
+  Wire<K>,
+  Timestamped<K>,
+  FulfillmentEvent,
+  FulfillmentStateName,
+  FulfillmentResult
+>;
 
 // ==================
 // Command: beginProduction — the whole story (synthesized by the transitional
@@ -225,33 +220,7 @@ type AnyEvolveEntry = (
   event: FulfillmentEvent,
 ) => FulfillmentWorkflowState;
 
-/**
- * Merge every block's evolve map into the machine's single event → entry table.
- * Duplicate keys must be the IDENTICAL function reference — two blocks inlining
- * different code for one event throws here, at module load, so shared events cannot
- * silently diverge.
- */
-function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
-  const merged: EvolveMap = {};
-  for (const block of blockList) {
-    if (!block.evolve) continue;
-    for (const type of Object.keys(block.evolve) as FulfillmentEvent['type'][]) {
-      const entry = block.evolve[type];
-      if (!entry) continue;
-      const existing = merged[type];
-      if (existing && existing !== entry) {
-        throw new Error(
-          `fulfillment evolve assembly: event '${type}' has two different evolve entries — ` +
-            'share one named evolve function between the blocks instead',
-        );
-      }
-      (merged as Record<FulfillmentEvent['type'], unknown>)[type] = entry;
-    }
-  }
-  return merged;
-}
-
-const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+const evolveByEvent: EvolveMap = assembleEvolve('fulfillment', Object.values(blocks));
 
 /**
  * decide(command, context) → events. Pure: emits the events implied by the command in the

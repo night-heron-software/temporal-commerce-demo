@@ -6,7 +6,6 @@ import { describe, it, expect } from 'vitest';
 // entries are exercised directly in addition to the assembled dispatchers.
 import {
   decide,
-  deriveRoutes,
   evolve,
   cartDecider,
   addItemBlock,
@@ -24,6 +23,7 @@ import {
 import type { CartEvent, EnrichedCartCommand } from './states';
 import type { CartDetails, CartWorkflowContext, CheckoutWorkflowResult } from './types';
 import { terminal } from '../framework';
+import { deriveRoutes } from '../framework';
 
 // ── Builders ────────────────────────────────────────────────────────────────
 function makeCart(overrides: Partial<CartDetails> = {}): CartDetails {
@@ -721,7 +721,7 @@ describe('deriveRoutes — the three laws', () => {
     // CartAbandoned is declared by three blocks; CheckoutEntered by one. Value-equal
     // duplicates are the premise: an event's destination is a machine-global fact.
     expect(
-      deriveRoutes({
+      deriveRoutes('cart', {
         updateQuantity: updateQuantityBlock,
         removeItem: removeItemBlock,
         expireCart: expireCartBlock,
@@ -735,7 +735,7 @@ describe('deriveRoutes — the three laws', () => {
     // exactly what the deleted literal said. Kept permanently here (the mono deleted its
     // transitional equivalents at the flip; this one doubles as the port record).
     expect(
-      deriveRoutes(
+      deriveRoutes('cart', 
         {
           addItem: addItemBlock,
           updateQuantity: updateQuantityBlock,
@@ -753,7 +753,7 @@ describe('deriveRoutes — the three laws', () => {
       '*': '__self',
     });
     expect(
-      deriveRoutes(
+      deriveRoutes('cart', 
         {
           addItem: addItemBlock,
           updateQuantity: updateQuantityBlock,
@@ -779,7 +779,7 @@ describe('deriveRoutes — the three laws', () => {
 
   it('throws when two blocks give one event different destinations', () => {
     expect(() =>
-      deriveRoutes({
+      deriveRoutes('cart', {
         a: { routes: { CheckoutEntered: 'checkout' } },
         b: { routes: { CheckoutEntered: 'active' } },
       }),
@@ -788,11 +788,11 @@ describe('deriveRoutes — the three laws', () => {
 
   it('throws when extras try to REDIRECT rather than weaken to SELF', () => {
     expect(() =>
-      deriveRoutes({ beginCheckout: beginCheckoutBlock }, { CheckoutEntered: 'active' }),
+      deriveRoutes('cart', { beginCheckout: beginCheckoutBlock }, { CheckoutEntered: 'active' }),
     ).toThrow(/may only weaken to SELF/);
   });
 
   it('throws when a state with commands derives an empty table', () => {
-    expect(() => deriveRoutes({ beginCheckout: {} })).toThrow(/empty route table/);
+    expect(() => deriveRoutes('cart', { beginCheckout: {} })).toThrow(/empty route table/);
   });
 });

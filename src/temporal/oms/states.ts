@@ -71,8 +71,16 @@ import type {
   ReturnRequestRecord,
 } from './types';
 import { buildFulfillerOrderDocument } from './document-builder';
+import { assembleEvolve } from '../framework';
 import { defineMachine, terminal, SELF, reject, workflowCorrelationId } from '../framework';
-import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
+import type {
+  CommandBlock as FrameworkCommandBlock,
+  EffectsMap,
+  EvolveMap as FrameworkEvolveMap,
+  MachineDecider,
+  Rejection,
+  StateRegistry,
+} from '../framework';
 
 // ==================
 // Commands and events — the machine's whole vocabulary
@@ -487,17 +495,17 @@ function evolveOrderRefunded(
  * commands (those reference one shared evolve function instead of inlining twice). The
  * machine's single `evolve(context, event)` is assembled by merging every block's map.
  */
-type EvolveMap = {
-  [E in OrderEvent['type']]?: (context: Readonly<OrderState>, event: Ev<E>) => OrderState;
-};
+type EvolveMap = FrameworkEvolveMap<OrderEvent, OrderState>;
 
 /** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
-export interface CommandBlock<K extends OrderCommand['type']> {
-  guard?: (context: Readonly<OrderState>, command: Wire<K>) => Rejection | void;
-  prepare?: (context: Readonly<OrderState>, command: Wire<K>) => Promise<object | void>;
-  decide: (command: Enriched<K>, context: Readonly<OrderState>) => OrderEvent[];
-  evolve?: EvolveMap;
-}
+export type CommandBlock<K extends OrderCommand['type']> = FrameworkCommandBlock<
+  OrderState,
+  Wire<K>,
+  Enriched<K>,
+  OrderEvent,
+  OrderStateName,
+  OrderState
+>;
 
 // ==================
 // Command: capturePayment — transitional intake 1/3. A pure hop — the mono decides the
@@ -986,33 +994,7 @@ type AnyDecide = (command: EnrichedOrderCommand, context: Readonly<OrderState>) 
 /** An evolve entry, widened for dispatch (the assembled map keys guarantee the match). */
 type AnyEvolveEntry = (context: Readonly<OrderState>, event: OrderEvent) => OrderState;
 
-/**
- * Merge every block's evolve map into the machine's single event → entry table.
- * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
- * above) — two blocks inlining different code for one event throws here, at module
- * load, so shared events cannot silently diverge.
- */
-function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
-  const merged: EvolveMap = {};
-  for (const block of blockList) {
-    if (!block.evolve) continue;
-    for (const type of Object.keys(block.evolve) as OrderEvent['type'][]) {
-      const entry = block.evolve[type];
-      if (!entry) continue;
-      const existing = merged[type];
-      if (existing && existing !== entry) {
-        throw new Error(
-          `oms evolve assembly: event '${type}' has two different evolve entries — ` +
-            'share one named evolve function between the blocks instead',
-        );
-      }
-      (merged as Record<OrderEvent['type'], unknown>)[type] = entry;
-    }
-  }
-  return merged;
-}
-
-const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+const evolveByEvent: EvolveMap = assembleEvolve('oms', Object.values(blocks));
 
 /**
  * decide(command, context) → events.

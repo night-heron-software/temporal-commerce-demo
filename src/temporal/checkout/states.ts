@@ -58,8 +58,15 @@ import type {
   CheckoutContext,
   CheckoutStateName,
 } from './types';
+import { assembleEvolve } from '../framework';
 import { defineMachine, terminal, SELF } from '../framework';
-import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
+import type {
+  CommandBlock as FrameworkCommandBlock,
+  EffectsMap,
+  EvolveMap as FrameworkEvolveMap,
+  MachineDecider,
+  StateRegistry,
+} from '../framework';
 
 // ==================
 // Commands and events — the machine's whole vocabulary
@@ -203,20 +210,17 @@ function evolveCancelled(
  * commands (those reference one shared evolve function instead of inlining twice). The
  * machine's single `evolve(context, event)` is assembled by merging every block's map.
  */
-type EvolveMap = {
-  [E in CheckoutEvent['type']]?: (
-    context: Readonly<CheckoutContext>,
-    event: Ev<E>,
-  ) => CheckoutContext;
-};
+type EvolveMap = FrameworkEvolveMap<CheckoutEvent, CheckoutContext>;
 
 /** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
-export interface CommandBlock<K extends CheckoutCommand['type']> {
-  guard?: (context: Readonly<CheckoutContext>, command: Wire<K>) => Rejection | void;
-  prepare?: (context: Readonly<CheckoutContext>, command: Wire<K>) => Promise<object | void>;
-  decide: (command: Cmd<K>, context: Readonly<CheckoutContext>) => CheckoutEvent[];
-  evolve?: EvolveMap;
-}
+export type CommandBlock<K extends CheckoutCommand['type']> = FrameworkCommandBlock<
+  CheckoutContext,
+  Wire<K>,
+  Cmd<K>,
+  CheckoutEvent,
+  CheckoutStateName,
+  CheckoutState
+>;
 
 // ==================
 // Command: validate — the whole story. Pull authoritative cart contents live (no
@@ -699,33 +703,7 @@ type AnyDecide = (
 /** An evolve entry, widened for dispatch (the assembled map keys guarantee the match). */
 type AnyEvolveEntry = (context: Readonly<CheckoutContext>, event: CheckoutEvent) => CheckoutContext;
 
-/**
- * Merge every block's evolve map into the machine's single event → entry table.
- * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
- * above) — two blocks inlining different code for one event throws here, at module
- * load, so shared events cannot silently diverge.
- */
-function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
-  const merged: EvolveMap = {};
-  for (const block of blockList) {
-    if (!block.evolve) continue;
-    for (const type of Object.keys(block.evolve) as CheckoutEvent['type'][]) {
-      const entry = block.evolve[type];
-      if (!entry) continue;
-      const existing = merged[type];
-      if (existing && existing !== entry) {
-        throw new Error(
-          `checkout evolve assembly: event '${type}' has two different evolve entries — ` +
-            'share one named evolve function between the blocks instead',
-        );
-      }
-      (merged as Record<CheckoutEvent['type'], unknown>)[type] = entry;
-    }
-  }
-  return merged;
-}
-
-const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+const evolveByEvent: EvolveMap = assembleEvolve('checkout', Object.values(blocks));
 
 /**
  * decide(command, context) → events. Pure. This is a thin dispatcher: each command's

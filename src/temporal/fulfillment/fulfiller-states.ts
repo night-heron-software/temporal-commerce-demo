@@ -36,8 +36,15 @@
 import * as wf from '@temporalio/workflow';
 import type { Fulfillers, Fulfillment } from '../contracts';
 import { parseWorkflowId } from '../contracts/constants';
+import { assembleEvolve } from '../framework';
 import { defineMachine, terminal, SELF } from '../framework';
-import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
+import type {
+  CommandBlock as FrameworkCommandBlock,
+  EffectsMap,
+  EvolveMap as FrameworkEvolveMap,
+  MachineDecider,
+  StateRegistry,
+} from '../framework';
 import type { FulfillmentFulfillerOrderState, ShipmentInfo } from './types';
 import {
   submitFulfillerOrder,
@@ -272,26 +279,16 @@ function evolveCancelled(
  * commands (those reference one shared evolve function instead of inlining twice). The
  * machine's single `evolve(context, event)` is assembled by merging every block's map.
  */
-type EvolveMap = {
-  [E in FulfillerEvent['type']]?: (
-    context: Readonly<FulfillerOrderWorkflowContext>,
-    event: Ev<E>,
-  ) => FulfillerOrderWorkflowContext;
-};
+type EvolveMap = FrameworkEvolveMap<FulfillerEvent, FulfillerOrderWorkflowContext>;
 
 /** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
-export interface CommandBlock<K extends FulfillerOrderCommand['type']> {
-  guard?: (context: Readonly<FulfillerOrderWorkflowContext>, command: Wire<K>) => Rejection | void;
-  prepare?: (
-    context: Readonly<FulfillerOrderWorkflowContext>,
-    command: Wire<K>,
-  ) => Promise<object | void>;
-  decide: (
-    command: Enriched<K>,
-    context: Readonly<FulfillerOrderWorkflowContext>,
-  ) => FulfillerEvent[];
-  evolve?: EvolveMap;
-}
+export type CommandBlock<K extends FulfillerOrderCommand['type']> = FrameworkCommandBlock<
+  FulfillerOrderWorkflowContext,
+  Wire<K>,
+  Enriched<K>,
+  FulfillerEvent,
+  FulfillerOrderStateName
+>;
 
 // ==================
 // Command: beginSubmit — the whole story (synthesized by the `received` hop; marks the
@@ -516,33 +513,7 @@ type AnyEvolveEntry = (
   event: FulfillerEvent,
 ) => FulfillerOrderWorkflowContext;
 
-/**
- * Merge every block's evolve map into the machine's single event → entry table.
- * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
- * above) — two blocks inlining different code for one event throws here, at module
- * load, so shared events cannot silently diverge.
- */
-function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
-  const merged: EvolveMap = {};
-  for (const block of blockList) {
-    if (!block.evolve) continue;
-    for (const type of Object.keys(block.evolve) as FulfillerEvent['type'][]) {
-      const entry = block.evolve[type];
-      if (!entry) continue;
-      const existing = merged[type];
-      if (existing && existing !== entry) {
-        throw new Error(
-          `fulfiller-order evolve assembly: event '${type}' has two different evolve entries — ` +
-            'share one named evolve function between the blocks instead',
-        );
-      }
-      (merged as Record<FulfillerEvent['type'], unknown>)[type] = entry;
-    }
-  }
-  return merged;
-}
-
-const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+const evolveByEvent: EvolveMap = assembleEvolve('fulfiller', Object.values(blocks));
 
 /**
  * decide(command, context) → events. Pure: emits the events implied by the command, and

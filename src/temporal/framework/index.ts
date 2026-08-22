@@ -18,3 +18,6 @@ export type {
   EventRoute,
   Rejection,
 } from './machine';
+// The CommandBlock authoring surface (ADR-0024) and its two assemblers (ADR-0026).
+export { deriveRoutes, assembleEvolve } from './command-block';
+export type { CommandBlock, RouteMap, RouteTarget, EvolveMap } from './command-block';
