@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
+import { deriveRoutes, terminal, SELF } from '../framework';
+
 // Pure Functional Core: no Temporal sandbox, no activity mocks. The per-command blocks
 // are exported structures, so each command's decide / evolve entries are exercised
 // directly in addition to the assembled dispatchers.
@@ -369,5 +371,77 @@ describe('a fulfiller-reported failure keeps its reason (#269 port)', () => {
     expect(events.every((e) => (e as { errorMessage?: string }).errorMessage === undefined)).toBe(
       true,
     );
+  });
+});
+
+// ==================
+// deriveRoutes equivalence pin (ADR-0026) — the port's permanent proof.
+// ==================
+
+describe('deriveRoutes — the port is a no-op', () => {
+  it('received and submitting derive their old literals exactly', () => {
+    expect(
+      deriveRoutes('fulfiller', { beginSubmit: beginSubmitBlock, cancel: cancelBlock }),
+    ).toEqual({ SubmissionStarted: 'submitting', Cancelled: terminal('cancelled') });
+    expect(deriveRoutes('fulfiller', { submitted: submittedBlock, cancel: cancelBlock })).toEqual({
+      OrderSubmitted: 'in_production',
+      Cancelled: terminal('cancelled'),
+    });
+  });
+
+  it('in_production derives the old literal exactly', () => {
+    expect(
+      deriveRoutes(
+        'fulfiller',
+        {
+          simulatedShip: simulatedShipBlock,
+          fulfillerStatus: fulfillerStatusBlock,
+          cancel: cancelBlock,
+        },
+        { '*': SELF },
+      ),
+    ).toEqual({
+      SimulatedShipped: 'shipped',
+      ShipmentProgressed: 'shipped',
+      DeliveryConfirmed: terminal('delivered'),
+      FulfillerOrderFailed: terminal('failed'),
+      Cancelled: terminal('cancelled'),
+      '*': SELF,
+    });
+  });
+
+  it('shipped derives the old literal exactly', () => {
+    expect(
+      deriveRoutes(
+        'fulfiller',
+        {
+          simulatedDeliver: simulatedDeliverBlock,
+          fulfillerStatus: fulfillerStatusBlock,
+          cancel: cancelBlock,
+        },
+        { '*': SELF },
+      ),
+    ).toEqual({
+      SimulatedDelivered: terminal('delivered'),
+      ShipmentProgressed: 'shipped',
+      DeliveryConfirmed: terminal('delivered'),
+      FulfillerOrderFailed: terminal('failed'),
+      Cancelled: terminal('cancelled'),
+      '*': SELF,
+    });
+  });
+
+  it('Cancelled from two blocks is a value-equal duplicate, not a conflict', () => {
+    // cancelBlock and fulfillerStatusBlock (via statusOutcome) both decide it; both say
+    // terminal('cancelled'), which is the premise derivation relies on.
+    expect(
+      deriveRoutes('fulfiller', { cancel: cancelBlock, fulfillerStatus: fulfillerStatusBlock })
+        .Cancelled,
+    ).toEqual(terminal('cancelled'));
+  });
+
+  it('leaves the FulfillerStatusApplied marker unrouted', () => {
+    const table = deriveRoutes('fulfiller', { fulfillerStatus: fulfillerStatusBlock });
+    expect('FulfillerStatusApplied' in table).toBe(false);
   });
 });

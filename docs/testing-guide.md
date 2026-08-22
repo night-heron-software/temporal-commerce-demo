@@ -30,7 +30,7 @@ level 1, which is why most of the suite needs nothing installed.
 ## Level 1 — pure decider tests
 
 Every domain's decision logic is a pure Chassaing decider
-([ADR-0009](adr/0009-chassaing-decider-split.md)): `decide(command, state) → facts`,
+([ADR-0009](adr/0009-chassaing-decider-transfer-pilot.md)): `decide(command, state) → facts`,
 `evolve(state, fact) → state`, no clock, no randomness, no I/O. Testing it needs no harness at
 all — [cart-decider.test.ts](../src/temporal/cart/cart-decider.test.ts) is the pattern:
 
@@ -114,7 +114,7 @@ Cassandra/Elasticsearch edges are canned.
 dead ends), every state is reachable from the initial state, every machine's initial state exists.
 Combined with the CI freshness gate (`npm run docs:diagrams:check`), this means an agent or human
 who adds an orphan state gets a failing build, not a quiet inconsistency — see
-[ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md) for why the graph is generated at
+[ADR-0003](adr/0003-prepare-decide-evolve-state-machines.md) for why the graph is generated at
 all.
 
 ## Where the seams are

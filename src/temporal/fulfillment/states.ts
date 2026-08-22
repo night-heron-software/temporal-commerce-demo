@@ -34,8 +34,14 @@ import type {
   FulfillmentFulfillerOrderState,
 } from './types';
 import type { FulfillmentResult } from './definitions';
+import { assembleEvolve, deriveRoutes } from '../framework';
 import { defineMachine, terminal, SELF } from '../framework';
-import type { MachineDecider, Rejection, StateRegistry } from '../framework';
+import type {
+  CommandBlock as FrameworkCommandBlock,
+  EvolveMap as FrameworkEvolveMap,
+  MachineDecider,
+  StateRegistry,
+} from '../framework';
 
 // ==================
 // Commands and events — the machine's whole vocabulary
@@ -62,8 +68,6 @@ type Timestamped<K extends FulfillmentCommand['type']> = Extract<
 >;
 
 /** One member of the event union, by its `type` tag. */
-type Ev<K extends FulfillmentEvent['type']> = Extract<FulfillmentEvent, { type: K }>;
-
 // ==================
 // Pure aggregation helpers — no I/O, no side effects. `aggregateStatus` is exported for
 // direct unit testing (`fulfillment-decider.test.ts`).
@@ -100,26 +104,17 @@ export function aggregateStatus(
  * command: one command may emit several event types. The machine's single
  * `evolve(context, event)` is assembled by merging every block's map.
  */
-type EvolveMap = {
-  [E in FulfillmentEvent['type']]?: (
-    context: Readonly<FulfillmentWorkflowState>,
-    event: Ev<E>,
-  ) => FulfillmentWorkflowState;
-};
+type EvolveMap = FrameworkEvolveMap<FulfillmentEvent, FulfillmentWorkflowState>;
 
 /** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
-export interface CommandBlock<K extends FulfillmentCommand['type']> {
-  guard?: (context: Readonly<FulfillmentWorkflowState>, command: Wire<K>) => Rejection | void;
-  prepare?: (
-    context: Readonly<FulfillmentWorkflowState>,
-    command: Wire<K>,
-  ) => Promise<object | void>;
-  decide: (
-    command: Timestamped<K>,
-    context: Readonly<FulfillmentWorkflowState>,
-  ) => FulfillmentEvent[];
-  evolve?: EvolveMap;
-}
+export type CommandBlock<K extends FulfillmentCommand['type']> = FrameworkCommandBlock<
+  FulfillmentWorkflowState,
+  Wire<K>,
+  Timestamped<K>,
+  FulfillmentEvent,
+  FulfillmentStateName,
+  FulfillmentResult
+>;
 
 // ==================
 // Command: beginProduction — the whole story (synthesized by the transitional
@@ -127,6 +122,7 @@ export interface CommandBlock<K extends FulfillmentCommand['type']> {
 // ==================
 
 export const beginProductionBlock: CommandBlock<'beginProduction'> = {
+  routes: { ProductionStarted: 'in_production' },
   decide: (command, context) =>
     context.status === 'received' ? [{ type: 'ProductionStarted', at: command.at }] : [],
 
@@ -141,6 +137,7 @@ export const beginProductionBlock: CommandBlock<'beginProduction'> = {
 // ==================
 
 export const cancelBlock: CommandBlock<'cancel'> = {
+  routes: { OrderCancelled: terminal('cancelled') },
   decide: (command, _context) => [{ type: 'OrderCancelled', at: command.at }],
 
   evolve: {
@@ -164,6 +161,13 @@ export const cancelBlock: CommandBlock<'cancel'> = {
 // ==================
 
 export const childStatusBlock: CommandBlock<'childStatus'> = {
+  // `ChildStatusApplied` is deliberately unrouted: it is the marker that a child update was
+  // applied, and the lifecycle outcome it implies is decided as a second event. Absence means
+  // "stays", which is what the state's `'*': SELF` extra says out loud.
+  routes: {
+    FulfillmentDelivered: terminal('delivered'),
+    FulfillmentFailed: terminal('failed'),
+  },
   decide: (command, context) => {
     const at = command.at;
     const events: FulfillmentEvent[] = [{ type: 'ChildStatusApplied', update: command.update, at }];
@@ -225,33 +229,7 @@ type AnyEvolveEntry = (
   event: FulfillmentEvent,
 ) => FulfillmentWorkflowState;
 
-/**
- * Merge every block's evolve map into the machine's single event → entry table.
- * Duplicate keys must be the IDENTICAL function reference — two blocks inlining
- * different code for one event throws here, at module load, so shared events cannot
- * silently diverge.
- */
-function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
-  const merged: EvolveMap = {};
-  for (const block of blockList) {
-    if (!block.evolve) continue;
-    for (const type of Object.keys(block.evolve) as FulfillmentEvent['type'][]) {
-      const entry = block.evolve[type];
-      if (!entry) continue;
-      const existing = merged[type];
-      if (existing && existing !== entry) {
-        throw new Error(
-          `fulfillment evolve assembly: event '${type}' has two different evolve entries — ` +
-            'share one named evolve function between the blocks instead',
-        );
-      }
-      (merged as Record<FulfillmentEvent['type'], unknown>)[type] = entry;
-    }
-  }
-  return merged;
-}
-
-const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+const evolveByEvent: EvolveMap = assembleEvolve('fulfillment', Object.values(blocks));
 
 /**
  * decide(command, context) → events. Pure: emits the events implied by the command in the
@@ -318,6 +296,12 @@ const m = defineMachine<
   FulfillmentResult
 >({ decider: fulfillmentDecider });
 
+// Each state's commands table is a named const shared with `deriveRoutes` (ADR-0026): the
+// route table is DERIVED from the blocks' own `routes` declarations, so a command's
+// destination lives beside the decide that emits it rather than 200 lines below.
+const receivedCommands = { beginProduction: beginProductionBlock };
+const inProductionCommands = { cancel: cancelBlock, childStatus: childStatusBlock };
+
 export const FULFILLMENT_STATES: StateRegistry<
   FulfillmentStateName,
   FulfillmentCommand,
@@ -326,19 +310,14 @@ export const FULFILLMENT_STATES: StateRegistry<
   FulfillmentCommand
 > = {
   received: m.state('received', {
-    commands: { beginProduction: beginProductionBlock },
-    route: { ProductionStarted: 'in_production' },
+    commands: receivedCommands,
+    route: deriveRoutes('fulfillment', receivedCommands),
     transitional: true,
     onTimeout: () => ({ type: 'beginProduction' }),
   }),
   in_production: m.state('in_production', {
-    commands: { cancel: cancelBlock, childStatus: childStatusBlock },
-    route: {
-      OrderCancelled: terminal('cancelled'),
-      FulfillmentDelivered: terminal('delivered'),
-      FulfillmentFailed: terminal('failed'),
-      '*': SELF,
-    },
+    commands: inProductionCommands,
+    route: deriveRoutes('fulfillment', inProductionCommands, { '*': SELF }),
     timeout: '365 days',
   }),
 };

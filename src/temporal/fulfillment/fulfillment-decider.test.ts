@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
+import { deriveRoutes, terminal, SELF } from '../framework';
+
 // Pure Functional Core: no Temporal sandbox, no mocks. The per-command blocks are
 // exported structures, so each command's decide / evolve entries are exercised directly
 // in addition to the assembled dispatchers.
@@ -201,5 +203,39 @@ describe('command blocks — one structure per command', () => {
         .decide({ type: 'childStatus', update: so('delivered'), at: AT }, state())
         .map((e) => e.type),
     ).toEqual(['ChildStatusApplied', 'FulfillmentDelivered']);
+  });
+});
+
+// ==================
+// deriveRoutes equivalence pin (ADR-0026). What derivation produces for each state's real
+// commands is exactly what the deleted hand-written literal said. Kept permanently: it is the
+// port's proof, and it fails loudly if a block's `routes` declaration drifts later.
+// ==================
+
+describe('deriveRoutes — the port is a no-op', () => {
+  it('received derives the old literal exactly', () => {
+    expect(deriveRoutes('fulfillment', { beginProduction: beginProductionBlock })).toEqual({
+      ProductionStarted: 'in_production',
+    });
+  });
+
+  it('in_production derives the old literal exactly, wildcard included', () => {
+    expect(
+      deriveRoutes(
+        'fulfillment',
+        { cancel: cancelBlock, childStatus: childStatusBlock },
+        { '*': SELF },
+      ),
+    ).toEqual({
+      OrderCancelled: terminal('cancelled'),
+      FulfillmentDelivered: terminal('delivered'),
+      FulfillmentFailed: terminal('failed'),
+      '*': SELF,
+    });
+  });
+
+  it('leaves the ChildStatusApplied marker unrouted — absence means "stays"', () => {
+    const table = deriveRoutes('fulfillment', { childStatus: childStatusBlock });
+    expect('ChildStatusApplied' in table).toBe(false);
   });
 });

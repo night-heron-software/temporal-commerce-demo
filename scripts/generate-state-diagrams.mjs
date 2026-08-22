@@ -485,7 +485,7 @@ function kindFromCondition(expr) {
 }
 
 /**
- * Build rich edges from a resolved handler node (an object literal with prepare/decide/finalize,
+ * Build rich edges from a resolved handler node (an object literal with prepare/decide/evolve,
  * or any node we can collect targets from). Each edge shares the prepare/finalize/conditions
  * derived from the handler.
  */
@@ -657,9 +657,20 @@ function machineStateFromDef(defObj, decls, _src) {
       transitional = true;
   }
 
-  // If the route is derived, the state's commands are deriveRoutes' first argument —
+  // ADR-0029 moved deriveRoutes into the framework and gave it a leading `domain` label, so
+  // the commands/extras arguments shift by one when it is present. Tolerate both shapes: a
+  // string-literal first argument is the label, never a commands table.
+  const deriveArgs = deriveCall
+    ? Array.from(deriveCall.arguments).slice(
+        deriveCall.arguments.length > 0 && ts.isStringLiteral(unwrap(deriveCall.arguments[0]))
+          ? 1
+          : 0,
+      )
+    : [];
+
+  // If the route is derived, the state's commands are deriveRoutes' first table argument —
   // resolve from there when the def's own `commands:` was not already resolvable.
-  if (deriveCall && !commandsObj) commandsObj = resolveToObj(deriveCall.arguments[0], decls);
+  if (deriveCall && !commandsObj) commandsObj = resolveToObj(deriveArgs[0], decls);
 
   // Shared handler groups arrive as spreads (`...lifecycleCommands`) — resolve them.
   // (Needed before route derivation: derived tables are built FROM the handlers.)
@@ -712,7 +723,7 @@ function machineStateFromDef(defObj, decls, _src) {
       }
     }
     // …then the extras literal (wildcard / weaken-to-SELF), same reading as a route table.
-    const extrasObj = deriveCall.arguments[1] ? resolveToObj(deriveCall.arguments[1], decls) : null;
+    const extrasObj = deriveArgs[1] ? resolveToObj(deriveArgs[1], decls) : null;
     if (extrasObj) {
       for (const rp of extrasObj.properties) {
         if (!ts.isPropertyAssignment(rp)) continue;

@@ -19,7 +19,12 @@ import {
   refundOrderBlock,
   confirmReturnBlock,
   denyReturnBlock,
+  assignFulfillersBlock,
+  requestFulfillmentBlock,
+  requestReturnBlock,
+  fulfillmentStatusBlock,
 } from './states';
+import { deriveRoutes, terminal, SELF } from '../framework';
 import type { EnrichedOrderCommand, OrderEvent, ResolvedAssignment } from './states';
 import type {
   OrderState,
@@ -910,5 +915,134 @@ describe('command blocks — one structure per command', () => {
     expect(next.status).toBe('complete');
     expect(next.customerFeedback).toEqual({ rating: 5, comment: 'Great', submittedAt: AT });
     expect(s.status).toBe('delivered'); // input untouched
+  });
+});
+
+// ==================
+// deriveRoutes equivalence pin (ADR-0026). OMS spread nine admin destinations across five
+// state literals; they are declared ONCE on `updateStatusBlock` now, and each state states
+// only its own exceptions. These assertions are what proves that collapse changed nothing.
+// ==================
+
+const ADMIN = {
+  OrderCancelled: terminal('cancelled'),
+  OrderProcessing: 'processing',
+  OrderPartiallyShipped: 'partially_shipped',
+  OrderShipped: 'shipped',
+  OrderDelivered: 'delivered',
+  OrderReturnRequested: 'return_requested',
+  OrderRefunded: terminal('refunded'),
+  OrderReturned: terminal('returned'),
+  OrderCompleted: terminal('complete'),
+};
+const AGGREGATE = {
+  cancelOrder: cancelOrderBlock,
+  updateStatus: updateStatusBlock,
+  fulfillmentStatus: fulfillmentStatusBlock,
+};
+
+describe('deriveRoutes — the port is a no-op', () => {
+  it('the three transitional intake states derive their old literals exactly', () => {
+    expect(deriveRoutes('oms', { capturePayment: capturePaymentBlock })).toEqual({
+      PaymentCaptured: 'assigning_fulfillers',
+    });
+    expect(deriveRoutes('oms', { assignFulfillers: assignFulfillersBlock })).toEqual({
+      FulfillersAssigned: 'requesting_fulfillment',
+      NoFulfillersResolved: 'ready_to_fulfill',
+    });
+    expect(deriveRoutes('oms', { requestFulfillment: requestFulfillmentBlock })).toEqual({
+      FulfillmentRequested: 'processing',
+    });
+  });
+
+  it('ready_to_fulfill derives the nine admin destinations, no wildcard', () => {
+    expect(
+      deriveRoutes('oms', { cancelOrder: cancelOrderBlock, updateStatus: updateStatusBlock }),
+    ).toEqual(ADMIN);
+  });
+
+  it('processing derives the old literal exactly', () => {
+    expect(deriveRoutes('oms', AGGREGATE, { OrderProcessing: SELF, '*': SELF })).toEqual({
+      ...ADMIN,
+      FulfillmentPartiallyShipped: 'partially_shipped',
+      FulfillmentShipped: 'shipped',
+      FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
+      OrderProcessing: SELF,
+      '*': SELF,
+    });
+  });
+
+  it('partially_shipped derives the old literal exactly', () => {
+    expect(
+      deriveRoutes('oms', AGGREGATE, {
+        FulfillmentPartiallyShipped: SELF,
+        OrderPartiallyShipped: SELF,
+        '*': SELF,
+      }),
+    ).toEqual({
+      ...ADMIN,
+      FulfillmentPartiallyShipped: SELF,
+      FulfillmentShipped: 'shipped',
+      FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
+      OrderPartiallyShipped: SELF,
+      '*': SELF,
+    });
+  });
+
+  it('shipped states the no-walking-backwards rule the old literal encoded by omission', () => {
+    // The ONE behavioural fact this migration changed on paper: the old `shipped` literal
+    // simply omitted FulfillmentPartiallyShipped, letting it fall through to `'*': SELF`.
+    // Derivation would have added the block's 'partially_shipped', so the state now weakens
+    // it to SELF explicitly. Same resolved target, said out loud.
+    const table = deriveRoutes('oms', AGGREGATE, {
+      FulfillmentPartiallyShipped: SELF,
+      FulfillmentShipped: SELF,
+      OrderShipped: SELF,
+      '*': SELF,
+    });
+    expect(table.FulfillmentPartiallyShipped).toBe(SELF);
+    expect(table['*']).toBe(SELF);
+    expect(table).toEqual({
+      ...ADMIN,
+      FulfillmentPartiallyShipped: SELF,
+      FulfillmentShipped: SELF,
+      FulfillmentDelivered: 'delivered',
+      FulfillmentRejected: terminal('failed'),
+      OrderShipped: SELF,
+      '*': SELF,
+    });
+  });
+
+  it('delivered derives the old literal exactly — and has no wildcard', () => {
+    const table = deriveRoutes(
+      'oms',
+      {
+        submitFeedback: submitFeedbackBlock,
+        updateStatus: updateStatusBlock,
+        refundOrder: refundOrderBlock,
+        requestReturn: requestReturnBlock,
+      },
+      { OrderDelivered: SELF },
+    );
+    expect('*' in table).toBe(false);
+    expect(table).toEqual({
+      ...ADMIN,
+      FeedbackSubmitted: terminal('complete'),
+      Refunded: SELF,
+      ReturnRequested: 'return_requested',
+      OrderDelivered: SELF,
+    });
+  });
+
+  it('return_requested derives the old literal exactly', () => {
+    expect(
+      deriveRoutes('oms', { confirmReturn: confirmReturnBlock, denyReturn: denyReturnBlock }),
+    ).toEqual({ ReturnConfirmed: terminal('returned'), ReturnDenied: 'delivered' });
+  });
+
+  it('leaves the FulfillmentApplied marker unrouted', () => {
+    expect('FulfillmentApplied' in deriveRoutes('oms', AGGREGATE)).toBe(false);
   });
 });

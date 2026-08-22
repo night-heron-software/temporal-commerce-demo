@@ -258,14 +258,23 @@ describe('per-command journeys (ADR-0026, schemaVersion 3)', () => {
     // The ADR-0026 drift ratchet. Where a block declares `routes: { X: target }` AND the
     // state's table routes X explicitly, the two must agree — a mismatch means the
     // declaration and the table have drifted, which is exactly the failure mode derivation
-    // exists to remove. (via 'wildcard'/'unrouted' with a declaration is the audited
-    // weaken-to-stay exception shape: visible in the data, legal here.)
+    // exists to remove.
+    //
+    // Two legal divergences, both narrow:
+    //  - via 'wildcard'/'unrouted' with a declaration: the audited weaken-to-stay shape,
+    //    visible in the data.
+    //  - an explicit `__self` against a named declaration: a state weakening the event to
+    //    SELF through `deriveRoutes` extras. Law 2 permits exactly this and nothing else —
+    //    a state may REFUSE TO MOVE on an event, never redirect it somewhere the block did
+    //    not declare. Any other disagreement is still drift and still fails here.
     const drift: string[] = [];
     for (const m of graph.machines) {
       for (const s of m.states) {
         for (const c of s.commands ?? []) {
           for (const e of c.emits ?? []) {
             if (e.declared === undefined || e.via !== 'explicit') continue;
+            // Weakened to stay: the resolved target is this very state.
+            if (e.to === '__self' || e.to === s.name) continue;
             if (e.to !== e.declared) {
               drift.push(
                 `${m.id}/${s.name}/${c.name}: '${e.event}' declared '${e.declared}' but routes '${e.to}'`,
@@ -278,15 +287,13 @@ describe('per-command journeys (ADR-0026, schemaVersion 3)', () => {
     expect(drift).toEqual([]);
   });
 
-  it('the pilot carries declarations for every explicitly-routed emission (migration ratchet)', () => {
-    // Cart is on the ADR-0026 convention (the mono's other pilot, inventory/transfer, has no
-    // demo counterpart): any event it emits that a state routes EXPLICITLY somewhere else must
-    // have come from a block declaration. This pins the pilot's coverage so a new routed event
-    // cannot ship declaration-less.
-    const pilots = new Set(['CART_STATES']);
+  it('every machine carries declarations for every explicitly-routed emission', () => {
+    // ALL FIVE machines are now on the ADR-0026 convention, so this is no longer a pilot
+    // gate: any event any machine emits that a state routes EXPLICITLY somewhere else must
+    // have come from a block declaration. A new routed event cannot ship declaration-less
+    // anywhere in the system.
     const missing: string[] = [];
     for (const m of graph.machines) {
-      if (!pilots.has(m.id)) continue;
       for (const s of m.states) {
         for (const c of s.commands ?? []) {
           for (const e of c.emits ?? []) {

@@ -71,8 +71,17 @@ import type {
   ReturnRequestRecord,
 } from './types';
 import { buildFulfillerOrderDocument } from './document-builder';
+import { assembleEvolve, deriveRoutes } from '../framework';
 import { defineMachine, terminal, SELF, reject, workflowCorrelationId } from '../framework';
-import type { EffectsMap, MachineDecider, Rejection, StateRegistry } from '../framework';
+import type {
+  CommandBlock as FrameworkCommandBlock,
+  EffectsMap,
+  EvolveMap as FrameworkEvolveMap,
+  InputMeta,
+  MachineDecider,
+  Rejection,
+  StateRegistry,
+} from '../framework';
 
 // ==================
 // Commands and events — the machine's whole vocabulary
@@ -487,17 +496,17 @@ function evolveOrderRefunded(
  * commands (those reference one shared evolve function instead of inlining twice). The
  * machine's single `evolve(context, event)` is assembled by merging every block's map.
  */
-type EvolveMap = {
-  [E in OrderEvent['type']]?: (context: Readonly<OrderState>, event: Ev<E>) => OrderState;
-};
+type EvolveMap = FrameworkEvolveMap<OrderEvent, OrderState>;
 
 /** One command's whole story: refusal, I/O, decision, and the evolve for what it emits. */
-export interface CommandBlock<K extends OrderCommand['type']> {
-  guard?: (context: Readonly<OrderState>, command: Wire<K>) => Rejection | void;
-  prepare?: (context: Readonly<OrderState>, command: Wire<K>) => Promise<object | void>;
-  decide: (command: Enriched<K>, context: Readonly<OrderState>) => OrderEvent[];
-  evolve?: EvolveMap;
-}
+export type CommandBlock<K extends OrderCommand['type']> = FrameworkCommandBlock<
+  OrderState,
+  Wire<K>,
+  Enriched<K>,
+  OrderEvent,
+  OrderStateName,
+  OrderState
+>;
 
 // ==================
 // Command: capturePayment — transitional intake 1/3. A pure hop — the mono decides the
@@ -506,6 +515,7 @@ export interface CommandBlock<K extends OrderCommand['type']> {
 // ==================
 
 export const capturePaymentBlock: CommandBlock<'capturePayment'> = {
+  routes: { PaymentCaptured: 'assigning_fulfillers' },
   decide: (command, _context) => [{ type: 'PaymentCaptured', at: command.at }],
 
   evolve: {
@@ -521,6 +531,10 @@ export const capturePaymentBlock: CommandBlock<'capturePayment'> = {
 // ==================
 
 export const assignFulfillersBlock: CommandBlock<'assignFulfillers'> = {
+  routes: {
+    FulfillersAssigned: 'requesting_fulfillment',
+    NoFulfillersResolved: 'ready_to_fulfill',
+  },
   /**
    * I/O phase: resolve fulfiller assignments (impure) and mint assignment ids; `decide`
    * stays pure and only consumes the prepared, positionally-aligned resolutions. The
@@ -594,6 +608,7 @@ export const assignFulfillersBlock: CommandBlock<'assignFulfillers'> = {
 // ==================
 
 export const requestFulfillmentBlock: CommandBlock<'requestFulfillment'> = {
+  routes: { FulfillmentRequested: 'processing' },
   // Mint one fulfiller-order id per fulfiller, mirroring `buildFulfillment`'s
   // group-by-fulfiller; `decide` remains the source of truth for the grouping itself.
   prepare: async (context) => {
@@ -645,6 +660,7 @@ export const requestFulfillmentBlock: CommandBlock<'requestFulfillment'> = {
 // ==================
 
 export const cancelOrderBlock: CommandBlock<'cancelOrder'> = {
+  routes: { OrderCancelled: terminal('cancelled') },
   decide: (command, _context) => [{ type: 'OrderCancelled', at: command.at }],
 
   evolve: {
@@ -662,6 +678,20 @@ export const cancelOrderBlock: CommandBlock<'cancelOrder'> = {
 // ==================
 
 export const updateStatusBlock: CommandBlock<'updateStatus'> = {
+  // The admin status table — nine destinations, declared ONCE here instead of copied into
+  // five state literals. Where a state must not move on one of these (a forced 'processing'
+  // inside `processing`, say), that state weakens it to SELF in its own extras.
+  routes: {
+    OrderCancelled: terminal('cancelled'),
+    OrderProcessing: 'processing',
+    OrderPartiallyShipped: 'partially_shipped',
+    OrderShipped: 'shipped',
+    OrderDelivered: 'delivered',
+    OrderReturnRequested: 'return_requested',
+    OrderRefunded: terminal('refunded'),
+    OrderReturned: terminal('returned'),
+    OrderCompleted: terminal('complete'),
+  },
   guard: guardForceableStatus, // shared guard — referenced, not duplicated
 
   decide: (command, _context) => {
@@ -710,6 +740,7 @@ export const updateStatusBlock: CommandBlock<'updateStatus'> = {
 // ==================
 
 export const submitFeedbackBlock: CommandBlock<'submitFeedback'> = {
+  routes: { FeedbackSubmitted: terminal('complete') },
   decide: (command, _context) => [
     {
       type: 'FeedbackSubmitted',
@@ -740,6 +771,9 @@ export const submitFeedbackBlock: CommandBlock<'submitFeedback'> = {
 // ==================
 
 export const refundOrderBlock: CommandBlock<'refundOrder'> = {
+  // A partial refund stays put; a full refund additionally decides `OrderRefunded`, and
+  // last-routed-event-wins carries the order to the terminal.
+  routes: { Refunded: SELF, OrderRefunded: terminal('refunded') },
   // Selection mistakes (unknown line, non-positive qty, over-refund) are pure rejections,
   // so `decide`'s refund math never throws for a caller mistake.
   guard: (context, command) => {
@@ -778,6 +812,7 @@ export const refundOrderBlock: CommandBlock<'refundOrder'> = {
 // ==================
 
 export const requestReturnBlock: CommandBlock<'requestReturn'> = {
+  routes: { ReturnRequested: 'return_requested' },
   decide: (command, _context) => [
     {
       type: 'ReturnRequested',
@@ -803,6 +838,7 @@ export const requestReturnBlock: CommandBlock<'requestReturn'> = {
 // ==================
 
 export const confirmReturnBlock: CommandBlock<'confirmReturn'> = {
+  routes: { ReturnConfirmed: terminal('returned') },
   // Same pure validation as refundOrder, against the STORED request's lines.
   guard: (context) => {
     const problem = refundSelectionProblem(context, context.returnRequest?.lines);
@@ -837,6 +873,7 @@ export const confirmReturnBlock: CommandBlock<'confirmReturn'> = {
 // ==================
 
 export const denyReturnBlock: CommandBlock<'denyReturn'> = {
+  routes: { ReturnDenied: 'delivered' },
   decide: (command, _context) => [{ type: 'ReturnDenied', at: command.at }],
 
   evolve: {
@@ -852,6 +889,15 @@ export const denyReturnBlock: CommandBlock<'denyReturn'> = {
 // ==================
 
 export const fulfillmentStatusBlock: CommandBlock<'fulfillmentStatus'> = {
+  // `FulfillmentApplied` is deliberately unrouted — it marks that a child update was
+  // applied, and the lifecycle outcome it implies is decided as a second event. Routing
+  // keys on those decided events.
+  routes: {
+    FulfillmentPartiallyShipped: 'partially_shipped',
+    FulfillmentShipped: 'shipped',
+    FulfillmentDelivered: 'delivered',
+    FulfillmentRejected: terminal('failed'),
+  },
   decide: (command, context) => {
     const at = command.at;
     const update = command.update;
@@ -986,33 +1032,7 @@ type AnyDecide = (command: EnrichedOrderCommand, context: Readonly<OrderState>) 
 /** An evolve entry, widened for dispatch (the assembled map keys guarantee the match). */
 type AnyEvolveEntry = (context: Readonly<OrderState>, event: OrderEvent) => OrderState;
 
-/**
- * Merge every block's evolve map into the machine's single event → entry table.
- * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
- * above) — two blocks inlining different code for one event throws here, at module
- * load, so shared events cannot silently diverge.
- */
-function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
-  const merged: EvolveMap = {};
-  for (const block of blockList) {
-    if (!block.evolve) continue;
-    for (const type of Object.keys(block.evolve) as OrderEvent['type'][]) {
-      const entry = block.evolve[type];
-      if (!entry) continue;
-      const existing = merged[type];
-      if (existing && existing !== entry) {
-        throw new Error(
-          `oms evolve assembly: event '${type}' has two different evolve entries — ` +
-            'share one named evolve function between the blocks instead',
-        );
-      }
-      (merged as Record<OrderEvent['type'], unknown>)[type] = entry;
-    }
-  }
-  return merged;
-}
-
-const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+const evolveByEvent: EvolveMap = assembleEvolve('oms', Object.values(blocks));
 
 /**
  * decide(command, context) → events.
@@ -1212,6 +1232,60 @@ const forcedStatusEmailEffects: EffectsMap<OrderEvent, OrderState> = {
 // assembled from; the framework reads only their `guard`/`prepare`.
 // ==================
 
+// Each state's commands table is a named const shared with `deriveRoutes` (ADR-0026): the
+// route table is DERIVED from the blocks' own `routes` declarations. The five states that
+// used to re-list the same nine admin destinations now inherit them from `updateStatusBlock`,
+// and each states only its own exceptions as extras.
+const pendingAssignmentCommands = { capturePayment: capturePaymentBlock };
+const assigningFulfillersCommands = { assignFulfillers: assignFulfillersBlock };
+const requestingFulfillmentCommands = { requestFulfillment: requestFulfillmentBlock };
+const readyToFulfillCommands = {
+  cancelOrder: cancelOrderBlock,
+  updateStatus: updateStatusBlock,
+};
+const aggregateCommands = {
+  cancelOrder: cancelOrderBlock,
+  updateStatus: updateStatusBlock,
+  fulfillmentStatus: fulfillmentStatusBlock,
+};
+const deliveredCommands = {
+  submitFeedback: submitFeedbackBlock,
+  // The updateStatus block with TWO phases replaced: this state's refundability guard
+  // (demo divergence: `guardDeliveredUpdateStatus`) and an `enrich` that normalizes a
+  // 'refunded' status into a real `refundOrder` command. Everything else — decide,
+  // evolve — is the block's, which is what the spread says.
+  //
+  // Ported from mono #270 (`f0648dc0`). This was a bare `{ guard, enrich }` literal whose
+  // own comment said it was "spelled as a literal so the diagram generator resolves the
+  // guard" — a workaround for one generator limitation that created a worse one: emissions
+  // derive from the handler's evolve map, the literal carried none, and the generated
+  // diagram rendered this command as "(no events — idempotent no-op)" when it can force
+  // many statuses. A bare literal is now reserved for its honest meaning — "deliberately
+  // NOT the block", as cart's `beginCheckout: {}` uses it.
+  //
+  // Accepted imprecision: the render lists `OrderRefunded` under this command, which
+  // `enrich` actually diverts to `refundOrder`. The outcome is right; only the mechanism
+  // is indirect. Naming one edge by its effect beats silently omitting the rest.
+  updateStatus: {
+    ...updateStatusBlock,
+    guard: guardDeliveredUpdateStatus,
+    // Params are annotated because this table is now a hoisted const (ADR-0026 needs one
+    // literal shared by `commands` and `deriveRoutes`), so it no longer gets its types
+    // contextually from the `m.state` call.
+    enrich: (command: Wire<'updateStatus'>, _prepared: unknown, meta: InputMeta) =>
+      command.status === 'refunded'
+        ? { type: 'refundOrder' as const, reason: command.note, at: meta.timestamp }
+        : { ...command, at: meta.timestamp },
+  },
+  refundOrder: refundOrderBlock,
+  requestReturn: requestReturnBlock,
+};
+
+const returnRequestedCommands = {
+  confirmReturn: confirmReturnBlock,
+  denyReturn: denyReturnBlock,
+};
+
 export const OMS_STATES: StateRegistry<
   OrderStateName,
   OrderCommand,
@@ -1225,8 +1299,8 @@ export const OMS_STATES: StateRegistry<
    * accounting, so the event carries nothing and has no effect (see `capturePaymentBlock`).
    */
   pending_assignment: m.state('pending_assignment', {
-    commands: { capturePayment: capturePaymentBlock },
-    route: { PaymentCaptured: 'assigning_fulfillers' },
+    commands: pendingAssignmentCommands,
+    route: deriveRoutes('oms', pendingAssignmentCommands),
     timeout: '1 minute',
     transitional: true,
     onTimeout: () => ({ type: 'capturePayment' }),
@@ -1238,11 +1312,8 @@ export const OMS_STATES: StateRegistry<
    * to the manual `ready_to_fulfill` path.
    */
   assigning_fulfillers: m.state('assigning_fulfillers', {
-    commands: { assignFulfillers: assignFulfillersBlock },
-    route: {
-      FulfillersAssigned: 'requesting_fulfillment',
-      NoFulfillersResolved: 'ready_to_fulfill',
-    },
+    commands: assigningFulfillersCommands,
+    route: deriveRoutes('oms', assigningFulfillersCommands),
     timeout: '1 minute',
     transitional: true,
     onTimeout: () => ({ type: 'assignFulfillers' }),
@@ -1254,8 +1325,8 @@ export const OMS_STATES: StateRegistry<
    * `FulfillmentRequested` effect.
    */
   requesting_fulfillment: m.state('requesting_fulfillment', {
-    commands: { requestFulfillment: requestFulfillmentBlock },
-    route: { FulfillmentRequested: 'processing' },
+    commands: requestingFulfillmentCommands,
+    route: deriveRoutes('oms', requestingFulfillmentCommands),
     timeout: '1 minute',
     transitional: true,
     onTimeout: () => ({ type: 'requestFulfillment' }),
@@ -1263,98 +1334,44 @@ export const OMS_STATES: StateRegistry<
 
   /** No fulfiller resolved — the order waits for manual handling (admin status moves). */
   ready_to_fulfill: m.state('ready_to_fulfill', {
-    commands: {
-      cancelOrder: cancelOrderBlock,
-      updateStatus: updateStatusBlock,
-    },
-    route: {
-      OrderCancelled: terminal('cancelled'),
-      OrderProcessing: 'processing',
-      OrderPartiallyShipped: 'partially_shipped',
-      OrderShipped: 'shipped',
-      OrderDelivered: 'delivered',
-      OrderReturnRequested: 'return_requested',
-      OrderRefunded: terminal('refunded'),
-      OrderReturned: terminal('returned'),
-      OrderCompleted: terminal('complete'),
-    },
+    commands: readyToFulfillCommands,
+    route: deriveRoutes('oms', readyToFulfillCommands),
     effects: forcedStatusEmailEffects,
     timeout: '365 days',
   }),
 
   processing: m.state('processing', {
-    commands: {
-      cancelOrder: cancelOrderBlock,
-      updateStatus: updateStatusBlock,
-      fulfillmentStatus: fulfillmentStatusBlock,
-    },
-    route: {
-      FulfillmentPartiallyShipped: 'partially_shipped',
-      FulfillmentShipped: 'shipped',
-      FulfillmentDelivered: 'delivered',
-      FulfillmentRejected: terminal('failed'),
-      OrderCancelled: terminal('cancelled'),
-      OrderProcessing: SELF,
-      OrderPartiallyShipped: 'partially_shipped',
-      OrderShipped: 'shipped',
-      OrderDelivered: 'delivered',
-      OrderReturnRequested: 'return_requested',
-      OrderRefunded: terminal('refunded'),
-      OrderReturned: terminal('returned'),
-      OrderCompleted: terminal('complete'),
-      '*': SELF,
-    },
+    commands: aggregateCommands,
+    // A forced 'processing' on an order already processing is a no-op, not a re-entry.
+    route: deriveRoutes('oms', aggregateCommands, { OrderProcessing: SELF, '*': SELF }),
     effects: forcedStatusEmailEffects,
     timeout: '365 days',
   }),
 
   partially_shipped: m.state('partially_shipped', {
-    commands: {
-      cancelOrder: cancelOrderBlock,
-      updateStatus: updateStatusBlock,
-      fulfillmentStatus: fulfillmentStatusBlock,
-    },
-    route: {
+    commands: aggregateCommands,
+    // Another partial on an already-partial order stays put.
+    route: deriveRoutes('oms', aggregateCommands, {
       FulfillmentPartiallyShipped: SELF,
-      FulfillmentShipped: 'shipped',
-      FulfillmentDelivered: 'delivered',
-      FulfillmentRejected: terminal('failed'),
-      OrderCancelled: terminal('cancelled'),
-      OrderProcessing: 'processing',
       OrderPartiallyShipped: SELF,
-      OrderShipped: 'shipped',
-      OrderDelivered: 'delivered',
-      OrderReturnRequested: 'return_requested',
-      OrderRefunded: terminal('refunded'),
-      OrderReturned: terminal('returned'),
-      OrderCompleted: terminal('complete'),
       '*': SELF,
-    },
+    }),
     effects: forcedStatusEmailEffects,
     timeout: '365 days',
   }),
 
   shipped: m.state('shipped', {
-    commands: {
-      cancelOrder: cancelOrderBlock,
-      updateStatus: updateStatusBlock,
-      fulfillmentStatus: fulfillmentStatusBlock,
-    },
-    route: {
+    commands: aggregateCommands,
+    // `FulfillmentPartiallyShipped: SELF` is the one rule this table previously encoded by
+    // OMISSION: a late partial arriving after a full ship must not walk the order backwards
+    // to `partially_shipped`. It fell through to `'*': SELF`, which is behaviourally the same
+    // and documentationally invisible — deriving forces it to be said out loud (ADR-0026).
+    route: deriveRoutes('oms', aggregateCommands, {
+      FulfillmentPartiallyShipped: SELF,
       FulfillmentShipped: SELF,
-      FulfillmentDelivered: 'delivered',
-      FulfillmentRejected: terminal('failed'),
-      OrderCancelled: terminal('cancelled'),
-      OrderProcessing: 'processing',
-      OrderPartiallyShipped: 'partially_shipped',
       OrderShipped: SELF,
-      OrderDelivered: 'delivered',
-      OrderReturnRequested: 'return_requested',
-      OrderRefunded: terminal('refunded'),
-      OrderReturned: terminal('returned'),
-      OrderCompleted: terminal('complete'),
       '*': SELF,
-    },
+    }),
     effects: forcedStatusEmailEffects,
     timeout: '365 days',
   }),
@@ -1366,51 +1383,10 @@ export const OMS_STATES: StateRegistry<
    * Timeouts are ignored (no `onTimeout`): the demo has no return-window auto-close.
    */
   delivered: m.state('delivered', {
-    commands: {
-      submitFeedback: submitFeedbackBlock,
-      // The updateStatus block with TWO phases replaced: this state's refundability guard
-      // (demo divergence: `guardDeliveredUpdateStatus`) and an `enrich` that normalizes a
-      // 'refunded' status into a real `refundOrder` command. Everything else — decide,
-      // evolve — is the block's, which is what the spread says.
-      //
-      // Ported from mono #270 (`f0648dc0`). This was a bare `{ guard, enrich }` literal whose
-      // own comment said it was "spelled as a literal so the diagram generator resolves the
-      // guard" — a workaround for one generator limitation that created a worse one: emissions
-      // derive from the handler's evolve map, the literal carried none, and the generated
-      // diagram rendered this command as "(no events — idempotent no-op)" when it can force
-      // many statuses. A bare literal is now reserved for its honest meaning — "deliberately
-      // NOT the block", as cart's `beginCheckout: {}` uses it.
-      //
-      // Accepted imprecision: the render lists `OrderRefunded` under this command, which
-      // `enrich` actually diverts to `refundOrder`. The outcome is right; only the mechanism
-      // is indirect. Naming one edge by its effect beats silently omitting the rest.
-      updateStatus: {
-        ...updateStatusBlock,
-        guard: guardDeliveredUpdateStatus,
-        enrich: (command, _prepared, meta) =>
-          command.status === 'refunded'
-            ? { type: 'refundOrder' as const, reason: command.note, at: meta.timestamp }
-            : { ...command, at: meta.timestamp },
-      },
-      refundOrder: refundOrderBlock,
-      requestReturn: requestReturnBlock,
-    },
-    route: {
-      FeedbackSubmitted: terminal('complete'),
-      // Partial refunds stay; a full refund additionally decides `OrderRefunded`
-      // (last routed event wins → terminal).
-      Refunded: SELF,
-      ReturnRequested: 'return_requested',
-      OrderCancelled: terminal('cancelled'),
-      OrderProcessing: 'processing',
-      OrderPartiallyShipped: 'partially_shipped',
-      OrderShipped: 'shipped',
-      OrderDelivered: SELF,
-      OrderReturnRequested: 'return_requested',
-      OrderRefunded: terminal('refunded'),
-      OrderReturned: terminal('returned'),
-      OrderCompleted: terminal('complete'),
-    },
+    commands: deliveredCommands,
+    // No `'*'` here by design — `delivered` has no catch-all; an unrouted event stays by
+    // the framework's own default. A forced 'delivered' on a delivered order is a no-op.
+    route: deriveRoutes('oms', deliveredCommands, { OrderDelivered: SELF }),
     timeout: '30 days',
   }),
 
@@ -1421,14 +1397,8 @@ export const OMS_STATES: StateRegistry<
    * to `delivered`. Timeouts are ignored — the demo has no review-SLA auto-close.
    */
   return_requested: m.state('return_requested', {
-    commands: {
-      confirmReturn: confirmReturnBlock,
-      denyReturn: denyReturnBlock,
-    },
-    route: {
-      ReturnConfirmed: terminal('returned'),
-      ReturnDenied: 'delivered',
-    },
+    commands: returnRequestedCommands,
+    route: deriveRoutes('oms', returnRequestedCommands),
     timeout: '30 days',
   }),
 };

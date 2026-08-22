@@ -61,13 +61,14 @@ import type {
   CheckoutWorkflowInput,
   CheckoutWorkflowResult,
 } from './types';
+import { assembleEvolve, deriveRoutes } from '../framework';
 import { defineMachine, reject, terminal, SELF, workflowCorrelationId } from '../framework';
 import type {
+  CommandBlock as FrameworkCommandBlock,
   EffectsMap,
-  EventRoute,
+  EvolveMap as FrameworkEvolveMap,
   MachineDecider,
   Rejection,
-  Self,
   StateRegistry,
 } from '../framework';
 import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
@@ -253,34 +254,18 @@ function evolveCartAbandoned(
  * commands (those reference one shared evolve function instead of inlining twice). The
  * machine's single `evolve(context, event)` is assembled by merging every block's map.
  */
-type EvolveMap = {
-  [E in CartEvent['type']]?: (
-    context: Readonly<CartWorkflowContext>,
-    event: Ev<E>,
-  ) => CartWorkflowContext;
-};
+type EvolveMap = FrameworkEvolveMap<CartEvent, CartWorkflowContext>;
 
 /** Where an event may take the machine: a state name, a terminal, or an explicit stay. */
-type RouteTarget = CartStateName | `__terminal:${string}` | Self;
-
-/**
- * A block's routes — keyed by EVENT TYPE, like its evolve map (ADR-0026, ported from mono #253).
- * An event's destination is a machine-global fact (audited: no event in any machine routes to two
- * different targets by state), so the block that emits an event declares where it goes, and each
- * state's route table is DERIVED from its commands via `deriveRoutes` below. Absence means
- * "stays" (the unrouted/`'*'` behavior); an explicit `SELF` is allowed where staying put is
- * itself worth stating.
- */
-type RouteMap = { [E in CartEvent['type']]?: RouteTarget };
-
 /** One command's whole story: refusal, I/O, decision, destination, and the evolve for what it emits. */
-export interface CommandBlock<K extends CartCommand['type']> {
-  guard?: (context: Readonly<CartWorkflowContext>, command: Wire<K>) => Rejection | void;
-  prepare?: (context: Readonly<CartWorkflowContext>, command: Wire<K>) => Promise<object | void>;
-  decide: (command: Enriched<K>, context: Readonly<CartWorkflowContext>) => CartEvent[];
-  routes?: RouteMap;
-  evolve?: EvolveMap;
-}
+export type CommandBlock<K extends CartCommand['type']> = FrameworkCommandBlock<
+  CartWorkflowContext,
+  Wire<K>,
+  Enriched<K>,
+  CartEvent,
+  CartStateName,
+  CartUpdateResponse
+>;
 
 // ==================
 // Command: addItem — the whole story, in one value
@@ -741,84 +726,7 @@ type AnyEvolveEntry = (
   event: CartEvent,
 ) => CartWorkflowContext;
 
-/**
- * Merge every block's evolve map into the machine's single event → entry table.
- * Duplicate keys must be the IDENTICAL function reference (the shared evolve functions
- * above) — two blocks inlining different code for one event throws here, at module
- * load, so shared events cannot silently diverge.
- */
-/**
- * Derive a state's route table from its commands' declared routes (ADR-0026, ported from mono
- * #253 / `91e08773`), plus optional extras. Three laws, enforced at MODULE LOAD so a violation
- * cannot reach a worker:
- *
- *   1. one event, one destination — two blocks in one state disagreeing about where an event
- *      goes is a design contradiction, not a merge;
- *   2. extras may only weaken to SELF — a state can refuse to move, never redirect an event
- *      somewhere its block did not declare;
- *   3. a state with commands must not derive an empty table — the symptom of a handler-override
- *      literal that dropped its block's routes.
- */
-export function deriveRoutes(
-  commands: Record<string, { routes?: RouteMap }>,
-  extras?: RouteMap & { '*'?: Self },
-): EventRoute<CartStateName, CartEvent> {
-  const merged: Record<string, RouteTarget> = {};
-  for (const [commandType, block] of Object.entries(commands)) {
-    for (const [eventType, target] of Object.entries(block.routes ?? {}) as [
-      string,
-      RouteTarget,
-    ][]) {
-      const existing = merged[eventType];
-      if (existing !== undefined && existing !== target) {
-        throw new Error(
-          `cart route assembly: event '${eventType}' has two destinations in one state ` +
-            `('${String(existing)}' vs '${String(target)}' via '${commandType}') — ` +
-            'an event has ONE machine-global destination; fix the blocks',
-        );
-      }
-      merged[eventType] = target;
-    }
-  }
-  for (const [eventType, target] of Object.entries(extras ?? {}) as [string, RouteTarget][]) {
-    if (eventType !== '*' && target !== SELF) {
-      throw new Error(
-        `cart route extras: '${eventType}' may only weaken to SELF — ` +
-          'a state can refuse to move, never redirect; change the block instead',
-      );
-    }
-    merged[eventType] = target;
-  }
-  if (Object.keys(merged).length === 0 && Object.keys(commands).length > 0) {
-    throw new Error(
-      'cart route assembly: a state with commands derived an empty route table — ' +
-        "a handler-override literal probably dropped its block's routes",
-    );
-  }
-  return merged as EventRoute<CartStateName, CartEvent>;
-}
-
-function assembleEvolve(blockList: ReadonlyArray<{ evolve?: EvolveMap }>): EvolveMap {
-  const merged: EvolveMap = {};
-  for (const block of blockList) {
-    if (!block.evolve) continue;
-    for (const type of Object.keys(block.evolve) as CartEvent['type'][]) {
-      const entry = block.evolve[type];
-      if (!entry) continue;
-      const existing = merged[type];
-      if (existing && existing !== entry) {
-        throw new Error(
-          `cart evolve assembly: event '${type}' has two different evolve entries — ` +
-            'share one named evolve function between the blocks instead',
-        );
-      }
-      (merged as Record<CartEvent['type'], unknown>)[type] = entry;
-    }
-  }
-  return merged;
-}
-
-const evolveByEvent: EvolveMap = assembleEvolve(Object.values(blocks));
+const evolveByEvent: EvolveMap = assembleEvolve('cart', Object.values(blocks));
 
 /**
  * decide(command, context) → events.
@@ -1012,7 +920,7 @@ const active = m.state('active', {
   // Derived, not hand-written (ADR-0026): each block declares where its events lead, and this
   // table is their union. Proof-of-no-op at port time: the derived table equals the old literal
   // exactly — CheckoutEntered→checkout, CartAbandoned→terminal('abandoned'), '*'→SELF.
-  route: deriveRoutes(activeCommands, { '*': SELF }),
+  route: deriveRoutes('cart', activeCommands, { '*': SELF }),
   timeout: '30 days',
   onTimeout: () => ({ type: 'expireCart' }),
 });
@@ -1045,7 +953,7 @@ const checkout = m.state('checkout', {
   // Derived (ADR-0026); equals the old literal exactly — CheckoutDisowned→active,
   // CheckoutFailed→active, CartCompleted→terminal('completed'),
   // CartAbandoned→terminal('abandoned'), '*'→SELF.
-  route: deriveRoutes(checkoutCommands, { '*': SELF }),
+  route: deriveRoutes('cart', checkoutCommands, { '*': SELF }),
   effects: itemEditNudges,
   timeout: '1 hour',
   onTimeout: () => ({ type: 'checkoutTimedOut' }),

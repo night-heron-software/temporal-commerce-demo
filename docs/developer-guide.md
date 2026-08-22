@@ -850,13 +850,13 @@ The three recipes a contributor actually needs, end to end. Model everything on
    types.
 2. **Pure core** — in `src/temporal/<domain>/states.ts` (the machine is co-located in one file):
    `decide(command, context) → events`, `evolve(context, event) → context`
-   ([ADR-0009](adr/0009-chassaing-decider-split.md)), assembled from one exported
+   ([ADR-0009](adr/0009-chassaing-decider-transfer-pilot.md)), assembled from one exported
    `CommandBlock` per command. No clock, no randomness, no I/O — time arrives via
    `meta.timestamp` (lint-enforced). **A co-located `<domain>-decider.test.ts` is required,
    not optional.**
 3. **State registry** — `states.ts`: each state declares exactly the commands it handles (an
-   undeclared command is rejected — that's the point); handlers are prepare → decide → finalize
-   ([ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md)); timeouts live in the same
+   undeclared command is rejected — that's the point); handlers are prepare → decide → evolve
+   ([ADR-0003](adr/0003-prepare-decide-evolve-state-machines.md)); timeouts live in the same
    declaration.
 4. **Workflow shell + activities** — `workflows.ts` runs `runStateMachine`; activities use the
    two-file pattern (`activities.ts` contract / `activities-impl.ts` implementation);

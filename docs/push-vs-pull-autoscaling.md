@@ -305,7 +305,7 @@ writing: **pricing** (framed conceptually as pay-per-invocation, plus your own L
 **cold-start characteristics** (the sync-match trigger is designed to react immediately, but
 Lambda cold start + worker init is unquantified). Verified SDK support: Go, Python, TypeScript.
 
-For this project's architecture the trade is unusually cheap: the prepare/decide/finalize pattern
+For this project's architecture the trade is unusually cheap: the prepare/decide/evolve pattern
 carries nothing in-process between tasks, workflow state lives in Temporal, and activities are
 short — far inside the invocation limit. The sticky cache is a throughput optimization here, not a
 correctness dependency — and the transition-recording projection behind the

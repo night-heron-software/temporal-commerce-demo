@@ -189,9 +189,9 @@ stateDiagram-v2
   in_production --> [*]: Cancelled / timeout → cancelled
   in_production --> in_production: * / timeout
   shipped --> [*]: SimulatedDelivered / DeliveryConfirmed / timeout → delivered
+  shipped --> shipped: ShipmentProgressed / * / timeout
   shipped --> [*]: FulfillerOrderFailed / timeout → failed
   shipped --> [*]: Cancelled / timeout → cancelled
-  shipped --> shipped: ShipmentProgressed / * / timeout
   note right of received: timeout 1 millisecond
   note right of submitting: timeout 1 millisecond
 ```
@@ -277,15 +277,15 @@ Any other command is rejected.
 | Trigger | Next | Notes |
 |---------|------|-------|
 | `event: SimulatedDelivered` | ⇒ delivered |  |
+| `event: ShipmentProgressed` | `shipped` |  |
 | `event: DeliveryConfirmed` | ⇒ delivered |  |
 | `event: FulfillerOrderFailed` | ⇒ failed |  |
 | `event: Cancelled` | ⇒ cancelled |  |
-| `event: ShipmentProgressed` | `shipped` |  |
 | `event: *` | `shipped` | falls through: `FulfillerStatusApplied` |
 | `timeout` | ⇒ delivered |  |
+| `timeout` | `shipped` |  |
 | `timeout` | ⇒ failed |  |
 | `timeout` | ⇒ cancelled |  |
-| `timeout` | `shipped` |  |
 
 ---
 
@@ -368,43 +368,43 @@ stateDiagram-v2
   ready_to_fulfill --> [*]: OrderRefunded → refunded
   ready_to_fulfill --> [*]: OrderReturned → returned
   ready_to_fulfill --> [*]: OrderCompleted → complete
-  processing --> partially_shipped: FulfillmentPartiallyShipped / OrderPartiallyShipped
-  processing --> shipped: FulfillmentShipped / OrderShipped
-  processing --> delivered: FulfillmentDelivered / OrderDelivered
-  processing --> [*]: FulfillmentRejected → failed
   processing --> [*]: OrderCancelled → cancelled
   processing --> processing: OrderProcessing / *
+  processing --> partially_shipped: OrderPartiallyShipped / FulfillmentPartiallyShipped
+  processing --> shipped: OrderShipped / FulfillmentShipped
+  processing --> delivered: OrderDelivered / FulfillmentDelivered
   processing --> return_requested: OrderReturnRequested
   processing --> [*]: OrderRefunded → refunded
   processing --> [*]: OrderReturned → returned
   processing --> [*]: OrderCompleted → complete
-  partially_shipped --> partially_shipped: FulfillmentPartiallyShipped / OrderPartiallyShipped / *
-  partially_shipped --> shipped: FulfillmentShipped / OrderShipped
-  partially_shipped --> delivered: FulfillmentDelivered / OrderDelivered
-  partially_shipped --> [*]: FulfillmentRejected → failed
+  processing --> [*]: FulfillmentRejected → failed
   partially_shipped --> [*]: OrderCancelled → cancelled
   partially_shipped --> processing: OrderProcessing
+  partially_shipped --> partially_shipped: OrderPartiallyShipped / FulfillmentPartiallyShipped / *
+  partially_shipped --> shipped: OrderShipped / FulfillmentShipped
+  partially_shipped --> delivered: OrderDelivered / FulfillmentDelivered
   partially_shipped --> return_requested: OrderReturnRequested
   partially_shipped --> [*]: OrderRefunded → refunded
   partially_shipped --> [*]: OrderReturned → returned
   partially_shipped --> [*]: OrderCompleted → complete
-  shipped --> shipped: FulfillmentShipped / OrderShipped / *
-  shipped --> delivered: FulfillmentDelivered / OrderDelivered
-  shipped --> [*]: FulfillmentRejected → failed
+  partially_shipped --> [*]: FulfillmentRejected → failed
   shipped --> [*]: OrderCancelled → cancelled
   shipped --> processing: OrderProcessing
   shipped --> partially_shipped: OrderPartiallyShipped
+  shipped --> shipped: OrderShipped / FulfillmentPartiallyShipped / FulfillmentShipped / *
+  shipped --> delivered: OrderDelivered / FulfillmentDelivered
   shipped --> return_requested: OrderReturnRequested
   shipped --> [*]: OrderRefunded → refunded
   shipped --> [*]: OrderReturned → returned
   shipped --> [*]: OrderCompleted → complete
+  shipped --> [*]: FulfillmentRejected → failed
   delivered --> [*]: FeedbackSubmitted / OrderCompleted → complete
-  delivered --> delivered: Refunded / OrderDelivered
-  delivered --> return_requested: ReturnRequested / OrderReturnRequested
   delivered --> [*]: OrderCancelled → cancelled
   delivered --> processing: OrderProcessing
   delivered --> partially_shipped: OrderPartiallyShipped
   delivered --> shipped: OrderShipped
+  delivered --> delivered: OrderDelivered / Refunded
+  delivered --> return_requested: OrderReturnRequested / ReturnRequested
   delivered --> [*]: OrderRefunded → refunded
   delivered --> [*]: OrderReturned → returned
   return_requested --> [*]: ReturnConfirmed → returned
@@ -516,10 +516,6 @@ Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `event: FulfillmentPartiallyShipped` | `partially_shipped` |  |
-| `event: FulfillmentShipped` | `shipped` |  |
-| `event: FulfillmentDelivered` | `delivered` |  |
-| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: OrderProcessing` | `processing` |  |
 | `event: OrderPartiallyShipped` | `partially_shipped` |  |
@@ -529,6 +525,10 @@ Any other command is rejected.
 | `event: OrderRefunded` | ⇒ refunded |  |
 | `event: OrderReturned` | ⇒ returned |  |
 | `event: OrderCompleted` | ⇒ complete |  |
+| `event: FulfillmentPartiallyShipped` | `partially_shipped` |  |
+| `event: FulfillmentShipped` | `shipped` |  |
+| `event: FulfillmentDelivered` | `delivered` |  |
+| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: *` | `processing` | falls through: `FulfillmentApplied` |
 
 **Timeout:** 365 days
@@ -545,10 +545,6 @@ Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `event: FulfillmentPartiallyShipped` | `partially_shipped` |  |
-| `event: FulfillmentShipped` | `shipped` |  |
-| `event: FulfillmentDelivered` | `delivered` |  |
-| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: OrderProcessing` | `processing` |  |
 | `event: OrderPartiallyShipped` | `partially_shipped` |  |
@@ -558,6 +554,10 @@ Any other command is rejected.
 | `event: OrderRefunded` | ⇒ refunded |  |
 | `event: OrderReturned` | ⇒ returned |  |
 | `event: OrderCompleted` | ⇒ complete |  |
+| `event: FulfillmentPartiallyShipped` | `partially_shipped` |  |
+| `event: FulfillmentShipped` | `shipped` |  |
+| `event: FulfillmentDelivered` | `delivered` |  |
+| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: *` | `partially_shipped` | falls through: `FulfillmentApplied` |
 
 **Timeout:** 365 days
@@ -574,9 +574,6 @@ Any other command is rejected.
 
 | Trigger | Next | Notes |
 |---------|------|-------|
-| `event: FulfillmentShipped` | `shipped` |  |
-| `event: FulfillmentDelivered` | `delivered` |  |
-| `event: FulfillmentRejected` | ⇒ failed |  |
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: OrderProcessing` | `processing` |  |
 | `event: OrderPartiallyShipped` | `partially_shipped` |  |
@@ -586,7 +583,11 @@ Any other command is rejected.
 | `event: OrderRefunded` | ⇒ refunded |  |
 | `event: OrderReturned` | ⇒ returned |  |
 | `event: OrderCompleted` | ⇒ complete |  |
-| `event: *` | `shipped` | falls through: `FulfillmentApplied`, `FulfillmentPartiallyShipped` |
+| `event: FulfillmentPartiallyShipped` | `shipped` |  |
+| `event: FulfillmentShipped` | `shipped` |  |
+| `event: FulfillmentDelivered` | `delivered` |  |
+| `event: FulfillmentRejected` | ⇒ failed |  |
+| `event: *` | `shipped` | falls through: `FulfillmentApplied` |
 
 **Timeout:** 365 days
 
@@ -609,8 +610,6 @@ Any other command is rejected.
 | Trigger | Next | Notes |
 |---------|------|-------|
 | `event: FeedbackSubmitted` | ⇒ complete |  |
-| `event: Refunded` | `delivered` |  |
-| `event: ReturnRequested` | `return_requested` |  |
 | `event: OrderCancelled` | ⇒ cancelled |  |
 | `event: OrderProcessing` | `processing` |  |
 | `event: OrderPartiallyShipped` | `partially_shipped` |  |
@@ -620,6 +619,8 @@ Any other command is rejected.
 | `event: OrderRefunded` | ⇒ refunded |  |
 | `event: OrderReturned` | ⇒ returned |  |
 | `event: OrderCompleted` | ⇒ complete |  |
+| `event: Refunded` | `delivered` |  |
+| `event: ReturnRequested` | `return_requested` |  |
 
 **Timeout:** 30 days
 

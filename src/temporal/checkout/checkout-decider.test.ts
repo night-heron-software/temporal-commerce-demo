@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
+import { deriveRoutes, terminal, SELF } from '../framework';
+
 // Pure Functional Core: no Temporal sandbox, no activity mocks. All I/O is in the blocks'
 // `prepare`; here `decide` is asserted on emitted events and `evolve` on the fold.
 // The per-command blocks are exported structures, so each command's decide / evolve
@@ -495,5 +497,58 @@ describe('command blocks — one structure per command', () => {
     expect(next.state.paymentMethod).toBeUndefined();
     expect(next.totalPrice).toBeCloseTo(10 - 0 + 5 + 0.8);
     expect(priced.state.paymentMethod?.token).toBe('tok_1'); // input untouched
+  });
+});
+
+// ==================
+// deriveRoutes equivalence pin (ADR-0026). What derivation produces for each state's real
+// commands is exactly what the deleted hand-written literal said — the port's permanent proof.
+// ==================
+
+describe('deriveRoutes — the port is a no-op', () => {
+  it('validating derives the old literal exactly', () => {
+    expect(deriveRoutes('checkout', { validate: validateBlock })).toEqual({
+      CartLoaded: 'collecting',
+      ValidationFailed: terminal('failed'),
+    });
+  });
+
+  it('collecting derives the old literal exactly, wildcard included', () => {
+    expect(
+      deriveRoutes(
+        'checkout',
+        {
+          setShipping: setShippingBlock,
+          setPayment: setPaymentBlock,
+          cancelCheckout: cancelCheckoutBlock,
+          acknowledgeCartChange: acknowledgeCartChangeBlock,
+          retargetParent: retargetParentBlock,
+          checkoutTimedOut: checkoutTimedOutBlock,
+          submitOrder: submitOrderBlock,
+          recompute: recomputeBlock,
+        },
+        { '*': SELF },
+      ),
+    ).toEqual({
+      Cancelled: terminal('cancelled'),
+      OrderSubmitted: terminal('complete'),
+      '*': SELF,
+    });
+  });
+
+  it('leaves the stay-put rejections unrouted — ShippingFailed and SubmitRejected', () => {
+    const table = deriveRoutes('checkout', {
+      setShipping: setShippingBlock,
+      submitOrder: submitOrderBlock,
+    });
+    expect('ShippingFailed' in table).toBe(false);
+    expect('SubmitRejected' in table).toBe(false);
+  });
+
+  it('ValidationFailed cannot reach collecting — validate is not one of its commands', () => {
+    // The absence-exception this machine used to need dissolves: `validate` lives only in
+    // `validating`, so the event has one destination and no state has to weaken it.
+    const collecting = deriveRoutes('checkout', { submitOrder: submitOrderBlock }, { '*': SELF });
+    expect('ValidationFailed' in collecting).toBe(false);
   });
 });
