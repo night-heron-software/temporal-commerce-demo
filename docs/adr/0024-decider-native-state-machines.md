@@ -10,7 +10,7 @@
 - **Provenance:** duplicated from the parent platform's ADR-0024; held as close to identical as this demo's smaller surface allows.
 - **Supersedes:** the *opt-in posture* of [ADR-0009](0009-chassaing-decider-transfer-pilot.md) —
   its Option B substance is retained and extended
-- **Amends:** [ADR-0003](0003-prepare-decide-finalize-state-machines.md) (vocabulary); its
+- **Amends:** [ADR-0003](0003-prepare-decide-evolve-state-machines.md) (vocabulary); its
   no-second-event-log decision is **reaffirmed**, for the third time
 - **Relaxes:** the "prepare→decide→finalize shape is not up for refactor" alignment constraint
   (reconciliation plan (parent platform)) and

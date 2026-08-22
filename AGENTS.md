@@ -18,7 +18,7 @@ duplicate it.
    correlation-less singletons pass `undefined` explicitly. See
    [ADR-0011](docs/adr/0011-workflow-id-and-correlation-tagging.md).
 3. **State machines are authored, diagrams are generated.** Domains follow prepare → decide →
-   finalize with a pure Chassaing decider core ([ADR-0003](docs/adr/0003-prepare-decide-finalize-state-machines.md),
+   finalize with a pure Chassaing decider core ([ADR-0003](docs/adr/0003-prepare-decide-evolve-state-machines.md),
    [ADR-0009](docs/adr/0009-chassaing-decider-transfer-pilot.md)). After changing any `states.ts` /
    `*-decider.ts` / `fulfiller-states.ts`, run `npm run docs:diagrams` and commit the result —
    CI fails stale diagrams; never hand-edit `docs/reference/state-machine-diagrams.md`.

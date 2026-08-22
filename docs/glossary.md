@@ -28,7 +28,7 @@ Two vocabularies coexist by design ([ADR-0009](adr/0009-chassaing-decider-transf
 - **Event / signal / update** (the Temporal transport): how inputs reach the workflow. The shell
   enriches an incoming update into a _command_ (attaching `meta.timestamp`, prepared data) before
   the decider sees it.
-- **prepare → decide → finalize** — the handler shape ([ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md)):
+- **prepare → decide → evolve** — the handler shape ([ADR-0003](adr/0003-prepare-decide-evolve-state-machines.md)):
   I/O to gather inputs, a pure decision, I/O to apply effects.
 - **Transitional state** — a state the machine passes through without waiting for input
   (e.g. checkout's `validating`); excluded from the "every state needs an outgoing transition for

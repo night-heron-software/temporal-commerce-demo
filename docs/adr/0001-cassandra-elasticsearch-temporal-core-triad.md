@@ -47,4 +47,4 @@ We will use a **three-part core** with CQRS between the write and read stores:
 - **Single relational DB (Postgres) for everything** — simplest to operate, but weak multi-tenant
   partitioning at scale and poor faceted search; would push search into a bolt-on anyway.
 - **Event-sourced domain store separate from Temporal** — rejected as redundant; Temporal already
-  provides the durable event history (see [ADR-0003](0003-prepare-decide-finalize-state-machines.md)).
+  provides the durable event history (see [ADR-0003](0003-prepare-decide-evolve-state-machines.md)).

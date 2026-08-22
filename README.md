@@ -38,7 +38,7 @@ Every e-commerce system is a distributed state machine. The traditional approach
 
 ## What This Demonstrates
 
-- **Workflows as state machines** — domain workflows are authored as **prepare → decide → finalize** loops around pure, unit-tested deciders (`src/temporal/framework`).
+- **Workflows as state machines** — domain workflows are authored as **prepare → decide → evolve** loops around pure, unit-tested deciders (`src/temporal/framework`).
 - **Cross-domain correlation** — every workflow carries a parseable `demo.{domain}.{entityId}` ID plus correlation Search Attributes keyed by a journey UUID minted at cart creation, so one Temporal visibility query (`CorrelationId = '<correlationId>'`) returns the whole cart → checkout → order → fulfillment journey.
 - **Ambient activity correlation** — worker interceptors thread the correlationId to every activity via `AsyncLocalStorage`, so projections, journal writes, and log lines carry the journey key without hand-passing it.
 - **Transition recording** — every state transition is snapshotted to Cassandra with full context, powering the Order Trace dev tool shown above.
@@ -210,7 +210,7 @@ temporal-commerce-demo/
 │   ├── lib/                # Shared: Cassandra, ES, Temporal clients
 │   └── temporal/
 │       ├── contracts/      # Shared type definitions
-│       ├── framework/      # prepare → decide → finalize state machine kit
+│       ├── framework/      # prepare → decide → evolve state machine kit
 │       ├── transition-recorder/ # Async state-transition audit recording
 │       ├── projection-completion/ # Lifecycle stamping of ES docs at workflow close
 │       ├── cart/           # Cart workflow + activities

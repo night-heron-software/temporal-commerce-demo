@@ -10,7 +10,7 @@
 
 ## Context
 
-The prepare → decide → finalize framework (ADR-0003, ADR-0009, ADR-0010) grew up inside
+The prepare → decide → evolve framework (ADR-0003, ADR-0009, ADR-0010) grew up inside
 `@nightheron/infrastructure` under the `./framework` subpath. It has no infrastructure concerns of
 its own — it is workflow-side code with exactly two runtime dependencies (`@temporalio/workflow`,
 `@temporalio/common`) plus one internal coupling: the transition recorder read

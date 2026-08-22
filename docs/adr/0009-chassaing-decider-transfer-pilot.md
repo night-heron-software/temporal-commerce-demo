@@ -7,7 +7,7 @@
 - **Amended by:** [ADR-0024](0024-decider-native-state-machines.md) (2026-08-07) — the opt-in
   posture is superseded: the decider becomes the standard core for machine domains and the fold
   moves into the framework; Option B's substance and the durability model are unchanged
-- **Resolves:** the open evaluation deferred by [ADR-0003](0003-prepare-decide-finalize-state-machines.md)
+- **Resolves:** the open evaluation deferred by [ADR-0003](0003-prepare-decide-evolve-state-machines.md)
   and [Theme 1 P3](../planning/state-machine-framework-theme1-plan-2026-06-30.md#phase-3--chassaing-functional-event-sourcing-alignment-evaluate--spike)
 - **Provenance:** duplicated from the parent platform's ADR-0009; held as close to identical as this demo's smaller surface allows (paths and counts are this repo's).
 
@@ -15,7 +15,7 @@
 
 ## Context
 
-[ADR-0003](0003-prepare-decide-finalize-state-machines.md) folded Jérémie Chassaing's `decide` +
+[ADR-0003](0003-prepare-decide-evolve-state-machines.md) folded Jérémie Chassaing's `decide` +
 `evolve` into a single pure `decide` that returns `{ context, next }`, because Temporal already
 owns the durable event history. It left open whether an explicit `decide → events → evolve` split
 would pay for itself. The parent platform resolved this with a one-domain spike; the demo adopts
@@ -28,7 +28,7 @@ Domains express their pure core as a Chassaing **decider**: `decide(command, sta
 state). Each domain's decider is co-located in its machine's states file
 ([cart/states.ts](../../src/temporal/cart/states.ts),
 [oms/states.ts](../../src/temporal/oms/states.ts), …; originally a separate `*-decider.ts`,
-merged by the CommandBlock sweep — see the 2026-08-10 sync). The `prepare → decide → finalize`
+merged by the CommandBlock sweep — see the 2026-08-10 sync). The `prepare → decide → evolve`
 handler stays the shell: its `decide` runs the pure decider, folds the facts with `evolve`, and
 returns the driver's `{ context, next }`. **The `runStateMachine` driver is unchanged.**
 

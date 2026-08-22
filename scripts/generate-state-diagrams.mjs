@@ -485,7 +485,7 @@ function kindFromCondition(expr) {
 }
 
 /**
- * Build rich edges from a resolved handler node (an object literal with prepare/decide/finalize,
+ * Build rich edges from a resolved handler node (an object literal with prepare/decide/evolve,
  * or any node we can collect targets from). Each edge shares the prepare/finalize/conditions
  * derived from the handler.
  */

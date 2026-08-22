@@ -114,7 +114,7 @@ Cassandra/Elasticsearch edges are canned.
 dead ends), every state is reachable from the initial state, every machine's initial state exists.
 Combined with the CI freshness gate (`npm run docs:diagrams:check`), this means an agent or human
 who adds an orphan state gets a failing build, not a quiet inconsistency — see
-[ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md) for why the graph is generated at
+[ADR-0003](adr/0003-prepare-decide-evolve-state-machines.md) for why the graph is generated at
 all.
 
 ## Where the seams are
