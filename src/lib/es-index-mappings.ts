@@ -431,7 +431,21 @@ export const INDEX_MAPPINGS: Record<string, any> = {
       storeId: { type: 'keyword' },
       correlationId: { type: 'keyword' },
       stack: { type: 'text', index: false },
-      context: { type: 'object', dynamic: true },
+      // `enabled: false` — stored in _source, never indexed, and therefore UNABLE to reject a
+      // document for its shape. `context` is a catch-all bag (see `toSystemErrorDocument` in
+      // lib/logger.ts): callers put arbitrary fields in it, so under `dynamic: true` the FIRST
+      // document carrying a key fixes that key's type for every document after it.
+      //
+      // Forward-ported from nightheron-mono, where this exact mapping cost real money. An earlier
+      // numeric `context.status` mapped the field `long`; a later escalation whose `status` was
+      // the string 'unmatched_stripe' was rejected with `document_parsing_exception`, the
+      // forwarder swallowed the rejection, and the operator page reported $0 outstanding while
+      // $63.02 sat stranded. The alert fired into nothing.
+      //
+      // The demo has the same bag and the same swallow, so it had the same latent defect — it had
+      // simply never been unlucky with a key. Nothing SEARCHES on context.*; the dev errors route
+      // filters on level/component/message and reads context out of _source, which this preserves.
+      context: { type: 'object', enabled: false },
     },
   },
 };

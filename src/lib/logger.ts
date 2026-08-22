@@ -208,10 +208,45 @@ let inFlight = 0;
  * The ES client is required lazily so processes that never log an error never construct one.
  * Import './es-client' directly, never the '@/lib' barrel — the barrel re-exports this module.
  */
+/**
+ * Record that an error line never reached `system_errors`.
+ *
+ * Dropping is still correct — logging must never fail a request, and hammering an ES that is
+ * already down makes an outage worse. What was wrong was dropping it *invisibly*.
+ *
+ * Forward-ported from nightheron-mono: there, a mapping conflict rejected a money escalation, a
+ * bare `.catch(() => {})` swallowed the rejection, and the only record that $63.02 was stranded
+ * ceased to exist. The mono pairs this with a Prometheus counter; the demo has no metrics module,
+ * so stderr is the whole signal — which is why it must actually say something useful.
+ *
+ * Never routes through the logger: logging a logging failure recurses. Never throws: it is called
+ * from a pino stream and from a promise catch.
+ */
+function reportDroppedForward(
+  reason: 'rejected' | 'backpressure' | 'client_error',
+  detail?: unknown,
+) {
+  try {
+    const suffix = detail === undefined ? '' : ` — ${String(detail).slice(0, 300)}`;
+    process.stderr.write(
+      `[logger] system_errors forward dropped (${reason})${suffix}\n` +
+        '[logger] this error is NOT queryable at /dev/system-errors; read this stream instead\n',
+    );
+  } catch {
+    /* stderr itself is gone — nothing further is possible, and nothing may throw from here. */
+  }
+}
+
 const errorIndexStream: pino.DestinationStream = {
   write(line: string) {
     if (isTest || process.env.LOG_ES_ERRORS === 'false') return;
-    if (inFlight >= MAX_IN_FLIGHT) return;
+    // Backpressure is a DROP too, and it was silent for the same reason the rejection was. It
+    // bites hardest exactly when it matters: a hot failure loop is when errors are most worth
+    // keeping and most likely to exceed the cap.
+    if (inFlight >= MAX_IN_FLIGHT) {
+      reportDroppedForward('backpressure', `in-flight cap ${MAX_IN_FLIGHT} reached`);
+      return;
+    }
 
     const doc = toSystemErrorDocument(line);
     if (!doc) return;
@@ -222,14 +257,17 @@ const errorIndexStream: pino.DestinationStream = {
       const { getElasticsearchClient } = require('./es-client') as typeof import('./es-client');
       getElasticsearchClient()
         .index({ index: 'system_errors', document: doc })
-        .catch(() => {
-          /* intentionally swallowed — logging must never fail */
+        .catch((err: unknown) => {
+          // Still non-fatal — but no longer invisible. A `document_parsing_exception` here is the
+          // mono's signature: the document was REFUSED for its shape, not lost in transit.
+          reportDroppedForward('rejected', err);
         })
         .finally(() => {
           inFlight--;
         });
-    } catch {
+    } catch (err) {
       inFlight--;
+      reportDroppedForward('client_error', err);
     }
   },
 };
