@@ -36,7 +36,7 @@
 import * as wf from '@temporalio/workflow';
 import type { Fulfillers, Fulfillment } from '../contracts';
 import { parseWorkflowId } from '../contracts/constants';
-import { assembleEvolve } from '../framework';
+import { assembleEvolve, deriveRoutes } from '../framework';
 import { defineMachine, terminal, SELF } from '../framework';
 import type {
   CommandBlock as FrameworkCommandBlock,
@@ -296,6 +296,7 @@ export type CommandBlock<K extends FulfillerOrderCommand['type']> = FrameworkCom
 // ==================
 
 export const beginSubmitBlock: CommandBlock<'beginSubmit'> = {
+  routes: { SubmissionStarted: 'submitting' },
   decide: (command, _context) => [{ type: 'SubmissionStarted', at: command.at }],
 
   evolve: {
@@ -315,6 +316,7 @@ export const beginSubmitBlock: CommandBlock<'beginSubmit'> = {
 // ==================
 
 export const submittedBlock: CommandBlock<'submitted'> = {
+  routes: { OrderSubmitted: 'in_production' },
   prepare: async (context) => {
     const result = await submitFulfillerOrder({
       fulfillmentId: wf.workflowInfo().workflowId,
@@ -373,6 +375,7 @@ export const submittedBlock: CommandBlock<'submitted'> = {
 // ==================
 
 export const simulatedShipBlock: CommandBlock<'simulatedShip'> = {
+  routes: { SimulatedShipped: 'shipped' },
   prepare: async () => {
     // Derive from the ENTITY segment of the dot-delimited id (`so-<8hex>`), so every
     // shipment gets a distinct number (R7 — the old `slice(0, 8)` of an ADR-0011 dot-id
@@ -416,6 +419,7 @@ export const simulatedShipBlock: CommandBlock<'simulatedShip'> = {
 // ==================
 
 export const simulatedDeliverBlock: CommandBlock<'simulatedDeliver'> = {
+  routes: { SimulatedDelivered: terminal('delivered') },
   decide: (command, _context) => [{ type: 'SimulatedDelivered', at: command.at }],
 
   evolve: {
@@ -438,6 +442,23 @@ export const simulatedDeliverBlock: CommandBlock<'simulatedDeliver'> = {
 // ==================
 
 export const fulfillerStatusBlock: CommandBlock<'fulfillerStatus'> = {
+  // `FulfillerStatusApplied` is deliberately unrouted — it is the marker that an update was
+  // applied, and the lifecycle outcome it implies is decided as a second event by
+  // `statusOutcome`. Routing keys on those decided events.
+  //
+  // `ShipmentProgressed` targets `shipped` from BOTH states that accept this command. A
+  // partial ship therefore lands in `shipped`, whose simulation timer auto-delivers the whole
+  // order — partials intentionally auto-complete so the demo keeps moving instead of waiting
+  // on outstanding items. `manualMode` (MANUAL_FULFILLMENT) is the escape hatch for demos that
+  // want to hold partials and drive the remaining updates by hand. From `shipped`, the same
+  // route re-enters `shipped`, restarting that timer.
+  routes: {
+    ShipmentProgressed: 'shipped',
+    DeliveryConfirmed: terminal('delivered'),
+    FulfillerOrderFailed: terminal('failed'),
+    // Same destination `cancel` declares — a value-equal duplicate, which derivation merges.
+    Cancelled: terminal('cancelled'),
+  },
   decide: (command, _context) => {
     const at = command.at;
     const events: FulfillerEvent[] = [
@@ -476,6 +497,7 @@ export const fulfillerStatusBlock: CommandBlock<'fulfillerStatus'> = {
 // ==================
 
 export const cancelBlock: CommandBlock<'cancel'> = {
+  routes: { Cancelled: terminal('cancelled') },
   decide: (command, _context) => [{ type: 'Cancelled', at: command.at }],
 
   evolve: {
@@ -656,6 +678,23 @@ function lifecycleEffects(): EffectsMap<FulfillerEvent, FulfillerOrderWorkflowCo
 // from; the framework reads only their `guard`/`prepare`.
 // ==================
 
+// Each state's commands table is a named const shared with `deriveRoutes` (ADR-0026): the
+// route table is DERIVED from the blocks' own `routes` declarations. These were inline in the
+// registry below; hoisting them is what lets one literal serve both `commands` and the
+// derivation.
+const receivedCommands = { beginSubmit: beginSubmitBlock, cancel: cancelBlock };
+const submittingCommands = { submitted: submittedBlock, cancel: cancelBlock };
+const inProductionCommands = {
+  simulatedShip: simulatedShipBlock,
+  fulfillerStatus: fulfillerStatusBlock,
+  cancel: cancelBlock,
+};
+const shippedCommands = {
+  simulatedDeliver: simulatedDeliverBlock,
+  fulfillerStatus: fulfillerStatusBlock,
+  cancel: cancelBlock,
+};
+
 export const FULFILLER_ORDER_STATES: StateRegistry<
   FulfillerOrderStateName,
   FulfillerOrderCommand,
@@ -665,66 +704,31 @@ export const FULFILLER_ORDER_STATES: StateRegistry<
 > = {
   /** received — book-keeping hop; marks the order as submitting. */
   received: m.state('received', {
-    commands: { beginSubmit: beginSubmitBlock, cancel: cancelBlock },
-    route: {
-      SubmissionStarted: 'submitting',
-      Cancelled: terminal('cancelled'),
-    },
+    commands: receivedCommands,
+    route: deriveRoutes('fulfiller', receivedCommands),
     timeout: '1 millisecond',
     onTimeout: () => ({ type: 'beginSubmit' }),
   }),
 
   /** submitting — submits the order to the (simulated) fulfiller. */
   submitting: m.state('submitting', {
-    commands: { submitted: submittedBlock, cancel: cancelBlock },
-    route: {
-      OrderSubmitted: 'in_production',
-      Cancelled: terminal('cancelled'),
-    },
+    commands: submittingCommands,
+    route: deriveRoutes('fulfiller', submittingCommands),
     timeout: '1 millisecond',
     onTimeout: () => ({ type: 'submitted' }),
   }),
 
   /** in_production — auto-ships on timeout (unless manual mode); accepts fulfiller updates. */
   in_production: m.state('in_production', {
-    commands: {
-      simulatedShip: simulatedShipBlock,
-      fulfillerStatus: fulfillerStatusBlock,
-      cancel: cancelBlock,
-    },
-    route: {
-      SimulatedShipped: 'shipped',
-      // By design: `partially_shipped` routes into `shipped` too (ShipmentProgressed),
-      // whose simulation timer auto-delivers the whole order — partials intentionally
-      // auto-complete so the demo keeps moving instead of waiting on outstanding items.
-      // `manualMode` (MANUAL_FULFILLMENT) is the escape hatch for demos that want to
-      // hold partials and drive the remaining updates manually.
-      ShipmentProgressed: 'shipped',
-      DeliveryConfirmed: terminal('delivered'),
-      FulfillerOrderFailed: terminal('failed'),
-      Cancelled: terminal('cancelled'),
-      '*': SELF,
-    },
+    commands: inProductionCommands,
+    route: deriveRoutes('fulfiller', inProductionCommands, { '*': SELF }),
     onTimeout: (context) => (context.manualMode ? null : { type: 'simulatedShip' }),
   }),
 
   /** shipped — auto-delivers on timeout (unless manual mode); accepts fulfiller updates. */
   shipped: m.state('shipped', {
-    commands: {
-      simulatedDeliver: simulatedDeliverBlock,
-      fulfillerStatus: fulfillerStatusBlock,
-      cancel: cancelBlock,
-    },
-    route: {
-      SimulatedDelivered: terminal('delivered'),
-      DeliveryConfirmed: terminal('delivered'),
-      FulfillerOrderFailed: terminal('failed'),
-      Cancelled: terminal('cancelled'),
-      // A late shipped/partial update re-enters shipped (restarting the simulation
-      // timer for the whole order — see the partials note above).
-      ShipmentProgressed: 'shipped',
-      '*': SELF,
-    },
+    commands: shippedCommands,
+    route: deriveRoutes('fulfiller', shippedCommands, { '*': SELF }),
     // By design: this timer fires for partially-shipped orders too, so partials
     // auto-complete on the simulation timer — the demo favors forward motion over
     // blocking on unshipped items. `manualMode` suppresses the tick.

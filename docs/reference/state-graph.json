@@ -378,12 +378,14 @@
                 {
                   "event": "CartLoaded",
                   "to": "collecting",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "collecting"
                 },
                 {
                   "event": "ValidationFailed",
                   "to": "__terminal:failed",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:failed"
                 }
               ]
             }
@@ -452,7 +454,8 @@
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -482,7 +485,8 @@
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -497,7 +501,8 @@
                 {
                   "event": "OrderSubmitted",
                   "to": "__terminal:complete",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:complete"
                 },
                 {
                   "event": "SubmitRejected",
@@ -583,7 +588,8 @@
                 {
                   "event": "SubmissionStarted",
                   "to": "submitting",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "submitting"
                 }
               ]
             },
@@ -593,7 +599,8 @@
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             }
@@ -638,7 +645,8 @@
                 {
                   "event": "OrderSubmitted",
                   "to": "in_production",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "in_production"
                 }
               ]
             },
@@ -648,7 +656,8 @@
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             }
@@ -689,7 +698,8 @@
                 {
                   "event": "SimulatedShipped",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 }
               ]
             },
@@ -704,22 +714,26 @@
                 {
                   "event": "ShipmentProgressed",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "DeliveryConfirmed",
                   "to": "__terminal:delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:delivered"
                 },
                 {
                   "event": "FulfillerOrderFailed",
                   "to": "__terminal:failed",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:failed"
                 },
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -729,7 +743,8 @@
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             }
@@ -805,7 +820,8 @@
                 {
                   "event": "SimulatedDelivered",
                   "to": "__terminal:delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:delivered"
                 }
               ]
             },
@@ -820,22 +836,26 @@
                 {
                   "event": "ShipmentProgressed",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "DeliveryConfirmed",
                   "to": "__terminal:delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:delivered"
                 },
                 {
                   "event": "FulfillerOrderFailed",
                   "to": "__terminal:failed",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:failed"
                 },
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -845,7 +865,8 @@
                 {
                   "event": "Cancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             }
@@ -858,6 +879,11 @@
               "on": "SimulatedDelivered",
               "kind": "event",
               "to": "__terminal:delivered"
+            },
+            {
+              "on": "ShipmentProgressed",
+              "kind": "event",
+              "to": "shipped"
             },
             {
               "on": "DeliveryConfirmed",
@@ -875,11 +901,6 @@
               "to": "__terminal:cancelled"
             },
             {
-              "on": "ShipmentProgressed",
-              "kind": "event",
-              "to": "shipped"
-            },
-            {
               "on": "*",
               "kind": "event",
               "to": "shipped"
@@ -892,17 +913,17 @@
             {
               "on": "timeout",
               "kind": "timeout",
+              "to": "shipped"
+            },
+            {
+              "on": "timeout",
+              "kind": "timeout",
               "to": "__terminal:failed"
             },
             {
               "on": "timeout",
               "kind": "timeout",
               "to": "__terminal:cancelled"
-            },
-            {
-              "on": "timeout",
-              "kind": "timeout",
-              "to": "shipped"
             }
           ]
         }
@@ -929,7 +950,8 @@
                 {
                   "event": "ProductionStarted",
                   "to": "in_production",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "in_production"
                 }
               ]
             }
@@ -960,7 +982,8 @@
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -975,12 +998,14 @@
                 {
                   "event": "FulfillmentDelivered",
                   "to": "__terminal:delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:delivered"
                 },
                 {
                   "event": "FulfillmentFailed",
                   "to": "__terminal:failed",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:failed"
                 }
               ]
             }
@@ -1038,7 +1063,8 @@
                 {
                   "event": "PaymentCaptured",
                   "to": "assigning_fulfillers",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "assigning_fulfillers"
                 }
               ]
             }
@@ -1073,12 +1099,14 @@
                 {
                   "event": "FulfillersAssigned",
                   "to": "requesting_fulfillment",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "requesting_fulfillment"
                 },
                 {
                   "event": "NoFulfillersResolved",
                   "to": "ready_to_fulfill",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "ready_to_fulfill"
                 }
               ]
             }
@@ -1120,7 +1148,8 @@
                 {
                   "event": "FulfillmentRequested",
                   "to": "processing",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "processing"
                 }
               ]
             }
@@ -1152,7 +1181,8 @@
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -1163,47 +1193,56 @@
                 {
                   "event": "OrderProcessing",
                   "to": "processing",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "processing"
                 },
                 {
                   "event": "OrderPartiallyShipped",
                   "to": "partially_shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "OrderShipped",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "OrderDelivered",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "OrderReturnRequested",
                   "to": "return_requested",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "return_requested"
                 },
                 {
                   "event": "OrderReturned",
                   "to": "__terminal:returned",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:returned"
                 },
                 {
                   "event": "OrderCompleted",
                   "to": "__terminal:complete",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:complete"
                 },
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 },
                 {
                   "event": "OrderRefunded",
                   "to": "__terminal:refunded",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:refunded"
                 }
               ]
             }
@@ -1275,7 +1314,8 @@
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -1286,47 +1326,56 @@
                 {
                   "event": "OrderProcessing",
                   "to": "__self",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "processing"
                 },
                 {
                   "event": "OrderPartiallyShipped",
                   "to": "partially_shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "OrderShipped",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "OrderDelivered",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "OrderReturnRequested",
                   "to": "return_requested",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "return_requested"
                 },
                 {
                   "event": "OrderReturned",
                   "to": "__terminal:returned",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:returned"
                 },
                 {
                   "event": "OrderCompleted",
                   "to": "__terminal:complete",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:complete"
                 },
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 },
                 {
                   "event": "OrderRefunded",
                   "to": "__terminal:refunded",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:refunded"
                 }
               ]
             },
@@ -1341,22 +1390,26 @@
                 {
                   "event": "FulfillmentPartiallyShipped",
                   "to": "partially_shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "FulfillmentShipped",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "FulfillmentDelivered",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "FulfillmentRejected",
                   "to": "__terminal:failed",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:failed"
                 }
               ]
             }
@@ -1365,26 +1418,6 @@
           "hasPrepare": false,
           "hasFinalize": true,
           "transitions": [
-            {
-              "on": "FulfillmentPartiallyShipped",
-              "kind": "event",
-              "to": "partially_shipped"
-            },
-            {
-              "on": "FulfillmentShipped",
-              "kind": "event",
-              "to": "shipped"
-            },
-            {
-              "on": "FulfillmentDelivered",
-              "kind": "event",
-              "to": "delivered"
-            },
-            {
-              "on": "FulfillmentRejected",
-              "kind": "event",
-              "to": "__terminal:failed"
-            },
             {
               "on": "OrderCancelled",
               "kind": "event",
@@ -1435,6 +1468,26 @@
               "on": "OrderCompleted",
               "kind": "event",
               "to": "__terminal:complete"
+            },
+            {
+              "on": "FulfillmentPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
+            },
+            {
+              "on": "FulfillmentShipped",
+              "kind": "event",
+              "to": "shipped"
+            },
+            {
+              "on": "FulfillmentDelivered",
+              "kind": "event",
+              "to": "delivered"
+            },
+            {
+              "on": "FulfillmentRejected",
+              "kind": "event",
+              "to": "__terminal:failed"
             },
             {
               "on": "*",
@@ -1453,7 +1506,8 @@
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -1464,47 +1518,56 @@
                 {
                   "event": "OrderProcessing",
                   "to": "processing",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "processing"
                 },
                 {
                   "event": "OrderPartiallyShipped",
                   "to": "__self",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "OrderShipped",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "OrderDelivered",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "OrderReturnRequested",
                   "to": "return_requested",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "return_requested"
                 },
                 {
                   "event": "OrderReturned",
                   "to": "__terminal:returned",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:returned"
                 },
                 {
                   "event": "OrderCompleted",
                   "to": "__terminal:complete",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:complete"
                 },
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 },
                 {
                   "event": "OrderRefunded",
                   "to": "__terminal:refunded",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:refunded"
                 }
               ]
             },
@@ -1519,22 +1582,26 @@
                 {
                   "event": "FulfillmentPartiallyShipped",
                   "to": "__self",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "FulfillmentShipped",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "FulfillmentDelivered",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "FulfillmentRejected",
                   "to": "__terminal:failed",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:failed"
                 }
               ]
             }
@@ -1543,6 +1610,57 @@
           "hasPrepare": false,
           "hasFinalize": true,
           "transitions": [
+            {
+              "on": "OrderCancelled",
+              "kind": "event",
+              "to": "__terminal:cancelled"
+            },
+            {
+              "on": "OrderProcessing",
+              "kind": "event",
+              "to": "processing"
+            },
+            {
+              "on": "OrderPartiallyShipped",
+              "kind": "event",
+              "to": "partially_shipped"
+            },
+            {
+              "on": "OrderShipped",
+              "kind": "event",
+              "to": "shipped",
+              "finalizeActivities": [
+                "sendOrderStatusEmail"
+              ]
+            },
+            {
+              "on": "OrderDelivered",
+              "kind": "event",
+              "to": "delivered",
+              "finalizeActivities": [
+                "sendOrderStatusEmail"
+              ]
+            },
+            {
+              "on": "OrderReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
+            },
+            {
+              "on": "OrderRefunded",
+              "kind": "event",
+              "to": "__terminal:refunded"
+            },
+            {
+              "on": "OrderReturned",
+              "kind": "event",
+              "to": "__terminal:returned"
+            },
+            {
+              "on": "OrderCompleted",
+              "kind": "event",
+              "to": "__terminal:complete"
+            },
             {
               "on": "FulfillmentPartiallyShipped",
               "kind": "event",
@@ -1564,57 +1682,6 @@
               "to": "__terminal:failed"
             },
             {
-              "on": "OrderCancelled",
-              "kind": "event",
-              "to": "__terminal:cancelled"
-            },
-            {
-              "on": "OrderProcessing",
-              "kind": "event",
-              "to": "processing"
-            },
-            {
-              "on": "OrderPartiallyShipped",
-              "kind": "event",
-              "to": "partially_shipped"
-            },
-            {
-              "on": "OrderShipped",
-              "kind": "event",
-              "to": "shipped",
-              "finalizeActivities": [
-                "sendOrderStatusEmail"
-              ]
-            },
-            {
-              "on": "OrderDelivered",
-              "kind": "event",
-              "to": "delivered",
-              "finalizeActivities": [
-                "sendOrderStatusEmail"
-              ]
-            },
-            {
-              "on": "OrderReturnRequested",
-              "kind": "event",
-              "to": "return_requested"
-            },
-            {
-              "on": "OrderRefunded",
-              "kind": "event",
-              "to": "__terminal:refunded"
-            },
-            {
-              "on": "OrderReturned",
-              "kind": "event",
-              "to": "__terminal:returned"
-            },
-            {
-              "on": "OrderCompleted",
-              "kind": "event",
-              "to": "__terminal:complete"
-            },
-            {
               "on": "*",
               "kind": "event",
               "to": "partially_shipped"
@@ -1631,7 +1698,8 @@
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 }
               ]
             },
@@ -1642,47 +1710,56 @@
                 {
                   "event": "OrderProcessing",
                   "to": "processing",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "processing"
                 },
                 {
                   "event": "OrderPartiallyShipped",
                   "to": "partially_shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "OrderShipped",
                   "to": "__self",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "OrderDelivered",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "OrderReturnRequested",
                   "to": "return_requested",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "return_requested"
                 },
                 {
                   "event": "OrderReturned",
                   "to": "__terminal:returned",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:returned"
                 },
                 {
                   "event": "OrderCompleted",
                   "to": "__terminal:complete",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:complete"
                 },
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 },
                 {
                   "event": "OrderRefunded",
                   "to": "__terminal:refunded",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:refunded"
                 }
               ]
             },
@@ -1697,22 +1774,26 @@
                 {
                   "event": "FulfillmentPartiallyShipped",
                   "to": "__self",
-                  "via": "wildcard"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "FulfillmentShipped",
                   "to": "__self",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "FulfillmentDelivered",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "FulfillmentRejected",
                   "to": "__terminal:failed",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:failed"
                 }
               ]
             }
@@ -1721,21 +1802,6 @@
           "hasPrepare": false,
           "hasFinalize": true,
           "transitions": [
-            {
-              "on": "FulfillmentShipped",
-              "kind": "event",
-              "to": "shipped"
-            },
-            {
-              "on": "FulfillmentDelivered",
-              "kind": "event",
-              "to": "delivered"
-            },
-            {
-              "on": "FulfillmentRejected",
-              "kind": "event",
-              "to": "__terminal:failed"
-            },
             {
               "on": "OrderCancelled",
               "kind": "event",
@@ -1786,6 +1852,26 @@
               "on": "OrderCompleted",
               "kind": "event",
               "to": "__terminal:complete"
+            },
+            {
+              "on": "FulfillmentPartiallyShipped",
+              "kind": "event",
+              "to": "shipped"
+            },
+            {
+              "on": "FulfillmentShipped",
+              "kind": "event",
+              "to": "shipped"
+            },
+            {
+              "on": "FulfillmentDelivered",
+              "kind": "event",
+              "to": "delivered"
+            },
+            {
+              "on": "FulfillmentRejected",
+              "kind": "event",
+              "to": "__terminal:failed"
             },
             {
               "on": "*",
@@ -1805,7 +1891,8 @@
                 {
                   "event": "FeedbackSubmitted",
                   "to": "__terminal:complete",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:complete"
                 }
               ]
             },
@@ -1816,47 +1903,56 @@
                 {
                   "event": "OrderProcessing",
                   "to": "processing",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "processing"
                 },
                 {
                   "event": "OrderPartiallyShipped",
                   "to": "partially_shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "partially_shipped"
                 },
                 {
                   "event": "OrderShipped",
                   "to": "shipped",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "shipped"
                 },
                 {
                   "event": "OrderDelivered",
                   "to": "__self",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 },
                 {
                   "event": "OrderReturnRequested",
                   "to": "return_requested",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "return_requested"
                 },
                 {
                   "event": "OrderReturned",
                   "to": "__terminal:returned",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:returned"
                 },
                 {
                   "event": "OrderCompleted",
                   "to": "__terminal:complete",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:complete"
                 },
                 {
                   "event": "OrderCancelled",
                   "to": "__terminal:cancelled",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:cancelled"
                 },
                 {
                   "event": "OrderRefunded",
                   "to": "__terminal:refunded",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:refunded"
                 }
               ]
             },
@@ -1867,12 +1963,14 @@
                 {
                   "event": "Refunded",
                   "to": "__self",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__self"
                 },
                 {
                   "event": "OrderRefunded",
                   "to": "__terminal:refunded",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:refunded"
                 }
               ]
             },
@@ -1882,7 +1980,8 @@
                 {
                   "event": "ReturnRequested",
                   "to": "return_requested",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "return_requested"
                 }
               ]
             }
@@ -1895,16 +1994,6 @@
               "on": "FeedbackSubmitted",
               "kind": "event",
               "to": "__terminal:complete"
-            },
-            {
-              "on": "Refunded",
-              "kind": "event",
-              "to": "delivered"
-            },
-            {
-              "on": "ReturnRequested",
-              "kind": "event",
-              "to": "return_requested"
             },
             {
               "on": "OrderCancelled",
@@ -1950,6 +2039,16 @@
               "on": "OrderCompleted",
               "kind": "event",
               "to": "__terminal:complete"
+            },
+            {
+              "on": "Refunded",
+              "kind": "event",
+              "to": "delivered"
+            },
+            {
+              "on": "ReturnRequested",
+              "kind": "event",
+              "to": "return_requested"
             }
           ]
         },
@@ -1965,7 +2064,8 @@
                 {
                   "event": "ReturnConfirmed",
                   "to": "__terminal:returned",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "__terminal:returned"
                 }
               ]
             },
@@ -1975,7 +2075,8 @@
                 {
                   "event": "ReturnDenied",
                   "to": "delivered",
-                  "via": "explicit"
+                  "via": "explicit",
+                  "declared": "delivered"
                 }
               ]
             }

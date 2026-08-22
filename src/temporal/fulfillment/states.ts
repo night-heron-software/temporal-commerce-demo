@@ -34,7 +34,7 @@ import type {
   FulfillmentFulfillerOrderState,
 } from './types';
 import type { FulfillmentResult } from './definitions';
-import { assembleEvolve } from '../framework';
+import { assembleEvolve, deriveRoutes } from '../framework';
 import { defineMachine, terminal, SELF } from '../framework';
 import type {
   CommandBlock as FrameworkCommandBlock,
@@ -122,6 +122,7 @@ export type CommandBlock<K extends FulfillmentCommand['type']> = FrameworkComman
 // ==================
 
 export const beginProductionBlock: CommandBlock<'beginProduction'> = {
+  routes: { ProductionStarted: 'in_production' },
   decide: (command, context) =>
     context.status === 'received' ? [{ type: 'ProductionStarted', at: command.at }] : [],
 
@@ -136,6 +137,7 @@ export const beginProductionBlock: CommandBlock<'beginProduction'> = {
 // ==================
 
 export const cancelBlock: CommandBlock<'cancel'> = {
+  routes: { OrderCancelled: terminal('cancelled') },
   decide: (command, _context) => [{ type: 'OrderCancelled', at: command.at }],
 
   evolve: {
@@ -159,6 +161,13 @@ export const cancelBlock: CommandBlock<'cancel'> = {
 // ==================
 
 export const childStatusBlock: CommandBlock<'childStatus'> = {
+  // `ChildStatusApplied` is deliberately unrouted: it is the marker that a child update was
+  // applied, and the lifecycle outcome it implies is decided as a second event. Absence means
+  // "stays", which is what the state's `'*': SELF` extra says out loud.
+  routes: {
+    FulfillmentDelivered: terminal('delivered'),
+    FulfillmentFailed: terminal('failed'),
+  },
   decide: (command, context) => {
     const at = command.at;
     const events: FulfillmentEvent[] = [{ type: 'ChildStatusApplied', update: command.update, at }];
@@ -287,6 +296,12 @@ const m = defineMachine<
   FulfillmentResult
 >({ decider: fulfillmentDecider });
 
+// Each state's commands table is a named const shared with `deriveRoutes` (ADR-0026): the
+// route table is DERIVED from the blocks' own `routes` declarations, so a command's
+// destination lives beside the decide that emits it rather than 200 lines below.
+const receivedCommands = { beginProduction: beginProductionBlock };
+const inProductionCommands = { cancel: cancelBlock, childStatus: childStatusBlock };
+
 export const FULFILLMENT_STATES: StateRegistry<
   FulfillmentStateName,
   FulfillmentCommand,
@@ -295,19 +310,14 @@ export const FULFILLMENT_STATES: StateRegistry<
   FulfillmentCommand
 > = {
   received: m.state('received', {
-    commands: { beginProduction: beginProductionBlock },
-    route: { ProductionStarted: 'in_production' },
+    commands: receivedCommands,
+    route: deriveRoutes('fulfillment', receivedCommands),
     transitional: true,
     onTimeout: () => ({ type: 'beginProduction' }),
   }),
   in_production: m.state('in_production', {
-    commands: { cancel: cancelBlock, childStatus: childStatusBlock },
-    route: {
-      OrderCancelled: terminal('cancelled'),
-      FulfillmentDelivered: terminal('delivered'),
-      FulfillmentFailed: terminal('failed'),
-      '*': SELF,
-    },
+    commands: inProductionCommands,
+    route: deriveRoutes('fulfillment', inProductionCommands, { '*': SELF }),
     timeout: '365 days',
   }),
 };

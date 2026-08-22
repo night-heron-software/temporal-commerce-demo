@@ -58,7 +58,7 @@ import type {
   CheckoutContext,
   CheckoutStateName,
 } from './types';
-import { assembleEvolve } from '../framework';
+import { assembleEvolve, deriveRoutes } from '../framework';
 import { defineMachine, terminal, SELF } from '../framework';
 import type {
   CommandBlock as FrameworkCommandBlock,
@@ -229,6 +229,9 @@ export type CommandBlock<K extends CheckoutCommand['type']> = FrameworkCommandBl
 // ==================
 
 export const validateBlock: CommandBlock<'validate'> = {
+  // Both destinations are this block's alone — `validate` is only in `validating`, so
+  // `ValidationFailed` cannot reach `collecting` and needs no stay-exception there.
+  routes: { CartLoaded: 'collecting', ValidationFailed: terminal('failed') },
   prepare: async (context): Promise<{ prepared: ValidatingPrepared }> => {
     const cart = await queryCart(context.parentCartWorkflowId);
     const res = await renewReservationsForCheckout(context.cartId, cart.items);
@@ -306,6 +309,8 @@ async function prepareSetShipping(
 }
 
 export const setShippingBlock: CommandBlock<'setShipping'> = {
+  // Neither event moves the machine: `ShippingFailed` writes to `state.error` and stays,
+  // `ShippingSet` accumulates a prerequisite. Absence means "stays".
   // The saga above is doc-pinned by name; the block's prepare wraps it.
   prepare: async (context, command) => ({
     prepared: await prepareSetShipping(context, command.shippingAddress),
@@ -430,6 +435,7 @@ export const retargetParentBlock: CommandBlock<'retargetParent'> = {
 // ==================
 
 export const cancelCheckoutBlock: CommandBlock<'cancelCheckout'> = {
+  routes: { Cancelled: terminal('cancelled') },
   decide: (_command, context) => [
     { type: 'Cancelled', reason: 'checkout-cancelled', reservations: context.reservations },
   ],
@@ -440,6 +446,9 @@ export const cancelCheckoutBlock: CommandBlock<'cancelCheckout'> = {
 };
 
 export const checkoutTimedOutBlock: CommandBlock<'checkoutTimedOut'> = {
+  // Same destination `cancelCheckout` declares — a value-equal duplicate, which is the
+  // premise of derivation rather than an exception to it.
+  routes: { Cancelled: terminal('cancelled') },
   decide: (_command, context) => [
     { type: 'Cancelled', reason: 'checkout-timeout', reservations: context.reservations },
   ],
@@ -540,6 +549,9 @@ async function prepareSubmitOrder(
 }
 
 export const submitOrderBlock: CommandBlock<'submitOrder'> = {
+  // `SubmitRejected` is deliberately absent: it writes its error into `state.error` and the
+  // checkout stays put for the caller to read off the response.
+  routes: { OrderSubmitted: terminal('complete') },
   /**
    * The payment/order pipeline runs in `prepareSubmitOrder` above (doc-pinned by name);
    * this wrapper owns the cart freeze/abort orchestration.
@@ -793,14 +805,11 @@ const m = defineMachine<
 // framework reads only its `guard`/`prepare`.
 // ==================
 
+const validatingCommands = { validate: validateBlock };
+
 const validating = m.state('validating', {
-  commands: {
-    validate: validateBlock,
-  },
-  route: {
-    CartLoaded: 'collecting',
-    ValidationFailed: terminal('failed'),
-  },
+  commands: validatingCommands,
+  route: deriveRoutes('checkout', validatingCommands),
   transitional: true,
   onTimeout: () => ({ type: 'validate' }),
 });
@@ -809,24 +818,20 @@ const validating = m.state('validating', {
 // State: collecting — single prerequisite-accumulation state
 // ==================
 
+const collectingCommands = {
+  setShipping: setShippingBlock,
+  setPayment: setPaymentBlock,
+  cancelCheckout: cancelCheckoutBlock,
+  acknowledgeCartChange: acknowledgeCartChangeBlock,
+  retargetParent: retargetParentBlock,
+  checkoutTimedOut: checkoutTimedOutBlock,
+  submitOrder: submitOrderBlock,
+  recompute: recomputeBlock,
+};
+
 const collecting = m.state('collecting', {
-  commands: {
-    setShipping: setShippingBlock,
-    setPayment: setPaymentBlock,
-    cancelCheckout: cancelCheckoutBlock,
-    acknowledgeCartChange: acknowledgeCartChangeBlock,
-    retargetParent: retargetParentBlock,
-    checkoutTimedOut: checkoutTimedOutBlock,
-    submitOrder: submitOrderBlock,
-    recompute: recomputeBlock,
-  },
-  route: {
-    Cancelled: terminal('cancelled'),
-    OrderSubmitted: terminal('complete'),
-    // ShippingFailed / SubmitRejected write their error into `state.error` and stay
-    // put — the caller reads it off the response.
-    '*': SELF,
-  },
+  commands: collectingCommands,
+  route: deriveRoutes('checkout', collectingCommands, { '*': SELF }),
   timeout: '1 hour',
   onTimeout: () => ({ type: 'checkoutTimedOut' }),
 });
