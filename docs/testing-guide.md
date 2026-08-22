@@ -30,7 +30,7 @@ level 1, which is why most of the suite needs nothing installed.
 ## Level 1 — pure decider tests
 
 Every domain's decision logic is a pure Chassaing decider
-([ADR-0009](adr/0009-chassaing-decider-split.md)): `decide(command, state) → facts`,
+([ADR-0009](adr/0009-chassaing-decider-transfer-pilot.md)): `decide(command, state) → facts`,
 `evolve(state, fact) → state`, no clock, no randomness, no I/O. Testing it needs no harness at
 all — [cart-decider.test.ts](../src/temporal/cart/cart-decider.test.ts) is the pattern:
 

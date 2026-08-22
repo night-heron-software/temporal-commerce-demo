@@ -20,7 +20,7 @@ The project's terms of art, especially the pairs that look interchangeable but a
 
 ## State machine vocabulary
 
-Two vocabularies coexist by design ([ADR-0009](adr/0009-chassaing-decider-split.md)):
+Two vocabularies coexist by design ([ADR-0009](adr/0009-chassaing-decider-transfer-pilot.md)):
 
 - **Command → facts → state** (the pure core): `decide(command, state)` emits past-tense **facts**;
   `evolve(state, fact)` folds each fact — the only writer of state. Facts are **transient**: never

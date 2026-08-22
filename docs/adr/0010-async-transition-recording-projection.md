@@ -1,12 +1,21 @@
 # ADR-0010 — Async state-transition recording projection
 
-- **Status:** Accepted
+- **Status:** Accepted (implemented in PR #61 — `workflow_state_transitions` schema,
+  `packages/infrastructure/src/transition-recorder/`, framework sink, order-trace consumer;
+  rollout steps 5–6 (§8) tracked in todos #28 (parent platform))
+- **Date:** 2026-07-02
+- **Deciders:** platform / state-machine framework
 - **Tags:** temporal, state-machine, data-layer, observability
-- **Provenance:** adapted from the parent platform's ADR-0010
-- **Builds on:** [ADR-0003](0003-prepare-decide-finalize-state-machines.md) (Temporal = sole
-  durable log), [ADR-0011](0011-workflow-id-and-correlation-tagging.md) (parseable IDs +
-  correlation Search Attributes — the recorder reads tenant/correlation from these, so it needs
-  **zero per-domain wiring**)
+- **Builds on:** [ADR-0001](0001-cassandra-elasticsearch-temporal-core-triad.md) (Cassandra = projection
+  write model), [ADR-0003](0003-prepare-decide-finalize-state-machines.md) (Temporal = sole durable log),
+  [ADR-0004](0004-multi-tenant-shared-infrastructure-store-id.md) (tenant `store_id`),
+  [ADR-0007](0007-workflow-mediated-projection-writes.md) (projection writes go through the workflow),
+  [ADR-0011](0011-workflow-id-and-correlation-tagging.md) (parseable IDs + `CorrelationId`/`StoreId`
+  Search-Attribute tags on every workflow — the recorder reads tenant/correlation from these, so it
+  needs **zero per-domain wiring**)
+- **Provenance:** duplicated from the parent platform's ADR-0010; held as close to identical as this demo's smaller surface allows (paths and counts are this repo's).
+
+> **Divergence from the parent platform.** Recorded transitions carry no real PII here: this demo is pre-production, with mocked payments and stubbed email. The parent's PII handling rules still apply to the parent.
 
 ## Context
 

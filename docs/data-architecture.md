@@ -34,7 +34,7 @@ transitions taken, stock levels), never **coordination state**. Nothing reads Ca
 what a cart may do next — the workflow already knows.
 
 This is also why there is no separate event store: the deciders' `decide → facts → evolve` shape
-([ADR-0009](adr/0009-chassaing-decider-split.md)) gives event sourcing's reasoning style, but the
+([ADR-0009](adr/0009-chassaing-decider-transfer-pilot.md)) gives event sourcing's reasoning style, but the
 facts are transient — folded into state in the same call. Temporal's history is the only durable
 log ([ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md)), and it comes with replay,
 retention, and tooling already built.

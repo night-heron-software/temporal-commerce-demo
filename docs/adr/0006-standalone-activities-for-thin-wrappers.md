@@ -1,8 +1,10 @@
 # ADR-0006 — Standalone activities for thin single-activity wrappers
 
 - **Status:** Accepted
+- **Date:** 2026-06-30 (retroactively recorded)
+- **Deciders:** platform / Temporal patterns
 - **Tags:** temporal
-- **Provenance:** adapted from the parent platform's ADR-0006
+- **Provenance:** duplicated from the parent platform's ADR-0006; held as close to identical as this demo's smaller surface allows (paths and counts are this repo's).
 
 ## Context
 

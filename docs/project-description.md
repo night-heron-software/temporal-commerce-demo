@@ -263,7 +263,7 @@ Grouped the same way as the admin dashboard's "Patterns Demonstrated" card (`/ad
 
 | Pattern                                         | Where Used                                                                                                       |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| prepare → decide → finalize with a pure decider | [ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md) / [ADR-0009](adr/0009-chassaing-decider-split.md) |
+| prepare → decide → finalize with a pure decider | [ADR-0003](adr/0003-prepare-decide-finalize-state-machines.md) / [ADR-0009](adr/0009-chassaing-decider-transfer-pilot.md) |
 | Saga compensation on terminal states            | Checkout, Cart                                                                                                   |
 | Async transition-recording projection           | [ADR-0010](adr/0010-async-transition-recording-projection.md)                                                    |
 | Search Attribute + memo correlation             | [ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md)                                                      |

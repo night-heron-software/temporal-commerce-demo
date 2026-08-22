@@ -1,8 +1,15 @@
 # ADR-0011 — Parseable workflow IDs + Search-Attribute correlation tagging
 
 - **Status:** Accepted
+- **Date:** 2026-07-02
+- **Deciders:** platform / temporal
 - **Tags:** temporal, workflow-id, observability
-- **Provenance:** adapted from the parent platform's ADR-0011
+- **Builds on:** [ADR-0001](0001-cassandra-elasticsearch-temporal-core-triad.md) (Elasticsearch
+  advanced visibility), [ADR-0004](0004-multi-tenant-shared-infrastructure-store-id.md) (store_id
+  tenancy)
+- **Provenance:** duplicated from the parent platform's ADR-0011; held as close to identical as this demo's smaller surface allows (paths and counts are this repo's).
+
+> **Divergence from the parent platform.** The demo is **single-tenant**: `storeId` is the fixed `DEMO_STORE_ID` (`demo`), so the tenant filter this record describes is a store filter with one value.
 
 ## Context
 
