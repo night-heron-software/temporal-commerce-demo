@@ -162,6 +162,39 @@ describe('defineMachine — pipeline', () => {
     const out = await active.fn({ ...ctx0, items: 1 }, cmd({ type: 'begin' }));
     expect(out.next).toBe('checkout');
   });
+
+  it('a trailing UNROUTED event clobbers an earlier routed one when `*` is present', async () => {
+    // The sharp edge behind `'*': SELF`, pinned so nobody rediscovers it in production.
+    // `resolveNext` reads `routeTable[ev.type] ?? routeTable['*']` for EVERY event in
+    // emission order, last non-undefined wins. With a `'*'` entry present, an unrouted
+    // event is not skipped — it resolves to the wildcard and OVERWRITES the target an
+    // earlier routed event had already set.
+    //
+    // Every marker event in the commerce machines (FulfillmentApplied, ChildStatusApplied,
+    // FulfillerStatusApplied) is emitted FIRST for exactly this reason. Emit one last and
+    // the transition silently becomes a self-loop.
+    const trailing = m.state('active', {
+      commands: { begin: {} },
+      route: { CheckoutBegun: 'checkout', '*': SELF },
+    });
+    const twoEvents: MachineDecider<DCmd, Ev, Ctx> = {
+      ...decider,
+      decide: () => [{ type: 'CheckoutBegun' }, { type: 'Removed', qty: 0 }],
+    };
+    const mm = defineMachine<'active' | 'checkout', Cmd, Ev, Ctx, { items: number }>({
+      decider: twoEvents,
+      respond: (ctx) => ({ items: ctx.items }),
+    });
+    const clobbered = mm.state('active', {
+      commands: { begin: {} },
+      route: { CheckoutBegun: 'checkout', '*': SELF },
+    });
+
+    // Routed-only ordering behaves as you would expect…
+    expect((await trailing.fn(ctx0, cmd({ type: 'begin' }))).next).toBe('checkout');
+    // …but a trailing unrouted event drags it back to SELF.
+    expect((await clobbered.fn(ctx0, cmd({ type: 'begin' }))).next).toBe('active');
+  });
 });
 
 describe('defineMachine — rejection', () => {
