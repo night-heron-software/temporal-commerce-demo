@@ -12,7 +12,7 @@
   its Option B substance is retained and extended
 - **Amends:** [ADR-0003](0003-prepare-decide-evolve-state-machines.md) (vocabulary); its
   no-second-event-log decision is **reaffirmed**, for the third time
-- **Relaxes:** the "prepare→decide→finalize shape is not up for refactor" alignment constraint
+- **Relaxes:** the "prepare→decide→evolve shape is not up for refactor" alignment constraint
   (reconciliation plan (parent platform)) and
   Theme-1 Guardrail 1
   (theme 1 plan (parent platform)), for this

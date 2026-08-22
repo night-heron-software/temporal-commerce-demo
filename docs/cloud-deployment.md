@@ -119,7 +119,7 @@ design rather than just delaying it:
 An ephemeral worker also discards its sticky cache on exit, so the next invocation replays affected
 workflows from history. Temporal has not published how sticky execution behaves under Serverless
 Workers — treat that as inference. For this architecture the trade looks cheap: prepare → decide →
-finalize keeps nothing in-process between tasks, and workflow state lives in Temporal. The sticky
+evolve keeps nothing in-process between tasks, and workflow state lives in Temporal. The sticky
 cache is a throughput optimization here, not a correctness dependency.
 
 Worth noting that this trade may not be permanent. Losing the cache is a consequence of *current*
