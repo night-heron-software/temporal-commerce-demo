@@ -29,6 +29,8 @@ let canPayload: unknown;
 const handlers = new Map<unknown, (...a: unknown[]) => void>();
 // Mutable so a test can turn on the server's continue-as-new suggestion (#20).
 const infoState = { continueAsNewSuggested: false };
+// Warnings the driver emitted this test (#22).
+const warnCalls: string[] = [];
 // Captures batches handed to the persistWorkflowTransitions activity (ADR-0010 recorder).
 let persistedBatches: Array<Array<Record<string, unknown>>> = [];
 // Captures calls to the markProjectionsCompleted activity (projection completion).
@@ -37,7 +39,16 @@ let markedCalls: Array<Record<string, unknown>> = [];
 let callOrder: string[] = [];
 
 vi.mock('@temporalio/workflow', () => ({
-  log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  log: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    // Captured so a test can assert the driver SAID something, not merely that it behaved
+    // (#22: an unresolved timeout must be visible, not silently absorbed).
+    warn: (msg: string) => {
+      warnCalls.push(msg);
+    },
+    error: vi.fn(),
+  },
   setHandler: (def: unknown, fn: (...a: unknown[]) => void) => {
     handlers.set(def, fn);
   },
@@ -103,6 +114,7 @@ beforeEach(() => {
   handlers.clear();
   canPayload = undefined;
   infoState.continueAsNewSuggested = false;
+  warnCalls.length = 0;
   persistedBatches = [];
   markedCalls = [];
   callOrder = [];
@@ -113,6 +125,9 @@ describe('runStateMachine — continue-as-new threshold counts every input', () 
     const config: StateMachineConfig<State, never, Ctx, void, Sig> = {
       states: {
         live: {
+          // Declared because a waiting state must be (#22); the harness behaves identically,
+          // since the driver previously passed its 1 ms default to `condition` regardless.
+          timeout: '1 second',
           fn: async (ctx: Ctx, input: { kind: string }) =>
             input.kind === 'signal'
               ? { context: { count: ctx.count + 1 }, next: 'live' }
@@ -400,6 +415,7 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
     const config: StateMachineConfig<RState, never, Ctx, Resp> = {
       states: {
         a: {
+          timeout: '1 second', // a waiting state must declare one (#22)
           fn: async (ctx: Ctx, input: { kind: string }) =>
             // Updates are delivered to the state fn as kind 'event'.
             input.kind === 'event'
@@ -536,6 +552,76 @@ describe('runStateMachine — projection completion at close', () => {
   });
 });
 
+// ── A waiting state must declare how long it waits (#22) ─────────────────────────────
+// Before this, omitting `timeout` fell to a 1 ms default: a thousand wakes a second, each a
+// workflow task and history events, all counted toward continue-as-new — no error, no
+// warning, the machine just ran hot. Every state in this repo declares one; an omission has
+// only ever been a mistake.
+describe('runStateMachine — a waiting state must declare a timeout (#22)', () => {
+  it('refuses to start when a non-transitional state declares no timeout', async () => {
+    const config: StateMachineConfig<'live', never, Ctx, void> = {
+      states: { live: { fn: async (ctx: Ctx) => ({ context: ctx, next: 'live' }) } } as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+    };
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toThrow(
+      /waiting state\(s\) \[live\] declare no timeout/,
+    );
+  });
+
+  // Transitional states never wait — they synthesise their input and advance — so requiring a
+  // timeout of them would be nonsense.
+  it('does not require a timeout of a transitional state', async () => {
+    const config: StateMachineConfig<'live', never, Ctx, void> = {
+      states: {
+        live: {
+          transitional: true,
+          fn: async (ctx: Ctx) => ({ context: ctx, next: '__terminal:done' }),
+        },
+      } as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+    };
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).resolves.toBeDefined();
+  });
+
+  // The check runs against the registry the driver was HANDED, not a module-level constant:
+  // `buildFulfillerOrderStates()` ships a base registry whose waiting states omit `timeout`
+  // and spreads memo-derived durations in at run time. That correct pattern must pass.
+  it('accepts a timeout injected into the registry at build time', async () => {
+    const base = { live: { fn: async (ctx: Ctx) => ({ context: ctx, next: '__terminal:done' }) } };
+    const built = { ...base, live: { ...base.live, timeout: '1 second' } };
+    const config: StateMachineConfig<'live', never, Ctx, void> = {
+      states: built as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+    };
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).resolves.toBeDefined();
+  });
+
+  // A declared FUNCTION can still resolve to nothing on a given iteration. That must park the
+  // machine and say so — never fall back to spinning.
+  it('parks and warns when a timeout function resolves to nothing', async () => {
+    let calls = 0;
+    const config: StateMachineConfig<'live', never, Ctx, void> = {
+      states: {
+        live: {
+          timeout: () => (calls++ === 0 ? undefined : '1 second'),
+          fn: async (ctx: Ctx) => ({ context: ctx, next: '__terminal:done' }),
+        },
+      } as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+    };
+
+    await runStateMachine(config, { count: 0 }, [], []);
+    expect(warnCalls.some((m) => /resolved to nothing/.test(m))).toBe(true);
+  });
+});
+
 describe('runStateMachine — per-execution state timeouts (ADR-0024)', () => {
   it('resolves a timeout function from the live context each iteration', async () => {
     const resolved: number[] = [];
@@ -570,6 +656,7 @@ describe('runStateMachine — rejected outputs (ADR-0024)', () => {
     const config: StateMachineConfig<'live', Ev, Ctx, Ctx> = {
       states: {
         live: {
+          timeout: '1 second', // a waiting state must declare one (#22)
           fn: async (ctx: Ctx, input: { kind: string; event?: Ev }) => {
             if (input.kind !== 'event') return { context: ctx, next: 'live' };
             if (input.event!.type === 'bad') {
