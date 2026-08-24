@@ -12,6 +12,7 @@ import {
   workflowInfo,
 } from '@temporalio/workflow';
 import {
+  StateConfig,
   StateMachineConfig,
   SingleUpdateRegistration,
   MappedUpdateRegistration,
@@ -57,6 +58,14 @@ function isMappedUpdate<TEvent, TContext, TResponse>(
   return Array.isArray(updates);
 }
 
+/**
+ * Used only when a state's `timeout` FUNCTION resolves to undefined on some iteration (a
+ * missing declaration is refused outright at startup — see the check in `runStateMachine`).
+ * Long on purpose: an unresolved timeout should park the machine until real input arrives,
+ * never busy-poll it. Paired with a warning so the misconfiguration is visible.
+ */
+const UNRESOLVED_TIMEOUT_FALLBACK = '1 day';
+
 export async function runStateMachine<
   TState extends string,
   TEvent,
@@ -97,6 +106,37 @@ export async function runStateMachine<
         signalQueue.push(result);
       });
     }
+  }
+
+  // ── A waiting state MUST declare how long it waits (backlog #22) ──
+  //
+  // Without this, a non-transitional state that omits `timeout` fell to a 1 ms default and
+  // polled a thousand times a second — every wake a workflow task and history events, all
+  // counted toward continue-as-new, with no error and no warning. The machine simply ran
+  // hot. Nothing relies on that default: every state in this repo declares a timeout, and
+  // an omission has only ever been a mistake.
+  //
+  // Checked HERE, against the registry the driver was actually handed, rather than at module
+  // load over an exported constant — `buildFulfillerOrderStates()` legitimately ships a base
+  // registry whose `in_production` and `shipped` omit `timeout` and spreads the memo-derived
+  // durations in at run time. A module-load check would reject that correct pattern; this one
+  // sees the effective config.
+  //
+  // A function form counts as declared: it is resolved per iteration and cannot be evaluated
+  // here (no context yet, and it may legitimately vary). The runtime arm below covers it.
+  const undeclared = Object.entries(config.states)
+    .filter(([, def]) => {
+      const d = def as StateConfig<TState, TEvent, TContext, TResponse, TSignal>;
+      return !d.transitional && d.timeout === undefined;
+    })
+    .map(([name]) => name);
+  if (undeclared.length > 0) {
+    throw ApplicationFailure.nonRetryable(
+      `State machine misconfigured: waiting state(s) [${undeclared.join(', ')}] declare no ` +
+        `timeout. A non-transitional state must say how long it waits, or it will poll ` +
+        `continuously. Add \`timeout\` to each, or mark them \`transitional\` if they are ` +
+        `meant to advance immediately.`,
+    );
   }
 
   // ── Register Update Handlers ──
@@ -234,10 +274,19 @@ export async function runStateMachine<
         input = { kind: 'timeout', timestamp: new Date().toISOString() };
         inputEventDesc = 'automatic';
       } else {
-        const timeout =
-          (typeof stateConfig.timeout === 'function'
+        // The startup check above guarantees a DECLARATION exists; a function form can
+        // still resolve to nothing on a given iteration. Park rather than spin, and say so —
+        // a silent 1 ms poll is the failure mode #22 exists to prevent.
+        const resolved =
+          typeof stateConfig.timeout === 'function'
             ? stateConfig.timeout(ctx)
-            : stateConfig.timeout) ?? '1 millisecond';
+            : stateConfig.timeout;
+        if (resolved === undefined || resolved === null) {
+          log.warn('State timeout function resolved to nothing — parking instead of polling', {
+            state: currentStateName,
+          });
+        }
+        const timeout = resolved ?? UNRESOLVED_TIMEOUT_FALLBACK;
         const woke = await condition(
           () => updateQueue.length > 0 || signalQueue.length > 0,
           timeout,
