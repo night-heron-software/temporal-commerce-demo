@@ -114,6 +114,16 @@ export interface StateMachineConfig<
 > {
   states: StateRegistry<TState, TEvent, TContext, TResponse, TSignal>;
   initialState: TState;
+  /**
+   * Aggressive iteration bound: continue-as-new once this many INPUTS (updates, signals and
+   * timeouts alike — every one grows history) have been processed. Defaults to 100.
+   *
+   * This is a SECONDARY trigger. The primary one is the SDK's own
+   * `workflowInfo().continueAsNewSuggested`, which reflects actual history size; a fixed
+   * count cannot, because an input's event cost varies by an order of magnitude here. Keep
+   * both: the suggestion catches machines with expensive inputs, this bound caps storage on
+   * machines whose inputs are cheap (backlog #20).
+   */
   continueAsNewThreshold?: number;
   serializeForContinueAsNew?: (ctx: TContext, currentState: TState) => unknown;
   onTerminal?: (ctx: TContext, terminalState: string) => Promise<void>;

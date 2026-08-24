@@ -9,6 +9,7 @@ import {
   SignalDefinition,
   ApplicationFailure,
   TemporalFailure,
+  workflowInfo,
 } from '@temporalio/workflow';
 import {
   StateMachineConfig,
@@ -181,8 +182,26 @@ export async function runStateMachine<
       }
 
       // 2. Continue-As-New check (top of loop, non-blocking drain)
+      //
+      // TWO triggers, deliberately, because they catch opposite failure modes:
+      //
+      //   `continueAsNewSuggested` is the SERVER's view of history size and is the primary
+      //   trigger. An input's event cost varies by an order of magnitude in this framework —
+      //   an update running several activities through prepare/finalize emits many events,
+      //   an idle tick a handful — so no fixed count approximates history size. Counting
+      //   alone let a busy machine sail past the point Temporal wanted it to roll over.
+      //
+      //   `continueAsNewThreshold` (inputs) remains as an aggressive iteration bound, which
+      //   Temporal's own best-practice list recommends alongside the suggestion — it caps
+      //   storage and per-run cost on machines whose inputs are cheap enough that the
+      //   suggestion would take a very long time to fire.
+      //
+      // The pitfall was using the count INSTEAD of the suggestion; using both is the
+      // documented shape (backlog #20).
       const threshold = config.continueAsNewThreshold || 100;
-      if (config.serializeForContinueAsNew && inputCount >= threshold) {
+      const overIterationBound = inputCount >= threshold;
+      const historySuggests = workflowInfo().continueAsNewSuggested === true;
+      if (config.serializeForContinueAsNew && (historySuggests || overIterationBound)) {
         // Wait for handlers to finish OR new input to arrive
         await condition(
           () => allHandlersFinished() || updateQueue.length > 0 || signalQueue.length > 0,

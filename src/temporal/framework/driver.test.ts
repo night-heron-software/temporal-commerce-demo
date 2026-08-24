@@ -27,6 +27,8 @@ const { MockTemporalFailure, MockCancelledError } = vi.hoisted(() => {
 });
 let canPayload: unknown;
 const handlers = new Map<unknown, (...a: unknown[]) => void>();
+// Mutable so a test can turn on the server's continue-as-new suggestion (#20).
+const infoState = { continueAsNewSuggested: false };
 // Captures batches handed to the persistWorkflowTransitions activity (ADR-0010 recorder).
 let persistedBatches: Array<Array<Record<string, unknown>>> = [];
 // Captures calls to the markProjectionsCompleted activity (projection completion).
@@ -76,6 +78,9 @@ vi.mock('@temporalio/workflow', () => ({
     runId: 'run-1',
     workflowType: 'cartWorkflow',
     searchAttributes: { StoreId: ['store-1'], CorrelationId: ['cart-1'], Domain: ['cart'] },
+    // Server-driven continue-as-new hint. Tests flip this to assert the PRIMARY trigger
+    // independently of the iteration bound (#20).
+    continueAsNewSuggested: infoState.continueAsNewSuggested,
   }),
 }));
 
@@ -97,6 +102,7 @@ const serialize = (ctx: Ctx, state: State) => ({ restored: ctx, state });
 beforeEach(() => {
   handlers.clear();
   canPayload = undefined;
+  infoState.continueAsNewSuggested = false;
   persistedBatches = [];
   markedCalls = [];
   callOrder = [];
@@ -135,6 +141,63 @@ describe('runStateMachine — continue-as-new threshold counts every input', () 
   });
 
   it('counts timeouts too (transitional self-loop fires CAN at the threshold)', async () => {
+    const config: StateMachineConfig<State, never, Ctx, void, Sig> = {
+      states: {
+        live: {
+          transitional: true,
+          fn: async (ctx: Ctx) => ({ context: { count: ctx.count + 1 }, next: 'live' }),
+        },
+      } as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+      continueAsNewThreshold: THRESHOLD,
+      serializeForContinueAsNew: serialize as Any,
+    };
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toBeInstanceOf(
+      ContinueAsNewError,
+    );
+    expect(canPayload).toEqual({ restored: { count: THRESHOLD }, state: 'live' });
+  });
+
+  // ── The server's suggestion is the PRIMARY trigger (#20) ──────────────────────────
+  // A fixed input count cannot approximate history size: an update running several
+  // activities through prepare/finalize emits an order of magnitude more events than an
+  // idle tick. Counting alone let a machine with expensive inputs sail past the point
+  // Temporal wanted it to roll over. `continueAsNewSuggested` is the server's own view.
+  it('continues as new on the SDK suggestion, well below the iteration bound', async () => {
+    infoState.continueAsNewSuggested = true;
+    let inputs = 0;
+    const config: StateMachineConfig<State, never, Ctx, void, Sig> = {
+      states: {
+        live: {
+          transitional: true,
+          fn: async (ctx: Ctx) => {
+            inputs += 1;
+            return { context: { count: ctx.count + 1 }, next: 'live' };
+          },
+        },
+      } as Any,
+      initialState: 'live',
+      transitionRecording: { enabled: false },
+      // Bound set far out of reach, so ONLY the suggestion can fire this.
+      continueAsNewThreshold: 10_000,
+      serializeForContinueAsNew: serialize as Any,
+    };
+
+    await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toBeInstanceOf(
+      ContinueAsNewError,
+    );
+    // Fired on the first pass — the bound was never approached.
+    expect(inputs).toBeLessThan(10);
+  });
+
+  // The bound still stands on its own: a machine whose inputs are cheap enough that the
+  // suggestion takes a very long time must still cap storage and per-run cost. Temporal's
+  // best-practice list asks for both, and the pitfall was using the count INSTEAD of the
+  // suggestion — not using it at all.
+  it('still continues as new on the iteration bound when the server suggests nothing', async () => {
+    infoState.continueAsNewSuggested = false;
     const config: StateMachineConfig<State, never, Ctx, void, Sig> = {
       states: {
         live: {
