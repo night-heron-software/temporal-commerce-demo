@@ -85,7 +85,7 @@ The cart is the best entry point because everyone understands shopping carts, an
 // Use updateWithStart to lazily create the workflow
 const startOp = new WithStartWorkflowOperation('cartWorkflow', {
   // buildWorkflowStartOptions → workflowId `demo.cart.{cartId}` + correlation Search Attributes
-  // correlationId is REQUIRED — the journey UUID minted at cart creation (ADR-0011)
+  // correlationId is REQUIRED — the journey id, which IS the cartId (ADR-0011 amendment)
   ...buildWorkflowStartOptions({
     storeId: DEMO_STORE_ID,
     domain: 'cart',
