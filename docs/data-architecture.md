@@ -119,8 +119,8 @@ Elasticsearch scaling, which is a solved problem you can buy.
 ## The correlation join key
 
 There are no relational joins in either store, so cross-projection joining happens on a shared
-key: the **correlationId**, a journey UUID minted at cart creation
-([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md)). Every order-flow projection
+key: the **correlationId**, which is the cartId — one id per cart lifecycle
+([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md), 2026-08-12 amendment). Every order-flow projection
 carries it — `orders`, `carts`, `reservations`, `fulfiller_orders`, `fulfillments`, `shipments`,
 and `communications` docs in Elasticsearch — and on the Cassandra side the `inventory_history`
 journal is _partitioned_ by it, while write-side reservation rows and `customer_communications`

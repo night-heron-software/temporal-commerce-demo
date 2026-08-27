@@ -59,9 +59,9 @@ Two vocabularies coexist by design ([ADR-0009](adr/0009-chassaing-decider-transf
 - **Activity-spawn vs. `startChild` + `ABANDON`** — two decoupling tools: activity-spawn when
   there should be _no parent link at all_ (checkout → OMS); `ABANDON` when you want an
   _independent child_ (OMS → fulfillment). See Lesson 23.
-- **Correlation ID** — the journey's own UUID, minted at cart creation (not the cartId), stamped
+- **Correlation ID** — the journey's single lifecycle id, which **is the cartId**, stamped
   on every journey workflow as a Search Attribute
-  ([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md)); one visibility query returns the
+  ([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md), 2026-08-12 amendment); one visibility query returns the
   whole chain, and the order-flow projections and inventory journal join on it.
 - **Transition recording** — the async projection writing every state transition + full context
   snapshot to `workflow_state_transitions` ([ADR-0010](adr/0010-async-transition-recording-projection.md));

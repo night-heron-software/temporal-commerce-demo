@@ -67,7 +67,7 @@ An agent (or CI) can chain these and trust the exit codes; nothing prompts, noth
 An agent debugging this system reads it the way support staff would:
 
 - **One visibility query returns a whole journey** — `CorrelationId = '<correlationId>'` (the
-  journey UUID minted at cart creation) lists every workflow in an order's chain, because every
+  journey id, which is the cartId) lists every workflow in an order's chain, because every
   start is tagged ([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md)).
 - **Every transition is recorded with a full state snapshot**
   ([ADR-0010](adr/0010-async-transition-recording-projection.md)), and the

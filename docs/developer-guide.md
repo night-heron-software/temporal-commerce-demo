@@ -641,7 +641,7 @@ await client.workflow.start('orderWorkflow', {
     storeId: DEMO_STORE_ID,
     domain: 'order',
     entityId: orderId,
-    correlationId, // REQUIRED — the journey UUID, threaded from the cart
+    correlationId, // REQUIRED — the journey id (the cartId), threaded from the cart
     orderId,
     cartId,
   }),
@@ -650,9 +650,11 @@ await client.workflow.start('orderWorkflow', {
 });
 ```
 
-The `correlationId` is a **dedicated journey UUID minted at cart creation** — it is _not_
-the cartId (the cartId identifies one entity in the journey; the correlationId identifies
-the journey itself). The field is required on `BuildWorkflowStartOptionsInput` so no
+The `correlationId` **is the cartId** — one id per cart lifecycle, so a single query
+retrieves everything that cart ever did across every run and checkout
+([ADR-0011](adr/0011-workflow-id-and-correlation-tagging.md), 2026-08-12 amendment). The
+per-run UUID this replaced gave the same cart a different id on every revival, so no one
+query returned its history. The field is required on `BuildWorkflowStartOptionsInput` so no
 caller silently falls back; correlation-less singletons (the inventory service workflow)
 opt out by passing `undefined` explicitly.
 
@@ -885,7 +887,8 @@ The three recipes a contributor actually needs, end to end. Model everything on
 
 1. Declare the signature in the domain's `activities.ts` (contract half); implement in
    `activities-impl.ts` — I/O belongs here, never in the decider.
-2. Register it in the domain worker's activity map; call it from `prepare`/`finalize`/hooks.
+2. Register it in the domain worker's activity map; call it from a block's `prepare`, or from an
+   event-keyed `effects` entry.
 3. If it writes a projection, follow the non-blocking projection pattern
    ([Temporal Patterns & Conventions](#temporal-patterns--conventions)).
 
@@ -1007,8 +1010,8 @@ reindex — but only `system_errors` is guarded against reindexing entirely.) Us
 
 Every inventory mutation — reserve, failed reserve, renew, resurrect, confirm, release, cancel,
 fulfill, transfer, drift correction — is journaled at mutation time to the append-only
-`inventory_history` Cassandra table, partitioned by `correlation_id` — the journey UUID
-(ADR-0011; `__platform__` for correlation-less ops like drift corrections) — with the same
+`inventory_history` Cassandra table, partitioned by `correlation_id` — the journey id, which
+is the cartId (ADR-0011; `__platform__` for correlation-less ops like drift corrections) — with the same
 90-day TTL as `workflow_state_transitions`. System actors (the expiry sweep, a contending
 reserve's inline sweep) journal under the reservation row's **stored** journey key
 (`rowJournalKey`: the row's `correlation_id`, falling back to `cart_id` for legacy rows), never

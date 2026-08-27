@@ -20,7 +20,7 @@ duplicate it.
 3. **State machines are authored, diagrams are generated.** Domains follow prepare → decide →
    evolve with a pure Chassaing decider core ([ADR-0003](docs/adr/0003-prepare-decide-evolve-state-machines.md),
    [ADR-0009](docs/adr/0009-chassaing-decider-transfer-pilot.md)). After changing any `states.ts` /
-   `*-decider.ts` / `fulfiller-states.ts`, run `npm run docs:diagrams` and commit the result —
+   `fulfiller-states.ts`, run `npm run docs:diagrams` and commit the result —
    CI fails stale diagrams; never hand-edit `docs/reference/state-machine-diagrams.md`.
 4. **Test policy (overrides "don't add tests unless asked").** Changes to decider / states files
    **require** co-located `*.test.ts` unit tests. The suite must stay runnable with zero
