@@ -296,6 +296,53 @@ describe('runStateMachine — transition recording (ADR-0010)', () => {
     expect(JSON.parse(records[0].contextSnapshot as string)).toEqual({ count: 0 });
   });
 
+  /**
+   * Cancellation must leave an ENDING on the timeline — state-machine issue #11.
+   *
+   * The bug had two halves and this pins both. Nothing recorded an ending, because the only
+   * `recorder.record()` call site is inside the main loop and external cancellation interrupts
+   * the loop rather than transitioning through it. And the flush could not survive, because
+   * `shutdownRecorder()` awaits a coroutine created in the workflow's ROOT scope, already
+   * rejected by the time the catch runs — so the buffered rows were dropped.
+   *
+   * Without the fix the timeline simply stops at the last ordinary transition, and a cancelled
+   * workflow reads as still sitting in its last state forever.
+   */
+  it('records a terminal row when cancelled, and flushes it without the coroutine', async () => {
+    const config: StateMachineConfig<RState, never, Ctx, void> = {
+      states: {
+        a: { transitional: true, fn: async (ctx: Ctx) => ({ context: ctx, next: 'b' }) },
+        b: {
+          transitional: true,
+          fn: async () => {
+            throw new MockCancelledError('cancelled from outside');
+          },
+        },
+      } as Any,
+      initialState: 'a',
+    };
+
+    // Resolves rather than rejects: cancellation is an ending, not a failure.
+    await runStateMachine(config, { count: 0 }, [], []);
+
+    const records = persistedBatches.flat();
+    const ending = records[records.length - 1];
+    expect(ending).toMatchObject({
+      fromState: 'b',
+      toState: '__terminal:cancelled',
+      // 'cancellation', not 'timeout'/'automatic': it separates "the parent killed this" from
+      // a machine that routed itself to a cancelled terminal on its own.
+      triggerKind: 'cancellation',
+    });
+    // The ending is the LAST row, and the rows before it survived the same flush — the bug
+    // dropped the whole buffer, not just the terminal one.
+    expect(records.map((r) => [r.fromState, r.toState])).toEqual([
+      ['', 'a'],
+      ['a', 'b'],
+      ['b', '__terminal:cancelled'],
+    ]);
+  });
+
   it("records a genuine elapsed wait as 'timeout' (distinct from transitional 'automatic')", async () => {
     const config: StateMachineConfig<RState, never, Ctx, void> = {
       states: {
@@ -565,8 +612,11 @@ describe('runStateMachine — a waiting state must declare a timeout (#22)', () 
       transitionRecording: { enabled: false },
     };
 
+    // Message now comes from `describeMissingTimeouts`, which also names the machine. The
+    // load-bearing part is unchanged and still asserted: it names the offending STATE, so the
+    // fix is obvious from the failure alone.
     await expect(runStateMachine(config, { count: 0 }, [], [])).rejects.toThrow(
-      /waiting state\(s\) \[live\] declare no timeout/,
+      /waiting state\(s\) with no timeout: live/,
     );
   });
 
