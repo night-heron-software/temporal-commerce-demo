@@ -1,3 +1,4 @@
+import { workflowCorrelationId } from '../framework/identity';
 import { getExternalWorkflowHandle, log, setHandler } from '@temporalio/workflow';
 import { releaseCartItem, indexCart } from './activities';
 import { buildCartDocument } from './document-builder';
@@ -92,7 +93,13 @@ export async function cartWorkflow(input: CartWorkflowInput): Promise<CartDetail
   let currentStatus = (inputCheckoutInProgress ? 'checkout' : 'active') as CartDetails['status'];
 
   // Query Handlers — synthesize status from driver state
-  setHandler(getCartQuery, () => ({ ...workflowContext.cart, status: currentStatus }));
+  // `correlationId` comes off this workflow's own Search Attribute — the workflow is the
+  // single authority for the journey key; the storefront only caches it (ADR-0031).
+  setHandler(getCartQuery, () => ({
+    ...workflowContext.cart,
+    status: currentStatus,
+    correlationId: workflowCorrelationId(),
+  }));
   setHandler(getCheckoutStateQuery, () => workflowContext.cart.checkout || null);
   setHandler(getCheckoutWorkflowIdQuery, () => workflowContext.checkoutWorkflowId);
   setHandler(getUserIdQuery, () => workflowContext.cart.userId);

@@ -211,29 +211,26 @@ describe('active — beginCheckout', () => {
     );
   });
 
-  it('falls back to the cartId when the cart workflow itself is untagged', async () => {
-    // A legacy/untagged cart roots the journey on its cartId rather than producing an
-    // untagged child — an untagged child drops out of every CorrelationId visibility
-    // query and ES journey sweep, orphaning the downstream projections.
-    vi.mocked(workflowInfo).mockReturnValueOnce({
+  it('refuses to start a checkout child from an untagged cart (no cartId fallback)', async () => {
+    // Inverted from the pre-ADR-0031 test, which asserted the exact fallback ADR-0031
+    // removes. Rooting the journey on the cartId files it under an entity key — a mis-filed
+    // journey looks real, while a refusal is at least visible. An untagged cart is a
+    // threading bug to surface, not a case to paper over.
+    vi.mocked(workflowInfo).mockReturnValue({
       workflowId: 'demo.cart.cart-1',
       runId: 'run-1',
       searchAttributes: {},
       workflowType: 'cartWorkflow',
     } as never);
 
-    await CART_STATES.active.fn(makeCtx(), ev({ type: 'beginCheckout' }));
+    const out = await CART_STATES.active.fn(makeCtx(), ev({ type: 'beginCheckout' }));
 
-    const opts = (
-      vi.mocked(startChild).mock.calls[0] as unknown as [
-        unknown,
-        { searchAttributes: Record<string, unknown> },
-      ]
-    )[1];
-    expect(opts.searchAttributes).toMatchObject({
-      CorrelationId: ['cart-1'],
-      CartId: ['cart-1'],
+    expect(out).toMatchObject({
+      next: 'active',
+      rejected: true,
+      error: expect.stringMatching(/No CorrelationId available/),
     });
+    expect(vi.mocked(startChild)).not.toHaveBeenCalled();
   });
 
   it('rejects checkout on an empty cart (no child started)', async () => {

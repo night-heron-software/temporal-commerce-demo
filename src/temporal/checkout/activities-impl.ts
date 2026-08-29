@@ -1,3 +1,4 @@
+import { requireCorrelationId } from '../contracts/constants';
 /**
  * Checkout Activity Implementations
  * Mock payment, console email, real Cassandra-backed inventory
@@ -201,9 +202,10 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     orderId,
     cartId: input.cartId,
     // The journey's correlationId (ADR-0011) from the ambient activity context (set by
-    // the worker's correlation interceptor). Fallback cartId keeps seed/api paths —
-    // which run outside any workflow — working.
-    correlationId: currentCorrelationId() ?? input.cartId,
+    // the worker's correlation interceptor). No cartId fallback (ADR-0031) — and the old
+    // comment's "keeps seed/api paths working" was stale: the checkout workflow is this
+    // function's only caller, so the ambient key is always in-band here.
+    correlationId: requireCorrelationId(currentCorrelationId(), 'createOrder'),
     customerEmail: input.shippingAddress.email,
     items: input.items,
     shippingAddress: input.shippingAddress,

@@ -1,6 +1,11 @@
 # ADR-0022 — One lifecycle id + order-keyed inventory reservations
 
-- **Status:** Accepted (implemented in PRs #105/#106/#107, 2026-07-31)
+- **Status:** Accepted — **superseded in part by
+  [ADR-0031](0031-correlation-id-is-its-own-key.md) (2026-08-27):** §*One lifecycle id*'s
+  **correlation clause** is reversed; the correlation value is once again its own UUID, distinct
+  from `cartId`/`orderId`. Everything else here stands, including `cartId == orderId` and the
+  order-keyed reservation model. (Implemented in the parent platform's PRs #105/#106/#107,
+  2026-07-31.)
 - **Date:** 2026-07-31
 - **Deciders:** platform / inventory
 - **Tags:** inventory, identity, data-layer, multi-tenancy

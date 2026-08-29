@@ -132,7 +132,7 @@ export function parseWorkflowId(
  * `scripts/register-search-attributes.sh`.
  */
 export const SEARCH_ATTRIBUTE_KEYS = {
-  /** Root id tying the whole journey graph together — the cartId (R5 / ADR-0022: one lifecycle, one id). */
+  /** Root id tying the whole journey graph together — the journey's own UUID (ADR-0031). */
   correlationId: 'CorrelationId',
   storeId: 'StoreId',
   domain: 'Domain',
@@ -148,11 +148,16 @@ export interface BuildWorkflowStartOptionsInput {
   domain: WorkflowDomain;
   entityId: string;
   /**
-   * Root id tying the journey graph together — the cartId (R5, decided 2026-08-11:
-   * the mono's ADR-0022 one-lifecycle-id property; one query returns everything the
-   * cart ever did across runs and checkouts). Still REQUIRED, never defaulted, so no
-   * caller silently omits it; correlation-less singletons (e.g. the inventory service
-   * workflow) opt out by passing `undefined` explicitly.
+   * Root id tying the journey graph together — its own UUID, minted once per shopper
+   * journey at cart creation (ADR-0031, reversing R5's cartId-as-correlation). The cart
+   * workflow owns the value; downstream starts read it off the parent's `CorrelationId`
+   * Search Attribute and thread it here. Deriving it from an entity id is exactly what
+   * ADR-0031 removes: a reused cart id then splices two journeys onto one correlation,
+   * and correlation-keyed reads have no discriminator to tell them apart.
+   *
+   * Still REQUIRED, never defaulted, so no caller silently omits it; correlation-less
+   * singletons (e.g. the inventory service workflow) opt out by passing `undefined`
+   * explicitly.
    */
   correlationId: string | undefined;
   orderId?: string;
@@ -183,6 +188,26 @@ export interface WorkflowStartTagging {
  * With these tags set, the full graph is one visibility query away
  * (`CorrelationId = '<correlationId>'`) instead of a hand-rolled per-domain ID walk.
  */
+/**
+ * Assert a journey correlationId is present, or throw naming the site (ADR-0031).
+ *
+ * Replaces the `?? cartId` child-start fallbacks. Under R5 those were no-ops (the value WAS
+ * the cartId); with the correlation decoupled they would file a journey under the WRONG key,
+ * which is worse than the orphaning they were written to prevent — an orphan is visible as an
+ * absence, a mis-filed journey looks real.
+ *
+ * Pure on purpose, so it is usable from workflow code, activities, and the storefront alike.
+ */
+export function requireCorrelationId(value: string | undefined, context: string): string {
+  if (!value) {
+    throw new Error(
+      `No CorrelationId available for ${context}. A journey id must be threaded from the ` +
+        'root rather than derived from an entity id (ADR-0031).',
+    );
+  }
+  return value;
+}
+
 export function buildWorkflowStartOptions(
   input: BuildWorkflowStartOptionsInput,
 ): WorkflowStartTagging {
@@ -192,7 +217,17 @@ export function buildWorkflowStartOptions(
     [SEARCH_ATTRIBUTE_KEYS.storeId]: [storeId],
     [SEARCH_ATTRIBUTE_KEYS.domain]: [domain],
   };
-  if (correlationId) searchAttributes[SEARCH_ATTRIBUTE_KEYS.correlationId] = [correlationId];
+  if (correlationId !== undefined) {
+    if (!correlationId) {
+      // A falsy-but-defined value is a threading bug, not an opt-out. Silently dropping it
+      // produced an untagged workflow that no visibility sweep could find (ADR-0031).
+      throw new Error(
+        `buildWorkflowStartOptions: empty correlationId for ${domain}/${entityId}. ` +
+          'Pass a real journey id, or `undefined` to opt out deliberately (ADR-0031).',
+      );
+    }
+    searchAttributes[SEARCH_ATTRIBUTE_KEYS.correlationId] = [correlationId];
+  }
   if (orderId) searchAttributes[SEARCH_ATTRIBUTE_KEYS.orderId] = [orderId];
   if (cartId) searchAttributes[SEARCH_ATTRIBUTE_KEYS.cartId] = [cartId];
 

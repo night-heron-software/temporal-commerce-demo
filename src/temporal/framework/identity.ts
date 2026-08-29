@@ -49,7 +49,7 @@ const CORRELATION_ATTRIBUTE = 'CorrelationId';
  * The current workflow's correlationId from its own `CorrelationId` Search Attribute, or
  * undefined when untagged (inventory singleton, service workflows) or outside workflow
  * context (direct unit tests). Downstream `startChild` sites read this and pass it on so
- * the whole journey carries the one correlationId (the cartId — R5 / ADR-0022).
+ * the whole journey carries the one correlationId minted at cart creation.
  */
 export function workflowCorrelationId(): string | undefined {
   try {

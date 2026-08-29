@@ -217,13 +217,17 @@ describe('addItemToCart (updateWithStart lazy create)', () => {
       taskQueue: 'cart-queue',
       workflowIdConflictPolicy: 'USE_EXISTING',
       args: [{ cartId: CART_ID }],
-      // R5 (ADR-0022 one-lifecycle-id): the correlationId IS the cartId — one query
-      // returns everything this cart ever did, across every run and checkout.
+      // ADR-0031: the journey key is its own server-minted UUID, NOT the cartId. Both
+      // attributes must be present AND differ — asserting presence alone would pass under
+      // the welded model this replaces.
       searchAttributes: expect.objectContaining({
-        CorrelationId: [CART_ID],
+        CorrelationId: [expect.stringMatching(/^[0-9a-f-]{36}$/)],
         CartId: [CART_ID],
       }),
     });
+    const mintedCorrelation = (startOps[0].options.searchAttributes as Record<string, string[]>)
+      .CorrelationId[0];
+    expect(mintedCorrelation).not.toBe(CART_ID);
     expect(workflow.executeUpdateWithStart).toHaveBeenCalledWith(Cart.cartUpdate, {
       startWorkflowOperation: startOps[0],
       args: [{ type: 'addItem', variantId: 'var-1', quantity: 2, price: 19.99, ...snapshot }],
@@ -445,7 +449,8 @@ describe('submitOrder', () => {
     });
 
     await removeFromCart(CART_ID, 'li-1');
-    expect(cookieStore.deleted).toEqual(['cartId']);
+    // Both identity pointers retire together (ADR-0031): the cart id and its journey key.
+    expect(cookieStore.deleted).toEqual(['cartId', 'cartCorrelationId']);
   });
 
   it('keeps the cookie while the cart is still shoppable', async () => {
@@ -469,7 +474,8 @@ describe('submitOrder', () => {
     handles[CART_WF_ID].executeUpdate.mockRejectedValueOnce(workflowNotFound());
 
     expect(await removeFromCart(CART_ID, 'li-1')).toBeNull();
-    expect(cookieStore.deleted).toEqual(['cartId']); // a cookie naming a dead workflow is worse than none
+    // a cookie naming a dead workflow is worse than none; the journey key goes with it
+    expect(cookieStore.deleted).toEqual(['cartId', 'cartCorrelationId']);
   });
 
   it("leaves a DIFFERENT cart's cookie alone", async () => {
