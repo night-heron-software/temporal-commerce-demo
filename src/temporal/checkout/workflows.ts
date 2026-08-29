@@ -97,8 +97,20 @@ export async function checkoutWorkflow(
   // ── Track current step (single source of truth: the driver's state) ──
   let currentStep = 'validating' as CheckoutStep;
 
+  // ── The ONE projection from context to the wire CheckoutState ──
+  // Everything a reader sees — the query, every update response, error echoes, and the final
+  // result — goes through here, so the derived fields cannot drift apart per call site. `step`
+  // is derived (evolve never writes it), and `cartVersion` is the version THIS CHECKOUT has
+  // priced — checkout-owned, so `hasUnacknowledgedCartChange` compares two numbers with one
+  // authority instead of racing the cart workflow's live version against a checkout baseline.
+  const asCheckoutState = (base?: CheckoutState): CheckoutState => ({
+    ...(base ?? ctx.state),
+    step: currentStep,
+    cartVersion: ctx.cartVersion,
+  });
+
   // Query handler (read-only) — returns state with computed step
-  setHandler(getCheckoutStateQuery, () => ({ ...ctx.state, step: currentStep }));
+  setHandler(getCheckoutStateQuery, () => asCheckoutState());
 
   // ── State machine run ──
   const config: StateMachineConfig<
@@ -142,12 +154,11 @@ export async function checkoutWorkflow(
   // message attached; responses always carry the derived step (evolve never writes it).
   const stateFormatters = {
     formatError: (err: string, currentCtx: CheckoutContext): CheckoutState => ({
-      ...currentCtx.state,
+      ...asCheckoutState(currentCtx.state),
       error: err,
-      step: currentStep,
     }),
     formatResponse: (res: CheckoutState | void): CheckoutState | undefined =>
-      res ? { ...res, step: currentStep } : undefined,
+      res ? asCheckoutState(res) : undefined,
   };
 
   const updateHandlers: MappedUpdateRegistration<
@@ -228,7 +239,7 @@ export async function checkoutWorkflow(
     timedOut: false,
     order: ctx.state.order,
     error: ctx.state.error,
-    finalState: { ...ctx.state, step: currentStep },
+    finalState: asCheckoutState(),
     finalStep: currentStep,
     checkoutVersion: ctx.checkoutVersion,
   };

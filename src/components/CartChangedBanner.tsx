@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { acknowledgeCartChange, getCheckoutState } from '@/app/shop/cart-actions';
 import type { Cart } from '@/temporal/contracts';
+import { hasUnacknowledgedCartChange } from '@/temporal/contracts/cart';
 import { cartLineLabel } from '@/app/shop/cart-line-display';
 
 /**
@@ -85,7 +86,7 @@ export function CartChangedBanner() {
   const { cart, cartId, refreshCart } = useCart();
   const router = useRouter();
   const [dismissing, setDismissing] = useState(false);
-  const [acknowledgedVersion, setAcknowledgedVersion] = useState<number | undefined>(undefined);
+  const [checkoutState, setCheckoutState] = useState<Cart.CheckoutState | null>(null);
 
   // Poll cart + LIVE checkout state while mounted so a recompute lands here without a
   // manual reload (F5). The acknowledged version lives only on the checkout child.
@@ -95,7 +96,7 @@ export function CartChangedBanner() {
     const tick = () => {
       refreshCart();
       getCheckoutState(cartId).then((state) => {
-        if (!cancelled) setAcknowledgedVersion(state?.cartVersionAcknowledged);
+        if (!cancelled) setCheckoutState(state ?? null);
       });
     };
     tick();
@@ -106,11 +107,14 @@ export function CartChangedBanner() {
     };
   }, [cartId, refreshCart]);
 
-  const inCheckout =
-    !!cart && !!cartId && cart.status === 'checkout' && acknowledgedVersion !== undefined;
+  const inCheckout = !!cart && !!cartId && cart.status === 'checkout' && checkoutState !== null;
 
-  const currentVersion = cart?.cartVersion ?? 0;
-  const changed = inCheckout && currentVersion > (acknowledgedVersion ?? 0);
+  // Both numbers come from the CHECKOUT state — one workflow, one RPC, one authority
+  // (`asCheckoutState` projects the version this checkout priced). Comparing the cart query's
+  // live version against the checkout's acknowledged baseline raced two workflows read by two
+  // independent RPCs, so any timing gap between them read as a content change.
+  const changed = inCheckout && hasUnacknowledgedCartChange(checkoutState);
+  const currentVersion = checkoutState?.cartVersion ?? cart?.cartVersion ?? 0;
 
   // While the cart is in its APPROVED state, keep a snapshot to diff against later.
   useEffect(() => {
@@ -142,7 +146,10 @@ export function CartChangedBanner() {
     setDismissing(true);
     try {
       await acknowledgeCartChange(cartId, currentVersion);
-      setAcknowledgedVersion(currentVersion); // clear now, not on the next poll tick
+      // Clear now, not on the next poll tick.
+      setCheckoutState((prev) =>
+        prev ? { ...prev, cartVersionAcknowledged: currentVersion } : prev,
+      );
       await refreshCart();
     } catch {
       // Non-blocking
