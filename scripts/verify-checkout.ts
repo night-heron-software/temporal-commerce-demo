@@ -38,8 +38,10 @@ async function run() {
     // 2. Connect to Temporal
     const client = await getTemporalClient();
     const cartId = randomUUID();
-    // The correlationId IS the cartId (R5 / ADR-0022 one-lifecycle-id property).
-    const correlationId = cartId;
+    // The journey key is its own UUID (ADR-0031, reversing R5's cartId-as-correlation).
+    // Found by validation run -011: this script kept minting the welded pair after the
+    // src/ sweep, so script journeys read as R5-era in every era-detection heuristic.
+    const correlationId = randomUUID();
     const cartStart = buildWorkflowStartOptions({
       storeId: DEMO_STORE_ID,
       domain: 'cart',

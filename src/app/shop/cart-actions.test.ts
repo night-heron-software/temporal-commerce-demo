@@ -532,6 +532,25 @@ describe('submitOrder', () => {
 // It used to appear on success and on a returned refusal only. A domain error that THREW logged
 // `err` and no `ok` at all, so an operator filtering on the field saw every success and only some
 // failures: the thrown ones were absent from the count rather than counted as failures.
+// ── The correlation cookie is cached on the CREATING mutation (run -011 Defect #4 / #73) ──
+// Without this, the creating mutation's mint agrees with the workflow's answer, reconcile
+// early-returns without writing, and every cart warned "cache stale" on its second mutation
+// while logging that mutation under a discarded key.
+describe('correlation cookie caches on mint', () => {
+  it('writes the scoped cookie on the first (creating) mutation, not only on a later disagreement', async () => {
+    installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.executeUpdateWithStart.mockResolvedValue({ cartId: CART_ID, status: 'active' });
+
+    await addItemToCart(CART_ID, 'var-1', 1, 9.99);
+
+    const cookie = cookieStore.get('cartCorrelationId')?.value ?? '';
+    // Scoped shape <cartId>:<uuid> — present after ONE mutation.
+    expect(cookie.startsWith(`${CART_ID}:`)).toBe(true);
+    expect(cookie.slice(CART_ID.length + 1)).toMatch(/^[0-9a-f-]{36}$/);
+  });
+});
+
 describe('every action outcome carries ok', () => {
   /** The `ok` values on lines whose msg matches, across both log levels. */
   function okValuesFor(msg: string): unknown[] {
