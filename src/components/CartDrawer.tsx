@@ -4,6 +4,7 @@ import { useCart } from '@/context/CartContext';
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { beginCheckout } from '@/app/shop/cart-actions';
+import { destinationFor } from '@/app/shop/checkout/checkout-routing';
 import { cartLineTitle } from '@/app/shop/cart-line-display';
 import { IdChip } from '@/components/EntityIds';
 
@@ -13,7 +14,7 @@ interface CartDrawerProps {
 }
 
 export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
-  const { cart, cartId, removeItem, updateQuantity, loading } = useCart();
+  const { cart, cartId, removeItem, updateQuantity, loading, error, clearError } = useCart();
   const router = useRouter();
   const pathname = usePathname();
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -80,6 +81,63 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
             </div>
           ) : (
             <div className="space-y-4">
+              {/*
+                A checkout is live. Say so BEFORE the shopper edits, not after — an edit here is
+                real, and the checkout will ask the shopper to re-approve the new totals (the
+                parent platform's run-015 OB#2: the old warn-at-mutation modal arrived unannounced).
+              */}
+              {cart.status === 'checkout' && cart.checkout?.step !== 'failed' && (
+                <div className="bg-[var(--heron-gold)]/20 border border-[var(--heron-gold)] rounded-xl p-3">
+                  <p className="text-sm font-semibold text-white">
+                    You have a checkout in progress
+                  </p>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    Changes you make here will update it — you&apos;ll be asked to review the new
+                    total before placing the order.
+                  </p>
+                </div>
+              )}
+
+              {/* Checkout failure recovery: the failure is otherwise visible only in checkout
+                  state nobody polls once the shopper is back on the shop. */}
+              {cart.checkout?.step === 'failed' && cart.checkout?.error && (
+                <div className="bg-red-900/30 border border-red-700 rounded-xl p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <p className="text-red-300 text-sm font-medium mb-1">
+                        Checkout could not proceed
+                      </p>
+                      <p className="text-red-400/80 text-xs">{cart.checkout.error}</p>
+                      <p className="text-zinc-400 text-xs mt-2">
+                        Remove the unavailable items from your cart, then try checkout again.
+                      </p>
+                    </div>
+                    <button
+                      onClick={clearError}
+                      className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 flex-shrink-0"
+                      title="Dismiss"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Generic cart error from the context (mutation failures surface here, in the
+                  drawer the shopper is looking at, not only in a console). */}
+              {error && cart.checkout?.step !== 'failed' && (
+                <div className="bg-red-900/30 border border-red-700 rounded-xl p-3 flex items-start justify-between gap-2">
+                  <p className="text-red-300 text-xs">{error}</p>
+                  <button
+                    onClick={clearError}
+                    className="text-zinc-500 hover:text-zinc-300 flex-shrink-0"
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
               {cart.items.map((item) => (
                 <div
                   key={item.lineItemId}
@@ -177,17 +235,23 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                 <span>-${(cart.totalDiscounts / 100).toFixed(2)}</span>
               </div>
             )}
-            <div className="flex justify-between text-zinc-400">
-              <span>Tax</span>
-              <span>${(cart.totalTax / 100).toFixed(2)}</span>
-            </div>
+            {/*
+              No tax and no shipping here, deliberately: BOTH are address-derived, and a cart has
+              no address. The cart's own `totalTax` is a flat pre-address estimate and
+              `cart.totalPrice` folds it in, which is how a drawer comes to print one figure while
+              the checkout the shopper is standing in says another (the parent platform's run-016
+              Defect #5). A cart can only honestly total what it holds; the checkout owns the rest.
+            */}
             <div className="flex justify-between text-xl font-bold text-white pt-2 border-t border-zinc-700">
               <span>Total</span>
-              <span>${(cart.totalPrice / 100).toFixed(2)}</span>
+              <span>${((cart.subtotalPrice - cart.totalDiscounts) / 100).toFixed(2)}</span>
             </div>
+            <p className="text-sm text-zinc-500 italic">Shipping and tax calculated at checkout</p>
 
-            {/* The cartId IS the journey's correlationId (remediation R5), so it is the one
-                value every diagnostic keys off: `temporal workflow describe demo.cart.<id>`,
+            {/* The cartId is the ENTITY key — since ADR-0031 the journey correlationId is its
+                own UUID again (carried on cart.correlationId, minted at cart creation). The
+                cartId stays the value diagnostics key off: `temporal workflow describe
+                demo.cart.<id>`,
                 an inventory_history query, a validation station, a bug report. Surfacing it
                 here is deliberate — this repo's shopper surface is developer-facing, and the
                 alternative was fishing the id out of a cookie by hand (backlog #9, raised
@@ -213,11 +277,14 @@ export function CartDrawer({ isOpen, onClose }: CartDrawerProps) {
                 setCheckoutError(null);
                 try {
                   const updatedCart = await beginCheckout(cartId);
+                  const destination = destinationFor(updatedCart?.checkout);
                   if (
-                    updatedCart?.checkout?.step === 'shipping' ||
-                    updatedCart?.checkout?.step === 'validating'
+                    (updatedCart?.checkout?.step === 'shipping' ||
+                      updatedCart?.checkout?.step === 'validating') &&
+                    destination
                   ) {
-                    router.push('/shop/checkout/shipping');
+                    // Derived from the state the update just returned (mono-issue-0318).
+                    router.push(destination);
                     onClose();
                   } else if (updatedCart?.checkout?.error) {
                     setCheckoutError(updatedCart.checkout.error);

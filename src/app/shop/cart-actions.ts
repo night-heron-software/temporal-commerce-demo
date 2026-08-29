@@ -247,7 +247,7 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
     }
     const domainReason = domainMessageOf(e);
     log.warn(
-      { correlationId, cartId, command, err: domainReason ?? (e as Error).message },
+      { correlationId, cartId, command, ok: false, err: domainReason ?? (e as Error).message },
       'cart action failed',
     );
     // Re-throw carrying the DOMAIN's sentence so the UI can show it instead of guessing.
@@ -294,7 +294,7 @@ async function runCheckoutUpdate<TReturn, TArgs extends any[]>(
     }
     const domainReason = domainMessageOf(e);
     log.warn(
-      { checkoutWorkflowId, action, err: domainReason ?? (e as Error).message },
+      { checkoutWorkflowId, action, ok: false, err: domainReason ?? (e as Error).message },
       'checkout action failed',
     );
     if (domainReason) throw new Error(domainReason, { cause: e });
@@ -527,8 +527,11 @@ export async function submitOrder(
   ])) as Cart.CheckoutState | null;
 
   if (state?.step === 'complete') {
-    const cookieStore = await cookies();
-    cookieStore.delete(CART_ID_COOKIE);
+    // Through retireCartCookie, NOT a bare delete: its same-cart guard means an older tab
+    // completing checkout cannot clear a NEWER cart's cookie (the two-tab hazard c6d278d
+    // guarded at the other clear sites — this one predated it), and it retires the journey
+    // correlation cookie alongside (ADR-0031).
+    await retireCartCookie(cartId, 'checkout complete');
   }
 
   return state;

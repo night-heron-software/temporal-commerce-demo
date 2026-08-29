@@ -31,8 +31,15 @@ vi.mock('next/headers', () => ({ cookies: async () => cookieStore }));
 vi.mock('@/lib/temporal-client', () => ({
   getTemporalClient: async () => ({ workflow }),
 }));
+/** One stable logger, so tests can assert on the FIELDS an action logged (mono-issue-0350). */
+const logSpy = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+}));
 vi.mock('@/lib/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  createLogger: () => logSpy,
 }));
 vi.mock('@/lib/variant-display', () => ({ resolveVariantDisplay }));
 vi.mock('@/lib/shopper-session', () => ({ getSignedInShopper }));
@@ -332,10 +339,27 @@ describe('submitOrder', () => {
 
     handles['ck-1'].executeUpdate.mockResolvedValueOnce({ step: 'complete' });
     expect(await submitOrder(CART_ID)).toEqual({ step: 'complete' });
-    expect(cookieStore.deleted).toEqual(['cartId']);
+    // Both identity pointers retire together (ADR-0031): the cart id and its journey key.
+    expect(cookieStore.deleted).toEqual(['cartId', 'cartCorrelationId']);
     expect(handles['ck-1'].executeUpdate).toHaveBeenCalledWith(Checkout.submitOrderUpdate, {
       args: [{ reviewedCartVersion: undefined }],
     });
+  });
+
+  it("an older tab completing checkout does NOT clear a NEWER cart's cookie", async () => {
+    // The two-tab hazard: this clear site was a bare `cookieStore.delete` predating c6d278d's
+    // guards, so tab A finishing its checkout wiped the cookie tab B had already re-minted.
+    // Routed through retireCartCookie, the same-cart guard makes the clear conditional.
+    const handles = installHandles();
+    cookieStore.set('cartId', 'a-newer-cart-id');
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].query.mockResolvedValue('ck-1');
+    workflow.getHandle('ck-1');
+    handles['ck-1'].executeUpdate.mockResolvedValueOnce({ step: 'complete' });
+
+    expect(await submitOrder(CART_ID)).toEqual({ step: 'complete' });
+    expect(cookieStore.deleted).toEqual([]);
+    expect(cookieStore.get('cartId')?.value).toBe('a-newer-cart-id');
   });
 
   // ── The UI submit must carry the version it rendered (#17 / run -009 F-2) ──────────
@@ -501,5 +525,78 @@ describe('submitOrder', () => {
 
     expect(await submitOrder(CART_ID)).toBeNull();
     expect(cookieStore.deleted).toEqual([]);
+  });
+});
+
+// ── `ok` is TOTAL across every action outcome (mono-issue-0350) ────────────────────────
+// It used to appear on success and on a returned refusal only. A domain error that THREW logged
+// `err` and no `ok` at all, so an operator filtering on the field saw every success and only some
+// failures: the thrown ones were absent from the count rather than counted as failures.
+describe('every action outcome carries ok', () => {
+  /** The `ok` values on lines whose msg matches, across both log levels. */
+  function okValuesFor(msg: string): unknown[] {
+    return [...logSpy.info.mock.calls, ...logSpy.warn.mock.calls]
+      .filter((c) => c[1] === msg)
+      .map((c) => (c[0] as Record<string, unknown>).ok);
+  }
+
+  it('CONTROL: a successful mutation still logs ok: true', async () => {
+    // Without this the fix could satisfy every other assertion by logging `ok: false` everywhere.
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockResolvedValueOnce({
+      cartId: CART_ID,
+      status: 'active',
+      items: [{ lineItemId: 'li-2' }],
+    });
+    await removeFromCart(CART_ID, 'li-1');
+    expect(okValuesFor('cart action done')).toEqual([true]);
+  });
+
+  it('a THROWN domain error logs ok: false — the defect', async () => {
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+    handles[CART_WF_ID].executeUpdate.mockRejectedValueOnce(
+      new Error('Inventory reservation failed: insufficient stock'),
+    );
+    await expect(removeFromCart(CART_ID, 'li-1')).rejects.toThrow(/insufficient stock/);
+    expect(okValuesFor('cart action failed')).toEqual([false]);
+  });
+
+  it('no action outcome is EVER logged without ok', async () => {
+    // The assertion that actually closes the class: not "these lines have it" but "no line lacks
+    // it", so a branch added later cannot quietly reopen the gap. Drives every outcome kind.
+    const handles = installHandles();
+    cookieStore.set('cartId', CART_ID);
+    workflow.getHandle(CART_WF_ID);
+
+    handles[CART_WF_ID].executeUpdate.mockResolvedValueOnce({
+      cartId: CART_ID,
+      status: 'active',
+      items: [{ lineItemId: 'li-2' }],
+    });
+    await removeFromCart(CART_ID, 'li-1'); // success
+
+    handles[CART_WF_ID].executeUpdate.mockRejectedValueOnce(new Error('boom'));
+    await removeFromCart(CART_ID, 'li-1').catch(() => undefined); // thrown
+
+    cookieStore.set('cartId', CART_ID);
+    handles[CART_WF_ID].executeUpdate.mockRejectedValueOnce(workflowNotFound());
+    await removeFromCart(CART_ID, 'li-1'); // workflow gone
+
+    // `… action start` is deliberately excluded: it is the OPENING line, logged before anything
+    // has happened, so it has no outcome to report. Everything else on that prefix does.
+    const outcomes = [...logSpy.info.mock.calls, ...logSpy.warn.mock.calls].filter(
+      (c) => /^(cart|checkout) action /.test(String(c[1])) && !/ start$/.test(String(c[1])),
+    );
+    expect(outcomes.length).toBeGreaterThanOrEqual(3); // one per outcome kind driven above
+    for (const [fields, msg] of outcomes) {
+      expect(
+        typeof (fields as Record<string, unknown>).ok,
+        `"${String(msg)}" logged no ok field`,
+      ).toBe('boolean');
+    }
   });
 });

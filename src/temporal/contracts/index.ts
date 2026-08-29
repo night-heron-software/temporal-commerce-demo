@@ -13,3 +13,9 @@ export * from './common';
 export * as Constants from './constants';
 export * from './constants';
 export * as Elasticsearch from './elasticsearch';
+export * as Communications from './communications';
+export * from './activity-tagging';
+// NOTE: client-reachable components deliberately deep-import pure modules (elasticsearch,
+// communications) instead of using this barrel — it carries Temporal update/query definitions,
+// and pulling those into a client bundle is the parent platform's R8/#45 bug class. Keep the
+// "Direct module import" comments at those sites.

@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
 import type { Cart } from '@/temporal/contracts';
 import { validateShippingAddressFields } from '@/temporal/contracts/cart';
+import { destinationFor } from '../checkout-routing';
 
 // Semi-random test address generator
 function generateTestAddress(): Cart.ShippingAddress {
@@ -79,7 +80,7 @@ function generateTestAddress(): Cart.ShippingAddress {
 
 export default function ShippingPage() {
   const router = useRouter();
-  const { cart, cartId, resolved, refreshCart } = useCart();
+  const { cart, cartId, initializing, refreshCart } = useCart();
   const { shopper, savedAddress, signIn, signOut, saveAddress } = useShopper();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -203,9 +204,11 @@ export default function ShippingPage() {
       });
 
       const checkoutState = await setShippingAddress(cartId, formData);
-      if (checkoutState?.step === 'payment') {
+      const destination = destinationFor(checkoutState);
+      if (checkoutState?.step === 'payment' && destination) {
         await refreshCart();
-        router.push('/shop/checkout/payment');
+        // Derived from the state the update just returned (mono-issue-0318, the class).
+        router.push(destination);
       } else if (checkoutState?.error) {
         setError(checkoutState.error);
       } else if (!checkoutState) {
@@ -272,7 +275,7 @@ export default function ShippingPage() {
 
   // "No cart" is a distinct state from "still looking" (#12): without the split this spun
   // forever whenever the cart was terminal or the cookie was gone.
-  if (resolved && !cart) {
+  if (!initializing && !cart) {
     return (
       <div className="min-h-screen flex items-center justify-center p-8">
         <div className="max-w-md text-center">
