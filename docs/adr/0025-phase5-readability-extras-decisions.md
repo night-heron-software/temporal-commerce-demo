@@ -75,7 +75,7 @@ Consumers already treat them that way:
 - Every `executeUpdate` call site wraps in try/catch — the storefront's
   `executeCheckoutUpdate` ([cart-actions.ts](../../src/app/shop/cart-actions.ts) §199)
   and each admin/customer order action
-  ([admin-order-actions.ts](<../../apps/storefront/src/app/store-admin/(protected)/admin-order-actions.ts>)).
+  ([admin-order-actions.ts](<https://github.com/night-heron-software/nightheron-mono/blob/main/apps/storefront/src/app/store-admin/(protected)/admin-order-actions.ts>)).
   OMS's refund/return rejections surface here as typed failures with the guard's reason (proven
   live in the Phase 3 validation: `Unknown line item: bogus-line` reached the caller).
 - The returned state, inline `error` included, is passed through to the UI **as the contract** —

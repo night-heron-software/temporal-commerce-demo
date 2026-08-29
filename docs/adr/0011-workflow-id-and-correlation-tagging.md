@@ -37,13 +37,13 @@ compile. Inline ID construction is banned by a custom ESLint rule.
 `SEARCH_ATTRIBUTE_KEYS` defines five custom **Keyword Search Attributes** set at every workflow
 start:
 
-| Attribute       | Purpose                                                                                                    |
-| --------------- | ---------------------------------------------------------------------------------------------------------- |
-| `CorrelationId` | root id tying the whole journey together — the `cartId` itself, one id per cart lifecycle (see Amendments) |
-| `StoreId`       | store filter (`demo`)                                                                                      |
-| `Domain`        | filter by stage                                                                                            |
-| `OrderId`       | order-scoped queries                                                                                       |
-| `CartId`        | cart-scoped queries                                                                                        |
+| Attribute       | Purpose                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `CorrelationId` | root id tying the whole journey together — the journey's own UUID, minted at cart creation (see Amendments; ADR-0031) |
+| `StoreId`       | store filter (`demo`)                                                                                                 |
+| `Domain`        | filter by stage                                                                                                       |
+| `OrderId`       | order-scoped queries                                                                                                  |
+| `CartId`        | cart-scoped queries                                                                                                   |
 
 `memo` carries display-only, non-indexed metadata. The attributes are registered on the namespace
 by `scripts/register-search-attributes.sh` locally (on managed Temporal, once via UI or `tcld`) —
@@ -80,7 +80,7 @@ updated in place to the current truth; this section records what changed and why
 
 ### correlationId is its own UUID, not the cartId
 
-_Superseded by the 2026-08-12 amendment below — kept as the record of the intermediate state._
+_Reversed by the 2026-08-12 amendment below, then RESTORED by the 2026-08-28 amendment — this section describes the model now in force (ADR-0031)._
 
 As originally implemented, `CorrelationId` reused the `cartId`. That conflated two different
 things: the cartId identifies **one entity** in the journey, while the correlationId identifies
@@ -127,3 +127,15 @@ the revived run carries the same correlation value by construction, and a single
 checkout. Propagation was already id-agnostic (children read the parent's `CorrelationId`
 Search Attribute), so only the mint changed. Journeys started between the two amendments keep
 their minted UUIDs — mixed ids on old data are expected, and legacy read paths accept both.
+
+## Amendment (2026-08-28) — reversed again: the correlationId is its own UUID (ADR-0031)
+
+[ADR-0031](0031-correlation-id-is-its-own-key.md) reverses the 2026-08-12 amendment. The cartId
+is a **reusable entity id** — the cart cookie lives 30 days and `updateWithStart` revives a cart
+id — so welding the journey key to it spliced two journeys onto one correlation, and
+correlation-keyed reads have no discriminator to tell them apart. The 2026-08-12 amendment's
+motivating property (one query returns everything a cart ever did, across revivals) **survives
+the reversal**: the journey key is minted once at cart creation, owned by the cart workflow,
+cached in a cookie scoped `<cartId>:<correlationId>`, and reconciled from the workflow's own
+Search Attribute on every mutation. A missing journey key now **throws**
+(`requireCorrelationId`) rather than falling back to an entity id.
