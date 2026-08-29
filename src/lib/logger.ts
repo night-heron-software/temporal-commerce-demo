@@ -41,14 +41,23 @@ const isTest = !!process.env.VITEST;
  * `npm run dev:up` — do not append to the same file. Set inline by the npm scripts.
  */
 const service = process.env.LOG_SERVICE || 'app';
-const logDir = path.resolve(process.cwd(), process.env.LOG_DIR || 'logs');
+// Resolved per call, not cached at import: the rotation tests point LOG_DIR at a temp dir
+// after this module loads, and a long-lived process should honour an env change never anyway
+// arrives — the cost is one env read per file (re)open, which happens once a day.
+const resolveLogDir = () => path.resolve(process.cwd(), process.env.LOG_DIR || 'logs');
 const retentionDays = Number(process.env.LOG_RETENTION_DAYS ?? 7);
 
 // ── File destination ──────────────────────────────────────────────────────────
 /** Delete log files older than LOG_RETENTION_DAYS. Best-effort; never throws. */
-function pruneOldLogs(): void {
+function pruneOldLogs(nowMs: number = Date.now()): void {
   try {
-    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+    // Cutoff derives from the caller's clock, not an unconditional Date.now(): retention is
+    // about the LOG timeline, and the rotation tests drive that timeline with an injected
+    // clock. With a real-clock cutoff the day-1 fixture file ages out of retention the moment
+    // the calendar moves a week past the test's literal dates — a test that rots on a date is
+    // the same defect shape as the check that cannot fail, one week apart.
+    const cutoff = nowMs - retentionDays * 24 * 60 * 60 * 1000;
+    const logDir = resolveLogDir();
     for (const name of fs.readdirSync(logDir)) {
       const match = /^demo-.*-(\d{4}-\d{2}-\d{2})\.log$/.exec(name);
       if (!match) continue;
@@ -59,29 +68,65 @@ function pruneOldLogs(): void {
   }
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * A write stream that opens on first use rather than at import.
+ * A write stream that opens on first use rather than at import, and ROLLS when the UTC day
+ * changes (the parent platform's mono-issue-0320).
  *
  * `next build` evaluates route modules, which reach this file through api-utils.ts — an eager
  * `mkdirSync` would create `logs/` as a build side effect. `src/lib/feature-flags.ts` defers
  * its `mkdirSync` for the same reason.
+ *
+ * Without the roll, a long-running worker keeps appending to the day-one file forever: anything
+ * tailing today's date shows nothing from that tier, and a log audit that aggregates today's
+ * file triages a clean report over an EMPTY population. The storefront never showed the bug only
+ * because Next.js dev re-evaluates modules and so happened to build a fresh sink.
+ *
+ * `serviceName` and `now` are injectable so the rollover is testable against a moving clock
+ * rather than by waiting for midnight. Exported for those tests only.
  */
-function createLazyFileStream(): pino.DestinationStream {
+export function createLazyFileStream(
+  serviceName: string = service,
+  now: () => number = Date.now,
+): pino.DestinationStream {
   let sink: fs.WriteStream | null = null;
+  let disabled = false;
+  /** Epoch ms at which the currently-open file stops being today's. */
+  let rollAtMs = 0;
 
   return {
     write(msg: string) {
+      if (disabled) return;
+      const nowMs = now();
+      // Compared as a timestamp rather than a formatted date: one integer compare per line on
+      // the hot path, not a `toISOString()` per line.
+      if (sink && nowMs >= rollAtMs) {
+        try {
+          sink.end();
+        } catch {
+          // A failed close must not cost us the new file.
+        }
+        sink = null;
+      }
       if (!sink) {
         try {
+          const logDir = resolveLogDir();
           fs.mkdirSync(logDir, { recursive: true });
-          pruneOldLogs();
-          const today = new Date().toISOString().slice(0, 10);
-          sink = fs.createWriteStream(path.join(logDir, `demo-${service}-${today}.log`), {
+          // Also prunes on each rollover, not only at process start — a process that runs for
+          // weeks would otherwise never prune at all.
+          pruneOldLogs(nowMs);
+          const today = new Date(nowMs).toISOString().slice(0, 10);
+          sink = fs.createWriteStream(path.join(logDir, `demo-${serviceName}-${today}.log`), {
             flags: 'a',
           });
+          rollAtMs = Math.floor(nowMs / DAY_MS) * DAY_MS + DAY_MS;
           // A broken log file must not take the process down with it.
-          sink.on('error', () => {});
+          sink.on('error', () => {
+            disabled = true;
+          });
         } catch {
+          disabled = true;
           return;
         }
       }

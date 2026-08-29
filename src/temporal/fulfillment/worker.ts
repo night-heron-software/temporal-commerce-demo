@@ -8,7 +8,7 @@ import { projectionCompletionActivities } from '../projection-completion';
 
 export default async function start(
   connection: NativeConnection,
-  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+  sharedConfig: Pick<WorkerOptions, 'interceptors' | 'sinks' | 'workerDeploymentOptions'> = {},
 ): Promise<void> {
   const worker = await Worker.create({
     connection,
@@ -20,7 +20,7 @@ export default async function start(
       ...transitionRecorderActivities,
       ...projectionCompletionActivities,
     },
-    ...otelConfig,
+    ...sharedConfig,
   });
 
   logger.info({ taskQueue: FULFILLMENT_TASK_QUEUE }, 'Fulfillment worker started');

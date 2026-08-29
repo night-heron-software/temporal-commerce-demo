@@ -16,6 +16,11 @@ initTracing('demo-workers');
 import { NativeConnection, Runtime } from '@temporalio/worker';
 import { createLogger } from '../lib/logger';
 import { getWorkerOtelConfig } from '../lib/worker-otel';
+import {
+  getWorkerVersioningConfig,
+  workerBuildId,
+  workerDeploymentName,
+} from '../lib/worker-versioning';
 
 import cartWorker from './cart/worker';
 import checkoutWorker from './checkout/worker';
@@ -66,6 +71,16 @@ async function run() {
 
   // Get OTel worker config (interceptors/sinks) — no-op when OTEL_ENABLED !== 'true'
   const otelConfig = await getWorkerOtelConfig();
+  // Worker Versioning (ADR-0030), opt-in via WORKER_BUILD_ID — {} when unset, so the default
+  // launch is byte-identical to before. Spread into every domain worker alongside otel.
+  const versioningConfig = getWorkerVersioningConfig();
+  if (versioningConfig.workerDeploymentOptions) {
+    log.info(
+      { buildId: workerBuildId(), deploymentName: workerDeploymentName() },
+      'worker versioning ON — this process registers a pinned deployment version',
+    );
+  }
+  const sharedConfig = { ...otelConfig, ...versioningConfig };
 
   // Connect with retry — Temporal's Docker health check passes before gRPC
   // is fully ready for external connections, causing TransportErrors on cold start.
@@ -105,12 +120,12 @@ async function run() {
 
   try {
     await Promise.all([
-      cartWorker(connection, otelConfig),
-      checkoutWorker(connection, otelConfig),
-      fulfillmentWorker(connection, otelConfig),
-      identityWorker(connection, otelConfig),
-      inventoryWorker(connection, otelConfig),
-      omsWorker(connection, otelConfig),
+      cartWorker(connection, sharedConfig),
+      checkoutWorker(connection, sharedConfig),
+      fulfillmentWorker(connection, sharedConfig),
+      identityWorker(connection, sharedConfig),
+      inventoryWorker(connection, sharedConfig),
+      omsWorker(connection, sharedConfig),
     ]);
     log.info('All workers have cleanly shut down.');
   } finally {

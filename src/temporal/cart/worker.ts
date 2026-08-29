@@ -11,7 +11,7 @@ const logger = createLogger('cart:worker');
 
 async function start(
   connection: NativeConnection,
-  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+  sharedConfig: Pick<WorkerOptions, 'interceptors' | 'sinks' | 'workerDeploymentOptions'> = {},
 ): Promise<void> {
   const worker = await Worker.create({
     connection,
@@ -22,7 +22,7 @@ async function start(
       ...projectionCompletionActivities,
     },
     taskQueue: CART_TASK_QUEUE,
-    ...otelConfig,
+    ...sharedConfig,
   });
   return worker.run();
 }

@@ -60,5 +60,7 @@ are the parent's and are not reachable from anything this demo cites.
 | [0024](0024-decider-native-state-machines.md)                    | Decider-native state machines: command/event vocabulary, framework-owned fold, guard phase           | Accepted                   | yes        |
 | [0025](0025-phase5-readability-extras-decisions.md)              | Readability extras (clarity plan Phase 5): context views and discriminated responses are NOT adopted | Accepted                   | yes        |
 | [0026](0026-per-block-route-declarations.md)                     | Per-block route declarations; per-state route tables derived                                         | Accepted                   | yes        |
+| [0027](0027-command-acceptance-annotations-and-event-blocks.md)  | Command acceptance annotations and event blocks — the extras NOT adopted                             | Accepted                   | —          |
 | [0029](0029-command-block-authoring-surface-in-the-framework.md) | The CommandBlock authoring surface moves into the framework                                          | Accepted                   | —          |
+| [0030](0030-worker-versioning-not-patching.md)                   | Workflow evolution: Worker Versioning, not patched()                                                 | Accepted                   | yes        |
 | [0031](0031-correlation-id-is-its-own-key.md)                    | The correlation id is its own key again (supersedes 0022's correlation clause; restores 0019)        | Accepted                   | yes        |
