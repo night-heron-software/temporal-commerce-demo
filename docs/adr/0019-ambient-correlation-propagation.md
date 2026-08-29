@@ -1,9 +1,11 @@
 # ADR-0019 — correlationId is its own key, propagated ambiently to activities
 
-- **Status:** Accepted — **amended by [ADR-0022](0022-one-lifecycle-id-order-keyed-inventory.md)
-  (2026-07-31):** the correlationId is no longer a separate mint. The propagation machinery
-  (interceptor headers, `CorrelationId` Search Attribute, journal partitioning) is unchanged, but
-  the value it carries is the platform's single lifecycle id (cartId = checkoutId = orderId).
+- **Status:** Accepted — **restored by [ADR-0031](0031-correlation-id-is-its-own-key.md)
+  (2026-08-27).** ADR-0022 briefly made the correlationId the platform's single lifecycle id
+  (cartId = checkoutId = orderId); that clause is reversed and the separate mint described below
+  is in force again. **The 2026-07-30 entity-key-fallback amendment in *Consequences* is
+  withdrawn** — see the note there. The propagation machinery (interceptor headers,
+  `CorrelationId` Search Attribute, journal partitioning) never changed through any of this.
 - **Date:** 2026-07-25
 - **Deciders:** platform operator + observability
 - **Tags:** temporal, observability, correlation
@@ -103,8 +105,16 @@ parameter (they execute in the workflow sandbox); activity-side writers read
   > associates its journey under the cart id rather than orphaning it; freshly minted journeys
   > are unaffected (their own SA always wins). `buildWorkflowStartOptions` itself stays strict —
   > `correlationId` remains required with explicit `undefined` as the only opt-out.
-- **Two deliberate fallbacks remain**, both local and commented: `createOrder` falls back to
-  `cartId` if ambient context is somehow absent (the ledger cannot take an undefined key), and OMS
-  reads `order.correlationId ?? order.cartId` for orders written before the field existed.
+  >
+  > > **Withdrawn 2026-08-27 by [ADR-0031](0031-correlation-id-is-its-own-key.md).** The
+  > > entity-key fallback was safe only while ADR-0022 made the correlation equal to the entity id
+  > > it fell back to. Decoupled again, `?? cartId` does not orphan a journey — it files one under
+  > > the **wrong** key, which is worse: an orphan is visible as an absence, a mis-filed journey
+  > > looks like a real one. Every such site now raises via `requireCorrelationId()`, as does
+  > > `buildWorkflowStartOptions`' own silent `if (correlationId)` drop.
+- ~~Two deliberate fallbacks remain~~ **Withdrawn with the amendment above (ADR-0031):**
+  `createOrder` now raises via `requireCorrelationId()` when ambient context is absent, and the
+  remaining `?? order.correlationId` reads carry the journey key the order itself holds — a
+  journey-key source, not an entity-key fallback.
 - **Cost:** one `AsyncLocalStorage` read per log line, and one header per scheduled activity.
 - **Amends ADR-0011**, which describes `correlationId` as defaulting to `cartId`.

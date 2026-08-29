@@ -1,3 +1,4 @@
+import { requireCorrelationId } from '../contracts/constants';
 /**
  * Cart Activity Implementations
  * Wired to real InventoryCommandRepository for Cassandra-backed inventory
@@ -99,8 +100,9 @@ export async function reserveCartItem(
             reservationId,
             cartId,
             // The journey correlationId (ADR-0011), carried ambiently from the cart
-            // workflow; cartId fallback mirrors the legacy correlationId-was-cartId era.
-            correlationId: currentCorrelationId() ?? cartId,
+            // workflow. No cartId fallback (ADR-0031): writing the entity key here would
+            // file the reservation under the wrong journey, silently.
+            correlationId: requireCorrelationId(currentCorrelationId(), 'reservation document'),
             variantId,
             quantity,
             status: 'TEMPORARY',

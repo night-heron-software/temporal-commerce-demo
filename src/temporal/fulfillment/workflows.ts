@@ -1,6 +1,11 @@
 import * as wf from '@temporalio/workflow';
 import { OMS } from '../contracts';
-import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
+import {
+  buildWorkflowId,
+  buildWorkflowStartOptions,
+  DEMO_STORE_ID,
+  requireCorrelationId,
+} from '../contracts/constants';
 import { ES_INDICES } from '../contracts/elasticsearch';
 import type {
   FulfillmentOrderRequest,
@@ -251,9 +256,13 @@ export async function fulfillmentWorkflow(
               storeId: DEMO_STORE_ID,
               domain: 'fulfiller-order',
               entityId: fulfillerOrder.fulfillerOrderId,
-              // Journey correlationId from this workflow's own Search Attribute
-              // (fallback cartId for legacy pre-tagging starts) — ADR-0011.
-              correlationId: workflowCorrelationId() ?? startCtx.cartId,
+              // Journey correlationId from this workflow's own Search Attribute. No
+              // cartId fallback — a mis-filed journey looks real, an orphan is at least
+              // visible as an absence (ADR-0031).
+              correlationId: requireCorrelationId(
+                workflowCorrelationId(),
+                'fulfiller-order child start',
+              ),
               orderId: startCtx.orderId,
               cartId: startCtx.cartId,
             }),

@@ -215,7 +215,8 @@ export interface Order {
   orderId: string;
   cartId: string;
   /**
-   * The journey's correlationId — the cartId (R5 / ADR-0022 one-lifecycle-id),
+   * The journey's correlationId — its own UUID (ADR-0031), threaded from the cart
+   * workflow's Search Attribute at order creation,
    * captured from the ambient correlation context when the order is created.
    */
   correlationId: string;
@@ -273,6 +274,14 @@ export interface CheckoutState {
 
 export interface CartDetails {
   cartId: string;
+  /**
+   * The journey key (ADR-0031) — its own UUID, NOT the cartId. Read back off the cart
+   * workflow's own `CorrelationId` Search Attribute by the query handler and by every update
+   * response, which makes the workflow the authority: the storefront caches this value (the
+   * scoped cart cookie) but never decides it. Absent on a locally-constructed `CartDetails`
+   * that has not come from a running workflow.
+   */
+  correlationId?: string;
   email?: string;
   userId?: string; // Linked user ID if authenticated
   items: CartItem[];

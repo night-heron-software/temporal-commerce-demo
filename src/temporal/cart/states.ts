@@ -71,7 +71,12 @@ import type {
   Rejection,
   StateRegistry,
 } from '../framework';
-import { buildWorkflowId, buildWorkflowStartOptions, DEMO_STORE_ID } from '../contracts/constants';
+import {
+  buildWorkflowId,
+  buildWorkflowStartOptions,
+  DEMO_STORE_ID,
+  requireCorrelationId,
+} from '../contracts/constants';
 
 // ==================
 // Commands and events — the machine's whole vocabulary
@@ -511,13 +516,14 @@ export const beginCheckoutBlock: CommandBlock<'beginCheckout'> = {
 
     // A fresh checkout id per attempt, tagged with the cart's correlation id so the
     // whole journey is queryable (ADR-0011). Read back from this workflow's own
-    // CorrelationId Search Attribute (minted at cart creation); legacy carts started
-    // before tagging fall back to the cartId.
+    // CorrelationId Search Attribute (minted at cart creation). No cartId fallback:
+    // checkout is where payment happens, so a wrong journey key here is a wrong key on
+    // the money (ADR-0031).
     const checkoutStart = buildWorkflowStartOptions({
       storeId: DEMO_STORE_ID,
       domain: 'checkout',
       entityId: uuid4(),
-      correlationId: workflowCorrelationId() ?? context.cart.cartId,
+      correlationId: requireCorrelationId(workflowCorrelationId(), 'checkout child start'),
       cartId: context.cart.cartId,
     });
     const checkoutWorkflowId = checkoutStart.workflowId;
@@ -868,7 +874,11 @@ const m = defineMachine<
   CartUpdateResponse
 >({
   decider: cartDecider,
-  respond: (context) => context.cart,
+  // Read off the Search Attribute in respond, not from context, so the workflow stays the
+  // single authority for BOTH read paths — the query and every update response. The update
+  // response is the path every mutation takes, and it is what the storefront reconciles its
+  // cached journey key against (ADR-0031).
+  respond: (context) => ({ ...context.cart, correlationId: workflowCorrelationId() }),
 });
 
 // ==================
