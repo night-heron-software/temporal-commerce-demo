@@ -175,7 +175,14 @@ export async function executeCartUpdate<TReturn, TArgs extends any[]>(
   // `CorrelationId` Search Attribute. A freshly minted value only takes effect if this call
   // actually CREATES the workflow — `workflowIdConflictPolicy: 'USE_EXISTING'` discards start
   // options otherwise, which is why the response is reconciled below rather than trusted.
-  const correlationId = (await readCachedCorrelation(cartId)) ?? randomUUID();
+  const cached = await readCachedCorrelation(cartId);
+  const correlationId = cached ?? randomUUID();
+  // Cache the settled key NOW, not only on a later disagreement. Without this, the creating
+  // mutation's mint agrees with the workflow's answer, reconcile early-returns without writing,
+  // and EVERY cart warned "cache stale" on its second mutation while logging that mutation
+  // under a discarded key (run -011 Defect #4, issue #73). The reconcile below still repairs
+  // any genuine disagreement — this just stops the agreement case from being forgotten.
+  if (!cached) await cacheCorrelation(cartId, correlationId);
   // R6 (backlog #6): one entry line + one exit line per mutating action, correlation-tagged,
   // so a shopper journey is reconstructable from demo-web.log alone. Every cart mutation
   // funnels through here; the command's own type is the action name. No payloads.
