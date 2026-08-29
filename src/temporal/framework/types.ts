@@ -182,7 +182,7 @@ export type ProjectionWorkflowOutcome = 'completed' | 'canceled' | 'failed';
 
 /** What drove a transition. 'automatic' = a transitional state advancing by design. */
 export interface TransitionTrigger {
-  kind: 'start' | 'signal' | 'update' | 'timeout' | 'automatic';
+  kind: 'start' | 'signal' | 'update' | 'timeout' | 'automatic' | 'cancellation';
   /** The update/signal event `type`, when the command carries one. */
   name?: string;
 }
@@ -289,6 +289,16 @@ export interface TransitionSink<TContext> {
   record(input: TransitionRecordInput<TContext>): void;
   runFlusher(): Promise<void>;
   drain(): Promise<void>;
+  /**
+   * Persist whatever is still buffered **without** going through the background coroutine.
+   *
+   * `runFlusher()` is started in the workflow's root cancellation scope, so once a workflow is
+   * cancelled that coroutine is already rejected and awaiting it re-throws — which is how
+   * cancelled workflows silently lost their terminal transition row (issue #11). The cancellation
+   * path calls this instead, from inside `CancellationScope.nonCancellable`, so the activity it
+   * schedules is protected and the rows actually land.
+   */
+  flushNow(): Promise<void>;
   close(): void;
 }
 

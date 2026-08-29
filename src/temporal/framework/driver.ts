@@ -12,7 +12,6 @@ import {
   workflowInfo,
 } from '@temporalio/workflow';
 import {
-  StateConfig,
   StateMachineConfig,
   SingleUpdateRegistration,
   MappedUpdateRegistration,
@@ -23,6 +22,11 @@ import {
   TransitionTrigger,
 } from './types';
 import { createTransitionRecorder } from './transition-sink';
+import {
+  describeMissingTimeouts,
+  findWaitingStatesWithoutTimeout,
+  shouldContinueAsNew,
+} from './machine-validation';
 import { markProjections } from './projection-completion';
 
 function isTerminalState(name: string): boolean {
@@ -80,6 +84,17 @@ export async function runStateMachine<
     | MappedUpdateRegistration<TEvent, TContext, TResponse>[],
   signals?: SignalDefinition<[TSignal]> | SignalRegistration<TSignal>[],
 ): Promise<TContext> {
+  // Refuse a malformed machine BEFORE it takes a step (backlog #22). Checked here rather than
+  // when the offending state is reached, so the failure is deterministic and immediate instead
+  // of arriving many steps and much traffic later.
+  const missingTimeouts = findWaitingStatesWithoutTimeout(config.states);
+  if (missingTimeouts.length > 0) {
+    throw ApplicationFailure.nonRetryable(
+      describeMissingTimeouts(workflowInfo().workflowType, missingTimeouts),
+      'StateMachineDeclarationError',
+    );
+  }
+
   let ctx = initialContext;
   let currentStateName = config.initialState;
   // Counts every processed input (update, signal, or timeout) toward the
@@ -106,37 +121,6 @@ export async function runStateMachine<
         signalQueue.push(result);
       });
     }
-  }
-
-  // ── A waiting state MUST declare how long it waits (backlog #22) ──
-  //
-  // Without this, a non-transitional state that omits `timeout` fell to a 1 ms default and
-  // polled a thousand times a second — every wake a workflow task and history events, all
-  // counted toward continue-as-new, with no error and no warning. The machine simply ran
-  // hot. Nothing relies on that default: every state in this repo declares a timeout, and
-  // an omission has only ever been a mistake.
-  //
-  // Checked HERE, against the registry the driver was actually handed, rather than at module
-  // load over an exported constant — `buildFulfillerOrderStates()` legitimately ships a base
-  // registry whose `in_production` and `shipped` omit `timeout` and spreads the memo-derived
-  // durations in at run time. A module-load check would reject that correct pattern; this one
-  // sees the effective config.
-  //
-  // A function form counts as declared: it is resolved per iteration and cannot be evaluated
-  // here (no context yet, and it may legitimately vary). The runtime arm below covers it.
-  const undeclared = Object.entries(config.states)
-    .filter(([, def]) => {
-      const d = def as StateConfig<TState, TEvent, TContext, TResponse, TSignal>;
-      return !d.transitional && d.timeout === undefined;
-    })
-    .map(([name]) => name);
-  if (undeclared.length > 0) {
-    throw ApplicationFailure.nonRetryable(
-      `State machine misconfigured: waiting state(s) [${undeclared.join(', ')}] declare no ` +
-        `timeout. A non-transitional state must say how long it waits, or it will poll ` +
-        `continuously. Add \`timeout\` to each, or mark them \`transitional\` if they are ` +
-        `meant to advance immediately.`,
-    );
   }
 
   // ── Register Update Handlers ──
@@ -238,10 +222,18 @@ export async function runStateMachine<
       //
       // The pitfall was using the count INSTEAD of the suggestion; using both is the
       // documented shape (backlog #20).
-      const threshold = config.continueAsNewThreshold || 100;
-      const overIterationBound = inputCount >= threshold;
-      const historySuggests = workflowInfo().continueAsNewSuggested === true;
-      if (config.serializeForContinueAsNew && (historySuggests || overIterationBound)) {
+      //
+      // The predicate itself is `shouldContinueAsNew` in ./machine-validation — extracted so it
+      // is unit-testable without driving a whole machine. It also drops the old `|| 100`, which
+      // coerced an explicit threshold of 0 into 100.
+      if (
+        config.serializeForContinueAsNew &&
+        shouldContinueAsNew({
+          suggested: workflowInfo().continueAsNewSuggested === true,
+          inputCount,
+          threshold: config.continueAsNewThreshold ?? 100,
+        })
+      ) {
         // Wait for handlers to finish OR new input to arrive
         await condition(
           () => allHandlersFinished() || updateQueue.length > 0 || signalQueue.length > 0,
@@ -423,10 +415,47 @@ export async function runStateMachine<
   } catch (err) {
     if (isCancellation(err)) {
       log.info('State machine driver loop caught cancellation', { state: currentStateName });
-      // Best-effort flush of buffered transitions before unwinding.
+      // Flush buffered transitions AND record the ending, before unwinding.
+      //
+      // Both halves are state-machine issue #11. The timeline used to simply stop at the last
+      // ordinary transition, with no terminal row and no gap marker — so a cancelled workflow
+      // read as still sitting in its last state, and `workflow_state_transitions` is the only
+      // durable status timeline left once the workflow closes.
+      //
+      // Two distinct causes, both fixed here:
+      //
+      //  1. Nothing RECORDED an ending. The single `recorder.record()` call site is inside the
+      //     main loop, and external cancellation interrupts the loop rather than transitioning
+      //     through it, so no row was ever created. (A machine that cancels via its own timeout
+      //     path DOES transition, which is why those recorded `__terminal:cancelled` correctly
+      //     and made this look like a flush-only problem.)
+      //
+      //  2. The flush could not survive. `shutdownRecorder()` ends with `await flusher`, and
+      //     `flusher` is a coroutine created at driver start in the workflow's ROOT scope —
+      //     already rejected by the time we get here. `CancellationScope.nonCancellable` only
+      //     protects operations STARTED inside it, so wrapping the await never helped; it
+      //     re-threw `CancelledFailure` and the buffered rows were dropped.
+      //
+      // That root-scope coroutine is already rejected, and nothing awaits it any more now that
+      // this path no longer calls `shutdownRecorder()`. An unhandled rejection fails the workflow
+      // TASK, which Temporal retries forever — so the ending would never be recorded and the
+      // workflow would never close. Attach a handler without awaiting: the rejection is expected
+      // here, and it is the one rejection in this driver that carries no information.
+      void flusher?.catch(() => undefined);
+
       await CancellationScope.nonCancellable(async () => {
+        // The trigger kind distinguishes this from a machine that chose to cancel itself.
+        recorder?.record({
+          from: currentStateName,
+          to: '__terminal:cancelled',
+          trigger: { kind: 'cancellation' },
+          context: ctx,
+          at: new Date().toISOString(),
+        });
+        recorder?.close();
         try {
-          await shutdownRecorder();
+          // NOT shutdownRecorder(): that awaits the root-scope coroutine described above.
+          await recorder?.flushNow();
         } catch (drainErr) {
           log.warn('transition recorder drain failed during cancellation', {
             error: String(drainErr),

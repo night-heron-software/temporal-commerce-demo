@@ -137,6 +137,27 @@ export function createTransitionRecorder<TContext>(
       await condition(() => pending.length === 0 && inFlight === 0);
     },
 
+    async flushNow(): Promise<void> {
+      // Deliberately does NOT use `condition()` or the coroutine: both are cancellable, and this
+      // exists precisely for the moment when the workflow is being cancelled. Callers run it
+      // inside `CancellationScope.nonCancellable`.
+      while (pending.length > 0) {
+        const batch = pending.splice(0, MAX_BATCH);
+        try {
+          await persistWorkflowTransitions(batch);
+        } catch (err) {
+          // Same disposition as the coroutine: a failed persist drops its batch rather than
+          // wedging shutdown. Losing the row is bad; hanging a cancelling workflow is worse.
+          log.warn('[transition-recorder] final flush failed — dropping batch', {
+            workflowId,
+            count: batch.length,
+            error: String(err),
+          });
+          return;
+        }
+      }
+    },
+
     close(): void {
       closed = true;
     },

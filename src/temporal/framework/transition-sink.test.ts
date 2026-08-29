@@ -130,3 +130,73 @@ describe('createTransitionRecorder', () => {
     expect(persisted.map((r) => r.seq)).toEqual([0, 1, 2]);
   });
 });
+
+/**
+ * `flushNow()` — the cancellation escape hatch (issue #11).
+ *
+ * The bug it exists for: `runFlusher()` is started in the workflow's ROOT cancellation scope, so
+ * when a workflow is cancelled that coroutine is already rejected. `shutdownRecorder()` ends with
+ * `await flusher`, which re-threw `CancelledFailure` and dropped every buffered transition —
+ * including the terminal one. `CancellationScope.nonCancellable` could not help, because it only
+ * protects operations *started inside* it.
+ *
+ * So these tests deliberately NEVER start the coroutine. That is the whole point: if a test called
+ * `runFlusher()` first, it would be testing the healthy path and would have passed against the bug.
+ */
+describe('flushNow — persisting without the background coroutine', () => {
+  it('persists buffered transitions when the flusher was never started', async () => {
+    const rec = createTransitionRecorder<{ n: number }>()!;
+    rec.record({ from: 'a', to: 'b', trigger: { kind: 'update' }, context: { n: 1 }, at: 'T1' });
+    rec.record({
+      from: 'b',
+      to: '__terminal:cancelled',
+      trigger: { kind: 'cancellation' },
+      context: { n: 2 },
+      at: 'T2',
+    });
+
+    await rec.flushNow();
+
+    expect(persisted).toHaveLength(2);
+    expect(persisted[1]).toMatchObject({
+      toState: '__terminal:cancelled',
+      triggerKind: 'cancellation',
+    });
+  });
+
+  it('records the ending distinguishably from a machine that cancelled itself', async () => {
+    // A workflow cancelled from outside and one that timed out into its own cancel state both
+    // land on `__terminal:cancelled`. `triggerKind` is what separates them, so an operator reading
+    // the timeline can tell "the parent killed this" from "the machine decided".
+    const rec = createTransitionRecorder<{ n: number }>()!;
+    rec.record({
+      from: 'collecting',
+      to: '__terminal:cancelled',
+      trigger: { kind: 'cancellation' },
+      context: { n: 1 },
+      at: 'T',
+    });
+    await rec.flushNow();
+    expect(persisted[0]).toMatchObject({
+      fromState: 'collecting',
+      toState: '__terminal:cancelled',
+      triggerKind: 'cancellation',
+    });
+  });
+
+  it('is a no-op on an empty buffer rather than hanging', async () => {
+    // `drain()` waits on a `condition()`, which never resolves if the coroutine is dead. flushNow
+    // must not inherit that: a cancelling workflow that hangs here is worse than a lost row.
+    const rec = createTransitionRecorder<{ n: number }>()!;
+    await expect(rec.flushNow()).resolves.toBeUndefined();
+    expect(persisted).toHaveLength(0);
+  });
+
+  it('leaves nothing buffered, so a later flush does not double-write', async () => {
+    const rec = createTransitionRecorder<{ n: number }>()!;
+    rec.record({ from: 'a', to: 'b', trigger: { kind: 'update' }, context: { n: 1 }, at: 'T' });
+    await rec.flushNow();
+    await rec.flushNow();
+    expect(persisted).toHaveLength(1);
+  });
+});
