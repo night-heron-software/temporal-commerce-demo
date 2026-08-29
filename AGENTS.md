@@ -13,9 +13,12 @@ duplicate it.
 2. **Workflow IDs and correlation.** Build IDs with `buildWorkflowId()` — dot-delimited
    `demo.{domain}.{entityId}`, never inline (lint-enforced) — and spread
    `buildWorkflowStartOptions()` at every workflow start so the correlation Search Attributes +
-   memo are set. `correlationId` (the `cartId` itself — one journey id per cart lifecycle
-   since 2026-08-12; earlier workflows keep their separately minted UUIDs) is REQUIRED;
-   correlation-less singletons pass `undefined` explicitly. See
+   memo are set. `correlationId` is the journey's OWN UUID — minted at cart creation, owned by
+   the cart workflow, NOT the cartId
+   ([ADR-0031](docs/adr/0031-correlation-id-is-its-own-key.md), reversing the 2026-08-12
+   cartId-as-correlation model). It is REQUIRED; correlation-less singletons pass `undefined`
+   explicitly, and a missing journey key THROWS (`requireCorrelationId`) rather than falling
+   back to an entity id. See
    [ADR-0011](docs/adr/0011-workflow-id-and-correlation-tagging.md).
 3. **State machines are authored, diagrams are generated.** Domains follow prepare → decide →
    evolve with a pure Chassaing decider core ([ADR-0003](docs/adr/0003-prepare-decide-evolve-state-machines.md),
@@ -37,7 +40,7 @@ duplicate it.
 ```bash
 npm run dev:init      # full reset: containers + schema + seeded catalog (2–4 min)
 npm run dev:up        # storefront :3000 + workers        npm run dev:status  # health
-npm test              # 514 tests, ~6s, no containers     npm run typecheck
+npm test              # no containers (includes the replay gate)   npm run typecheck
 npm run docs:diagrams # regenerate state-machine diagrams (docs:diagrams:check in CI)
 ```
 

@@ -22,6 +22,19 @@ After making changes to any of these files, suggest restarting workers:
 - `src/temporal/*/definitions.ts` — Signal/query/update definitions
 - `src/temporal/*/types.ts` — Types used by workflows/activities
 
+## Replay compatibility — before you change workflow code
+
+`npm test` includes a **replay gate** (`src/test-support/workflow-replay.test.ts`): captured
+full-journey histories for cart, checkout, and oms are replayed against your changed code, and a
+`TMPRL1100` nondeterminism failure means the change would break executions already in flight.
+
+- If the change was **intentional** and no old-code execution can still be running, regenerate
+  the fixtures — `npm run histories:capture` — and commit the diff: regenerating is the visible,
+  deliberate act of saying "old histories no longer apply".
+- If you did NOT mean to change workflow behaviour, the fix is in the workflow, not the fixtures.
+- For a change that must coexist with in-flight executions, ADR-0030's answer is Worker
+  Versioning (`WORKER_BUILD_ID`, `src/lib/worker-versioning.ts`), not `patched()`.
+
 ## How to Restart Workers
 
 // turbo
