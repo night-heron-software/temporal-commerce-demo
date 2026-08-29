@@ -7,7 +7,7 @@ import { OMS_TASK_QUEUE } from '../contracts';
 
 async function start(
   connection: NativeConnection,
-  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+  sharedConfig: Pick<WorkerOptions, 'interceptors' | 'sinks' | 'workerDeploymentOptions'> = {},
 ): Promise<void> {
   const worker = await Worker.create({
     connection,
@@ -18,7 +18,7 @@ async function start(
       ...projectionCompletionActivities,
     },
     taskQueue: OMS_TASK_QUEUE,
-    ...otelConfig,
+    ...sharedConfig,
   });
   logger.info({ taskQueue: OMS_TASK_QUEUE }, 'OMS worker started');
   return worker.run();

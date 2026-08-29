@@ -18,7 +18,7 @@ const logger = createLogger('identity:worker');
 
 export default async function identityWorker(
   connection: NativeConnection,
-  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+  sharedConfig: Pick<WorkerOptions, 'interceptors' | 'sinks' | 'workerDeploymentOptions'> = {},
 ): Promise<void> {
   const worker = await Worker.create({
     connection,
@@ -29,7 +29,7 @@ export default async function identityWorker(
       ...transitionRecorderActivities,
       ...projectionCompletionActivities,
     },
-    ...otelConfig,
+    ...sharedConfig,
   });
 
   logger.info({ taskQueue: IDENTITY_TASK_QUEUE }, 'Identity worker started');

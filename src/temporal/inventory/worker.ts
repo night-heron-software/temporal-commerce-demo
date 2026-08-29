@@ -10,7 +10,7 @@ const logger = createLogger('inventory:worker');
 
 export default async function inventoryWorker(
   connection: NativeConnection,
-  otelConfig: Pick<WorkerOptions, 'interceptors' | 'sinks'> = {},
+  sharedConfig: Pick<WorkerOptions, 'interceptors' | 'sinks' | 'workerDeploymentOptions'> = {},
 ): Promise<void> {
   const worker = await Worker.create({
     connection,
@@ -22,7 +22,7 @@ export default async function inventoryWorker(
       ...transitionRecorderActivities,
       ...projectionCompletionActivities,
     },
-    ...otelConfig,
+    ...sharedConfig,
   });
 
   logger.info({ taskQueue: INVENTORY_TASK_QUEUE }, 'Inventory worker started');
