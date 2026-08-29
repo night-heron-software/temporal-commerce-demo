@@ -52,13 +52,19 @@ export type { InventoryChangedPayload };
 export interface InventoryServiceInput {
   signalCount?: number;
   pendingSkus?: string[];
+  /**
+   * Absolute epoch-ms deadline for the next FULL consistency sweep, carried across
+   * continue-as-new — otherwise a busy shop (whose signal volume is what triggers CAN) would
+   * reset the sweep clock at every rollover, re-opening the starvation issue #74 closed.
+   */
+  nextSweepAt?: number;
 }
 
 // ==================
 // Workflow
 // ==================
 
-const CONSISTENCY_SWEEP_INTERVAL = '5m';
+const CONSISTENCY_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const CONTINUE_AS_NEW_THRESHOLD = 100;
 
 export async function inventoryServiceWorkflow(input?: InventoryServiceInput): Promise<void> {
@@ -69,6 +75,14 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput): P
 
   const dirtySkus = new Set<string>(restored.pendingSkus ?? []);
 
+  // The sweep runs on a DEADLINE, not an interval-per-wake. The previous shape re-armed a
+  // fresh 5-minute timer on every loop iteration and only swept when a wake found no dirty
+  // SKUs — so any signal inside the window deferred expiry + drift healing, and sustained
+  // activity starved them indefinitely (issue #74; validation run -011 measured a 16-minute
+  // gap under ordinary shopping, and the sweep fired exactly one interval after the shop went
+  // quiet). `Date.now()` is deterministic inside a workflow, so the deadline replays.
+  let nextSweepAt = restored.nextSweepAt ?? Date.now() + CONSISTENCY_SWEEP_INTERVAL_MS;
+
   // Signal handler: collect dirty SKUs and increment counter
   setHandler(inventoryChangedSignal, ({ blankSkus }) => {
     for (const sku of blankSkus) {
@@ -78,8 +92,14 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput): P
   });
 
   while (true) {
-    // Wait for signals or periodic sweep timer (whichever comes first)
-    await condition(() => dirtySkus.size > 0, CONSISTENCY_SWEEP_INTERVAL);
+    // Wait for signals OR the sweep deadline, whichever comes first. The timeout is the time
+    // REMAINING to the deadline — never a fresh interval — so signal-driven wakes cannot push
+    // the sweep out.
+    const remaining = nextSweepAt - Date.now();
+    if (remaining > 0) {
+      await condition(() => dirtySkus.size > 0, remaining);
+    }
+    // remaining <= 0: the sweep is already due — no wait, straight to work.
 
     if (dirtySkus.size > 0) {
       // ---- Signal-driven targeted projection ----
@@ -105,8 +125,12 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput): P
       } catch (err) {
         log.warn(`syncInventoryToESForSkus error: ${err}`);
       }
-    } else {
-      // ---- Periodic full consistency sweep ----
+    }
+
+    // ---- Periodic full consistency sweep, ON SCHEDULE — even when this wake also carried
+    // dirty SKUs. An independent `if`, deliberately not the `else` of the branch above: the
+    // else-shape is what made every busy wake skip the sweep (issue #74).
+    if (Date.now() >= nextSweepAt) {
       log.info('Running periodic consistency sweep');
 
       try {
@@ -128,6 +152,7 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput): P
       } catch (err) {
         log.warn(`Consistency sweep error: ${err}`);
       }
+      nextSweepAt = Date.now() + CONSISTENCY_SWEEP_INTERVAL_MS;
     }
 
     // ---- ContinueAsNew check ----
@@ -137,6 +162,7 @@ export async function inventoryServiceWorkflow(input?: InventoryServiceInput): P
       await continueAsNew<typeof inventoryServiceWorkflow>({
         signalCount: 0,
         pendingSkus: Array.from(dirtySkus),
+        nextSweepAt,
       });
     }
   }
