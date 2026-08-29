@@ -8,6 +8,7 @@ import { setShippingAddress } from '@/app/shop/cart-actions';
 import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
 import type { Cart } from '@/temporal/contracts';
+import { validateShippingAddressFields } from '@/temporal/contracts/cart';
 
 // Semi-random test address generator
 function generateTestAddress(): Cart.ShippingAddress {
@@ -161,8 +162,20 @@ export default function ShippingPage() {
     e.preventDefault();
     if (!cartId) return;
 
-    if (!formData.email?.trim()) {
-      setError('Email address is required');
+    // Validate where entered, with the workflow's own rules. Mark every field touched so all
+    // messages show at their boxes, and stop before any network work.
+    if (Object.keys(fieldErrors).length > 0) {
+      setTouched({
+        firstName: true,
+        lastName: true,
+        address1: true,
+        city: true,
+        state: true,
+        postalCode: true,
+        country: true,
+        email: true,
+      });
+      setError('Please fix the highlighted fields.');
       return;
     }
 
@@ -205,8 +218,30 @@ export default function ShippingPage() {
     }
   };
 
+  /**
+   * Which fields the shopper has finished with. Nothing is reported before then: flagging "Email
+   * is required" at the first keystroke of a six-field form is noise — and never reporting until
+   * submit is the other half of the gap (the mono's run-009: six fields filled, Continue pressed,
+   * three problems in one sentence with nothing saying which box each belonged to).
+   */
+  const [touched, setTouched] = useState<Partial<Record<keyof Cart.ShippingAddress, boolean>>>({});
+
+  // The same rules the checkout workflow refuses on, keyed by field — so the message a shopper
+  // sees at the box and the authoritative refusal can never disagree.
+  const fieldErrors = validateShippingAddressFields(formData);
+
+  /** A message only where the shopper has already left the field, or after they pressed Continue. */
+  const errorFor = (field: keyof Cart.ShippingAddress): string | undefined =>
+    touched[field] ? fieldErrors[field] : undefined;
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  // Marking on blur is what makes a correction feel immediate: once a field is touched its
+  // message recomputes on every keystroke, so it disappears the moment the value becomes valid.
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setTouched((prev) => ({ ...prev, [e.target.name]: true }));
   };
 
   const handleShippingSignIn = useCallback(
@@ -370,10 +405,12 @@ export default function ShippingPage() {
                 name="firstName"
                 value={formData.firstName}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 required
                 autoComplete="shipping given-name"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
+              <FieldError message={errorFor('firstName')} />
             </div>
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
@@ -384,10 +421,12 @@ export default function ShippingPage() {
                 name="lastName"
                 value={formData.lastName}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 required
                 autoComplete="shipping family-name"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
+              <FieldError message={errorFor('lastName')} />
             </div>
           </div>
 
@@ -398,11 +437,13 @@ export default function ShippingPage() {
               name="email"
               value={formData.email}
               onChange={handleChange}
+              onBlur={handleBlur}
               required
               autoComplete="shipping email"
               readOnly={!!shopper}
               className={`w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none ${shopper ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 cursor-not-allowed' : ''}`}
             />
+            <FieldError message={errorFor('email')} />
           </div>
 
           <div>
@@ -412,10 +453,12 @@ export default function ShippingPage() {
               name="address1"
               value={formData.address1}
               onChange={handleChange}
+              onBlur={handleBlur}
               required
               autoComplete="shipping address-line1"
               className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
             />
+            <FieldError message={errorFor('address1')} />
           </div>
 
           <div>
@@ -440,10 +483,12 @@ export default function ShippingPage() {
                 name="city"
                 value={formData.city}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 required
                 autoComplete="shipping address-level2"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
+              <FieldError message={errorFor('city')} />
             </div>
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">State *</label>
@@ -452,12 +497,14 @@ export default function ShippingPage() {
                 name="state"
                 value={formData.state}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 required
                 placeholder="CA"
                 maxLength={2}
                 autoComplete="shipping address-level1"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none uppercase"
               />
+              <FieldError message={errorFor('state')} />
             </div>
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">ZIP *</label>
@@ -466,10 +513,12 @@ export default function ShippingPage() {
                 name="postalCode"
                 value={formData.postalCode}
                 onChange={handleChange}
+                onBlur={handleBlur}
                 required
                 autoComplete="shipping postal-code"
                 className="w-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 focus:border-indigo-500 focus:outline-none"
               />
+              <FieldError message={errorFor('postalCode')} />
             </div>
           </div>
 
@@ -495,5 +544,18 @@ export default function ShippingPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+/**
+ * `role="alert"` so a screen reader announces the message when it appears on blur — the shopper
+ * should not have to press Continue to learn a field is wrong.
+ */
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p role="alert" className="text-sm text-red-600 dark:text-red-400 mt-1">
+      {message}
+    </p>
   );
 }

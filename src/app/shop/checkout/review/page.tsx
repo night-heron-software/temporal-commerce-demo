@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
 import { cartLineLabel } from '@/app/shop/cart-line-display';
 import type { Cart } from '@/temporal/contracts';
+import { computeCheckoutTotal } from '@/temporal/contracts/cart';
 
 /**
  * Machine codes that carry no wording of their own, because until recently they could not
@@ -278,7 +279,10 @@ export default function ReviewPage() {
             )}
             <div className="flex justify-between font-bold text-xl pt-2 border-t border-[var(--heron-cream-dark)] dark:border-[var(--heron-slate-dark)]">
               <span>Total</span>
-              <span>${(cart.totalPrice / 100).toFixed(2)}</span>
+              {/* The authoritative figure: subtotal − discounts + LIVE shipping/tax. The rows
+                  above already read live state; `cart.totalPrice` is the pre-address estimate,
+                  and mixing the two is how a page shows one number and charges another. */}
+              <span>${(computeCheckoutTotal(cart, checkoutState) / 100).toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -303,7 +307,7 @@ export default function ReviewPage() {
               ? 'Processing...'
               : identityBlocked
                 ? 'Sign in to place this order'
-                : `Place Order — $${(cart.totalPrice / 100).toFixed(2)}`}
+                : `Place Order — $${(computeCheckoutTotal(cart, checkoutState) / 100).toFixed(2)}`}
           </button>
 
           <button
