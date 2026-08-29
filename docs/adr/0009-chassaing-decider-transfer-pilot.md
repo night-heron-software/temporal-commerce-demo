@@ -8,7 +8,7 @@
   posture is superseded: the decider becomes the standard core for machine domains and the fold
   moves into the framework; Option B's substance and the durability model are unchanged
 - **Resolves:** the open evaluation deferred by [ADR-0003](0003-prepare-decide-evolve-state-machines.md)
-  and [Theme 1 P3](../planning/state-machine-framework-theme1-plan-2026-06-30.md#phase-3--chassaing-functional-event-sourcing-alignment-evaluate--spike)
+  and [Theme 1 P3](https://github.com/night-heron-software/nightheron-mono/blob/main/docs/planning/state-machine-framework-theme1-plan-2026-06-30.md#phase-3--chassaing-functional-event-sourcing-alignment-evaluate--spike)
 - **Provenance:** duplicated from the parent platform's ADR-0009; held as close to identical as this demo's smaller surface allows (paths and counts are this repo's).
 
 > **Divergence from the parent platform.** The parent piloted this on inventory `transfer`, which has no counterpart here — this demo adopted the outcome directly across its own domains. The pilot framing in the title is the parent's history, kept so the two records share a name.
