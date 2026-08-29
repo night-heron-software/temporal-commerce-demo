@@ -4,6 +4,7 @@ import { useCart } from '@/context/CartContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { beginCheckout, getCheckoutState } from '@/app/shop/cart-actions';
+import { pathForStep } from './checkout-routing';
 import Link from 'next/link';
 import { cartLineLabel } from '@/app/shop/cart-line-display';
 
@@ -11,14 +12,6 @@ import { cartLineLabel } from '@/app/shop/cart-line-display';
 const CHECKOUT_READY_TIMEOUT_MS =
   Number(process.env.NEXT_PUBLIC_CHECKOUT_READY_TIMEOUT_MS) || 30_000;
 const POLL_INTERVAL_MS = 1_000;
-
-/** Route for each actionable checkout step; terminal steps handled separately. */
-function routeForStep(step: string | undefined): string | null {
-  if (step === 'shipping') return '/shop/checkout/shipping';
-  if (step === 'payment') return '/shop/checkout/payment';
-  if (step === 'review') return '/shop/checkout/review';
-  return null;
-}
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -51,11 +44,11 @@ export default function CheckoutPage() {
         const deadline = Date.now() + CHECKOUT_READY_TIMEOUT_MS;
         while (Date.now() < deadline) {
           const state =
-            updatedCart?.checkout?.step && routeForStep(updatedCart.checkout.step)
+            updatedCart?.checkout?.step && pathForStep(updatedCart.checkout.step)
               ? updatedCart.checkout
               : await getCheckoutState(cartId);
 
-          const route = routeForStep(state?.step);
+          const route = pathForStep(state?.step);
           if (route) {
             router.replace(route);
             return;
@@ -83,7 +76,7 @@ export default function CheckoutPage() {
   // If already in checkout mode, redirect to appropriate step
   useEffect(() => {
     if (cart?.status === 'checkout' && cart?.checkout?.step) {
-      const route = routeForStep(cart.checkout.step);
+      const route = pathForStep(cart.checkout.step);
       if (route) router.replace(route);
     }
   }, [cart?.status, cart?.checkout?.step, router]);

@@ -23,12 +23,12 @@ interface CartContextType {
    * "Loading review…" with no redirect and no message.
    *
    * `loading` is NOT this: it tracks in-flight mutations (add/remove/update), not the initial
-   * resolution. Guard "there is no cart" branches on `resolved`, never on `loading`.
+   * resolution. Guard "there is no cart" branches on `!initializing`, never on `loading`.
    */
-  resolved: boolean;
+  initializing: boolean;
   loading: boolean;
   error: string | null;
-  addItem: (sku: string, quantity: number, price: number) => Promise<void>;
+  addItem: (variantId: string, quantity: number, price: number) => Promise<void>;
   removeItem: (lineItemId: string) => Promise<void>;
   updateQuantity: (lineItemId: string, quantity: number) => Promise<void>;
   checkoutCart: () => Promise<void>;
@@ -42,24 +42,46 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cartId, setCartId] = useState<string | null>(null);
   const [cart, setCart] = useState<Cart.CartDetails | null>(null);
-  const [resolved, setResolved] = useState(false);
+  const [initializing, setInitializing] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const clearError = useCallback(() => setError(null), []);
+  // A checkout failure surfaced for recovery — DERIVED from the cart rather than synced into
+  // `error` by an effect (the parent syncs; this repo's react-hooks rule refuses the sync-
+  // setState-in-effect shape, and deriving is the better version of the same idea). Without it
+  // the failure is visible only in checkout state nobody polls once the shopper is back on /shop.
+  // Dismissal is per-message: a NEW failure surfaces even after an old one was dismissed.
+  const [dismissedFailure, setDismissedFailure] = useState<string | null>(null);
+  const checkoutFailure =
+    cart?.status === 'active' && cart?.checkout?.step === 'failed' && cart?.checkout?.error
+      ? cart.checkout.error
+      : null;
+  const surfacedError =
+    error ?? (checkoutFailure && checkoutFailure !== dismissedFailure ? checkoutFailure : null);
+
+  const clearError = useCallback(() => {
+    setError(null);
+    setDismissedFailure(checkoutFailure);
+  }, [checkoutFailure]);
 
   // Initialize cart ID from cookie on mount. No cookie means resolution is already finished
   // and the answer is "no cart" — the completed-order path deletes it (see cart-actions).
   useEffect(() => {
-    getCartId().then((id) => {
-      if (id) setCartId(id);
-      else setResolved(true);
-    });
+    getCartId()
+      .then((id) => {
+        if (id) setCartId(id);
+        else setInitializing(false);
+      })
+      .catch(() => {
+        // A rejected bootstrap must not pin `initializing` forever — that is the same
+        // unending spinner the flag exists to prevent, by another route.
+        setInitializing(false);
+      });
   }, []);
 
   // Fetch cart when cartId is set. A TERMINAL cart is deliberately not adopted: `cart` is the
   // ACTIVE cart, and completed/abandoned/failed ones must not keep driving shopping UI. Either
-  // way the lookup is finished, so `resolved` flips — that is what lets a page say "there is no
+  // way the lookup is finished, so `initializing` clears — that is what lets a page say "there is no
   // cart" instead of spinning (#12).
   useEffect(() => {
     if (cartId) {
@@ -69,7 +91,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             setCart(cartData);
           }
         })
-        .finally(() => setResolved(true));
+        .catch(() => undefined)
+        .finally(() => setInitializing(false));
     }
   }, [cartId]);
 
@@ -83,7 +106,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [cartId]);
 
-  const addItem = async (sku: string, quantity: number, price: number) => {
+  const addItem = async (variantId: string, quantity: number, price: number) => {
     setLoading(true);
     setError(null);
     try {
@@ -94,7 +117,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       }
       if (!cartId) setCartId(id);
 
-      const newCart = await addItemToCart(id, sku, quantity, price);
+      const newCart = await addItemToCart(id, variantId, quantity, price);
       if (newCart) {
         setCart(newCart);
       } else {
@@ -187,7 +210,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setCartId(null);
     // Resolution stands: we KNOW there is no cart now. Leaving this false would put the
     // checkout pages back into "still loading" and reintroduce #12 after every order.
-    setResolved(true);
+    setInitializing(false);
   }, []);
 
   return (
@@ -195,9 +218,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       value={{
         cartId,
         cart,
-        resolved,
+        initializing,
         loading,
-        error,
+        error: surfacedError,
         addItem,
         removeItem,
         updateQuantity,

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { setPaymentMethod } from '@/app/shop/cart-actions';
+import { destinationFor } from '../checkout-routing';
 import { CartChangedBanner } from '@/components/CartChangedBanner';
 
 /**
@@ -12,7 +13,7 @@ import { CartChangedBanner } from '@/components/CartChangedBanner';
  */
 export default function PaymentPage() {
   const router = useRouter();
-  const { cartId, resolved } = useCart();
+  const { cartId, initializing } = useCart();
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,8 +21,8 @@ export default function PaymentPage() {
   // render of every visit, so the unguarded version bounced shoppers who had a perfectly good
   // cart, and could not distinguish that from genuinely having none (#12).
   useEffect(() => {
-    if (resolved && !cartId) router.push('/shop');
-  }, [resolved, cartId, router]);
+    if (!initializing && !cartId) router.push('/shop');
+  }, [initializing, cartId, router]);
 
   const handleMockPayment = async () => {
     if (!cartId) return;
@@ -35,8 +36,11 @@ export default function PaymentPage() {
         token: 'mock_token_' + Date.now(),
       });
 
-      if (state?.step === 'review') {
-        router.push('/shop/checkout/review');
+      const destination = destinationFor(state);
+      if (state?.step === 'review' && destination) {
+        // The destination is derived from the state the update just returned — the step and
+        // the path cannot drift apart (mono-issue-0318, the class).
+        router.push(destination);
       } else {
         setError('Failed to process payment information');
       }

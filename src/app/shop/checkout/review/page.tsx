@@ -10,6 +10,8 @@ import { CartChangedBanner } from '@/components/CartChangedBanner';
 import { cartLineLabel } from '@/app/shop/cart-line-display';
 import type { Cart } from '@/temporal/contracts';
 import { computeCheckoutTotal } from '@/temporal/contracts/cart';
+import { CHECKOUT_PATHS, routeForStep } from '../checkout-routing';
+import { chooseReviewScreen } from '../review-screen';
 
 /**
  * Machine codes that carry no wording of their own, because until recently they could not
@@ -28,16 +30,21 @@ const SHOPPER_SENTENCES: Record<string, string> = {
 
 export default function ReviewPage() {
   const router = useRouter();
-  const { cart, cartId, resolved, refreshCart, clearCart } = useCart();
+  const { cart, cartId, initializing, refreshCart, clearCart } = useCart();
   // `loading` matters as much as `shopper` here: until the session lookup resolves, `shopper`
   // is null for a signed-IN visitor too, and treating "not yet known" as "signed out" would
   // flash a sign-in wall at every shopper on every render. Same distinction #12 drew between
-  // `loading` and `resolved` for the cart.
+  // `loading` and `initializing` for the cart.
   const { shopper, loading: shopperLoading } = useShopper();
   const [checkoutState, setCheckoutState] = useState<Cart.CheckoutState | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set the instant the order is confirmed placed, BEFORE the cart is cleared — `clearCart()`
+  // runs synchronously ahead of the async router.push, and in that window the page re-renders
+  // with cart === null. Without this the render fell through to the missing-cart screen and told
+  // a shopper who had just been charged there was nothing here (the parent platform's #255).
+  const [placedHref, setPlacedHref] = useState<string | null>(null);
 
   // Fetch full checkout state (includes shipping/payment details) and KEEP WATCHING it
   // (R3 / F5): a mid-checkout cart edit reverts the machine's step to 'payment' via the
@@ -53,10 +60,12 @@ export default function ReviewPage() {
       getCheckoutState(cartId).then((state) => {
         if (!state || cancelled) return;
         setCheckoutState(state);
-        if (state.step === 'shipping') {
-          router.replace('/shop/checkout/shipping');
-        } else if (state.step === 'payment') {
-          router.replace('/shop/checkout/payment');
+        // One guard for every step, with a reason — a silent bounce is how the class's first
+        // instance presented as "the button doesn't work" (mono-issue-0318).
+        const route = routeForStep(state.step, CHECKOUT_PATHS.review);
+        if (route.kind === 'redirect') {
+          console.info(route.reason);
+          router.replace(route.to);
         }
       });
 
@@ -74,10 +83,10 @@ export default function ReviewPage() {
   // is over, and this page sat on its spinner forever (#12). "No cart" is handled in the
   // render below with an explanation rather than a silent bounce.
   useEffect(() => {
-    if (resolved && cart && cart.status !== 'checkout') {
+    if (!initializing && cart && cart.status !== 'checkout') {
       router.replace('/shop');
     }
-  }, [resolved, cart, router]);
+  }, [initializing, cart, router]);
 
   const handlePlaceOrder = async () => {
     // `cart` is required as well as `cartId`: the submit is guarded by the version this page
@@ -94,8 +103,10 @@ export default function ReviewPage() {
       const finalState = await submitOrder(cartId, cart.cartVersion);
 
       if (finalState?.step === 'complete' && finalState.order) {
+        const href = `/shop/checkout/confirmation?order=${finalState.order.confirmationNumber}`;
+        setPlacedHref(href); // FIRST — see the state's comment
         clearCart();
-        router.push(`/shop/checkout/confirmation?order=${finalState.order.confirmationNumber}`);
+        router.push(href);
       } else if (finalState?.error) {
         // CART_CHANGED is a machine code, not a sentence, and until #17 it could never reach a
         // shopper — the UI never armed the guard. Now that it can, give it words. Everything
@@ -131,7 +142,33 @@ export default function ReviewPage() {
   // an order (the completed path deletes the cart cookie) or by the cart going terminal in
   // another tab. Before this split, both rendered the spinner below — forever, with no
   // redirect, because the redirect above needs a cart to fire.
-  if (resolved && !cart) {
+  const screen = chooseReviewScreen({
+    placedHref,
+    initializing,
+    hasCart: !!cart,
+    isReady: !!checkoutState,
+  });
+
+  if (screen === 'placed' && placedHref) {
+    return (
+      <div className="min-h-screen bg-[var(--heron-cream-light)] dark:bg-[var(--heron-forest-dark)] text-[var(--heron-slate-dark)] dark:text-[var(--heron-cream)] flex items-center justify-center p-8">
+        <div className="max-w-md text-center">
+          <h1 className="text-2xl font-semibold mb-2">Order placed</h1>
+          <p className="text-[var(--heron-slate)] dark:text-[var(--heron-slate-light)] mb-6">
+            Taking you to your confirmation…
+          </p>
+          <Link
+            href={placedHref}
+            className="px-4 py-2 rounded-lg bg-[var(--heron-forest)] text-[var(--heron-cream)] hover:opacity-90"
+          >
+            View confirmation
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === 'missing') {
     return (
       <div className="min-h-screen bg-[var(--heron-cream-light)] dark:bg-[var(--heron-forest-dark)] text-[var(--heron-slate-dark)] dark:text-[var(--heron-cream)] flex items-center justify-center p-8">
         <div className="max-w-md text-center">
@@ -158,7 +195,7 @@ export default function ReviewPage() {
     );
   }
 
-  if (!cart || !checkoutState) {
+  if (screen === 'loading' || !cart || !checkoutState) {
     return (
       <div className="min-h-screen bg-[var(--heron-cream-light)] dark:bg-[var(--heron-forest-dark)] text-[var(--heron-slate-dark)] dark:text-[var(--heron-cream)] flex items-center justify-center">
         <div className="animate-pulse text-lg">Loading review...</div>
@@ -192,7 +229,8 @@ export default function ReviewPage() {
           </div>
         )}
 
-        <CartChangedBanner />
+        {/* This page already polls the checkout state — hand it over so the banner does not run a second poll. */}
+        <CartChangedBanner checkoutState={checkoutState} />
 
         {/* Shipping Address */}
         <div className="bg-white dark:bg-[var(--heron-forest)] rounded-xl p-6 mb-4 border border-[var(--heron-cream-dark)] dark:border-[var(--heron-slate-dark)]">
