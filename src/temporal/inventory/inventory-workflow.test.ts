@@ -133,6 +133,59 @@ describe('inventoryServiceWorkflow (Temporal test env)', () => {
     });
   }, 120_000);
 
+  it('sweeps ON SCHEDULE even under sustained signal traffic — the starvation regression (#74)', async () => {
+    // The pre-fix loop re-armed a fresh 5m timer on every wake, so a signal inside each window
+    // deferred the sweep forever: validation run -011 measured a 16-minute gap under ordinary
+    // shopping. This drives signals at 3-minute spacing — every wake is signal-driven, no idle
+    // 5m window ever exists — across >5 minutes of workflow time, and the sweep must still run.
+    const activities = makeActivities();
+    await withWorkflowEnv([inventoryWorker(activities)], async (env) => {
+      const handle = await env.client.workflow.start(inventoryServiceWorkflow, startOpts());
+
+      await handle.signal(inventoryChangedSignal, { blankSkus: ['SKU-A'] });
+      await vi.waitFor(() => {
+        expect(activities.syncInventoryToESForSkus).toHaveBeenCalledTimes(1);
+      }, WAIT);
+      expect(activities.expireReservations).not.toHaveBeenCalled();
+
+      await env.sleep('3m'); // t≈3m — inside the window; pre-fix this wake would reset the timer
+      await handle.signal(inventoryChangedSignal, { blankSkus: ['SKU-B'] });
+      await vi.waitFor(() => {
+        expect(activities.syncInventoryToESForSkus).toHaveBeenCalledTimes(2);
+      }, WAIT);
+
+      await env.sleep('3m'); // t≈6m — past the ORIGINAL deadline, with signal traffic throughout
+      await vi.waitFor(() => {
+        expect(activities.expireReservations).toHaveBeenCalled();
+        expect(activities.reconcileStockCounters).toHaveBeenCalled();
+      }, WAIT);
+
+      await handle.terminate('test complete');
+    });
+  }, 120_000);
+
+  it('an overdue deadline sweeps on the SAME wake that carries dirty SKUs (independent if, not else)', async () => {
+    // Start with the deadline already in the past: the first signal-driven wake must run BOTH
+    // the targeted projections and the full sweep in one iteration. Also pins the input's
+    // `nextSweepAt` carry — the field continue-as-new threads through.
+    const activities = makeActivities();
+    await withWorkflowEnv([inventoryWorker(activities)], async (env) => {
+      const opts = startOpts();
+      const handle = await env.client.workflow.start(inventoryServiceWorkflow, {
+        ...opts,
+        args: [{ nextSweepAt: 1 }] as unknown as typeof opts.args,
+      });
+
+      await handle.signal(inventoryChangedSignal, { blankSkus: ['SKU-A'] });
+      await vi.waitFor(() => {
+        expect(activities.syncInventoryToESForSkus).toHaveBeenCalled();
+        expect(activities.expireReservations).toHaveBeenCalled();
+      }, WAIT);
+
+      await handle.terminate('test complete');
+    });
+  }, 120_000);
+
   it('isolates a targeted-projection failure: siblings still run and the loop survives', async () => {
     const activities = makeActivities();
     activities.projectStockForSkus.mockRejectedValue(
