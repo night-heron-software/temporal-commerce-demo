@@ -60,6 +60,14 @@ Workers do **not** hot-reload workflow code — restart them after workflow chan
 | Day-to-day conventions                                      | [docs/developer-guide.md](docs/developer-guide.md)                                                        |
 | Tracing, worker metrics, logging fan-out                    | [docs/observability-guide.md](docs/observability-guide.md)                                                |
 
+## Session conduct
+
+- **Don't commit or push unless asked.**
+- **Assume another agent session may be active in this repo.** Re-run
+  `git fetch && git status` immediately before committing; if a file contradicts what you
+  read minutes ago, suspect a parallel write, not your memory — never treat an earlier
+  snapshot of the tree as current.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
