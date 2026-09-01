@@ -55,7 +55,7 @@
     "dev:seed": "LOG_SERVICE=scripts tsx --env-file=.env.local ./scripts/seed.ts",
     "db:verify": "bash scripts/verify-schema.sh",
     "smoke:standalone": "node scripts/standalone-activity-smoke.cjs",
-    "sync:private": "bash scripts/sync-private-docs.sh",
+    "sync:private": "bash .claude/skills/sync-private-docs/sync-private-docs.sh",
     "workers-wait": "LOG_SERVICE=scripts tsx --env-file=.env.local scripts/wait-for-workers.ts",
     "infra:up": "bash scripts/infra-start.sh",
     "infra:up:obs": "docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d",
