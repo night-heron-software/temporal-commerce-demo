@@ -6,9 +6,9 @@ description: Back up or restore the git-ignored docs/private/ directory (plannin
 # Sync private docs (docs/private/ ⇄ object storage)
 
 `docs/private/` is deliberately git-ignored: local-only planning notes, session records,
-and the by-exact-path source index. Git-ignoring it keeps it out of the repository, but
-that also keeps it out of every backup. This skill gives it durable, cross-machine storage
-without committing it.
+and scratch analysis. Git-ignoring it keeps it out of the repository, but that also keeps
+it out of every backup. This skill gives it durable, cross-machine storage without
+committing it.
 
 ```bash
 .claude/skills/sync-private-docs/sync-private-docs.sh [--dry-run] [--pull-only | --push-only]
@@ -22,10 +22,10 @@ repo's own prefix.
 
 ## Configuration
 
-`PRIVATE_DOCS_BUCKET` is **required** and has no default. This repository is written as
-though it were public (see [AGENTS.md](../../../AGENTS.md)), and a bucket name is exactly
-the kind of internal infrastructure detail that rule keeps out of tracked files. Set it in
-your shell profile:
+`PRIVATE_DOCS_BUCKET` is **required** and has no default. A bucket name is internal
+infrastructure detail that does not belong in tracked files, and keeping it in the
+environment is what makes this skill folder portable between repositories. Set it in your
+shell profile:
 
 ```bash
 export PRIVATE_DOCS_BUCKET=gs://your-bucket     # Google Cloud Storage
