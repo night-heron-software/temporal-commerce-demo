@@ -67,6 +67,7 @@ Workers do **not** hot-reload workflow code — restart them after workflow chan
   `git fetch && git status` immediately before committing; if a file contradicts what you
   read minutes ago, suspect a parallel write, not your memory — never treat an earlier
   snapshot of the tree as current.
+- **Working docs stay in git-ignored `docs/private/`** — validation walkthroughs, session records, and the backlog (`demo-todos.md`), flat, with no subfolder. Never commit one: this repo is public. (Stated 2026-08-11, after an agent committed one to tracked `docs/validation/`; reverted the same day.) Default any new working or planning doc there, and run `sync-private-docs` after editing it.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
